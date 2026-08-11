@@ -2,12 +2,16 @@ from datetime import UTC, datetime
 
 import httpx
 
-from app.providers.common import TimedPayload
+from app.providers.common import TimedPayload, create_system_ssl_context
 
 
 class DltvBootstrapClient:
     def __init__(self, base_url: str, *, timeout_seconds: float = 8.0) -> None:
-        self._client = httpx.AsyncClient(base_url=base_url, timeout=timeout_seconds)
+        self._client = httpx.AsyncClient(
+            base_url=base_url,
+            timeout=timeout_seconds,
+            verify=create_system_ssl_context(),
+        )
 
     async def get_live(self, valve_match_id: int) -> TimedPayload:
         started = datetime.now(UTC)

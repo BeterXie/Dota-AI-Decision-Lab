@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 import httpx
 
-from app.providers.common import TimedPayload
+from app.providers.common import TimedPayload, create_system_ssl_context
 
 
 class RayBetHttpClient:
@@ -10,6 +10,7 @@ class RayBetHttpClient:
         self._client = httpx.AsyncClient(
             base_url=base_url,
             timeout=timeout_seconds,
+            verify=create_system_ssl_context(),
             headers={
                 "Accept": "application/json, text/plain, */*",
                 "Origin": origin,

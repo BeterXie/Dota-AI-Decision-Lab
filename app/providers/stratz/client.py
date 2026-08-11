@@ -3,14 +3,23 @@ from typing import Any
 
 import httpx
 
-from app.providers.common import TimedPayload
+from app.providers.common import TimedPayload, create_system_ssl_context
 
 
 class StratzClient:
-    def __init__(self, endpoint: str, token: str, *, timeout_seconds: float = 20.0) -> None:
-        self._client = httpx.AsyncClient(
-            base_url=endpoint,
+    def __init__(
+        self,
+        endpoint: str,
+        token: str,
+        *,
+        timeout_seconds: float = 20.0,
+        client: httpx.AsyncClient | None = None,
+    ) -> None:
+        self._endpoint = endpoint.rstrip("/")
+        self._owns_client = client is None
+        self._client = client or httpx.AsyncClient(
             timeout=timeout_seconds,
+            verify=create_system_ssl_context(),
             headers={"Authorization": f"Bearer {token}", "User-Agent": "Dota-AI-Decision-Lab"},
         )
 
@@ -23,7 +32,7 @@ class StratzClient:
     ) -> TimedPayload:
         started = datetime.now(UTC)
         response = await self._client.post(
-            "",
+            self._endpoint,
             json={
                 "operationName": operation_name,
                 "query": query,
@@ -42,4 +51,5 @@ class StratzClient:
         )
 
     async def close(self) -> None:
-        await self._client.aclose()
+        if self._owns_client:
+            await self._client.aclose()

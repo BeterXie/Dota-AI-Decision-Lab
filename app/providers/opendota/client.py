@@ -4,7 +4,7 @@ from typing import Any
 import httpx
 
 from app.domain.history import HistoricalMatchBundle
-from app.providers.common import TimedPayload
+from app.providers.common import TimedPayload, create_system_ssl_context
 from app.providers.opendota.normalizer import NORMALIZER_VERSION, normalize_match
 
 
@@ -23,7 +23,10 @@ class OpenDotaClient:
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
         self._client = httpx.AsyncClient(
-            base_url=base_url.rstrip("/"), timeout=timeout_seconds, headers=headers
+            base_url=base_url.rstrip("/"),
+            timeout=timeout_seconds,
+            verify=create_system_ssl_context(),
+            headers=headers,
         )
 
     async def get_team_catalog(self, page: int = 0) -> TimedPayload:

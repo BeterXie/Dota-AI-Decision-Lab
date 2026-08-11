@@ -9,6 +9,7 @@ from app.ai.base import (
     decision_json_schema,
     parse_decision,
 )
+from app.providers.common import create_system_ssl_context
 
 
 class GeminiDecisionProvider:
@@ -28,6 +29,7 @@ class GeminiDecisionProvider:
         self._client = client or httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
             timeout=timeout_seconds,
+            verify=create_system_ssl_context(),
             headers={"x-goog-api-key": api_key},
         )
 

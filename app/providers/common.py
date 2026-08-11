@@ -1,3 +1,4 @@
+import ssl
 from datetime import datetime
 from typing import Any
 
@@ -10,3 +11,7 @@ class TimedPayload(BaseModel):
     payload: dict[str, Any] | list[Any]
     request_started_at: datetime
     received_at: datetime
+
+
+def create_system_ssl_context() -> ssl.SSLContext:
+    return ssl.create_default_context()
