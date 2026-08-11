@@ -1,0 +1,47 @@
+{
+  "match_id": 8940730389,
+  "start_time": 1786492800,
+  "duration": 2110,
+  "radiant_team_id": 100,
+  "dire_team_id": 200,
+  "radiant_win": true,
+  "leagueid": 17701,
+  "league": {"name": "The International 2026"},
+  "patch": 61,
+  "players": [
+    {
+      "account_id": 1001,
+      "hero_id": 10,
+      "player_slot": 0,
+      "isRadiant": true,
+      "position_est": 1,
+      "win": 1,
+      "kills": 8,
+      "deaths": 2,
+      "assists": 9,
+      "gold_per_min": 710,
+      "xp_per_min": 760,
+      "last_hits": 401,
+      "hero_damage": 28100,
+      "tower_damage": 6200,
+      "total_gold": 24910
+    },
+    {
+      "account_id": 2001,
+      "hero_id": 20,
+      "player_slot": 128,
+      "isRadiant": false,
+      "position_est": 5,
+      "win": 0,
+      "kills": 1,
+      "deaths": 7,
+      "assists": 12,
+      "gold_per_min": null,
+      "xp_per_min": 390,
+      "last_hits": 38,
+      "hero_damage": 9100,
+      "tower_damage": 0,
+      "total_gold": 9650
+    }
+  ]
+}

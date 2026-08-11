@@ -1,8 +1,47 @@
-# Dota AI Decision Lab — TI 2026 快速落地开发文档
+# Dota AI Decision Lab — Full Implementation Architecture
 
-**目标：在 TI 2026 开赛前形成可运行的独立系统闭环**  
+**版本：V4.1 — Full Implementation Architecture**  
+**目标：实现完整、可持续运行、可回放、可审计的 Dota 2 多 AI 决策情报平台**  
+**近期实战目标：TI 2026 Shadow Decision**  
 **运行模式：Shadow Decision（只记录建议，不自动执行交易）**  
-**项目边界：Standalone，新项目运行时不依赖旧 `dota2-predictor`**
+**项目边界：Standalone，新项目运行时不依赖旧 `dota2-predictor`**  
+**范围原则：时间压力可以改变实现顺序，但不得缩减本文件定义的 Required Scope**
+
+**本次修订：补充 R.O.S.H. Reference Implementation、迁移边界与回归等价性要求**
+
+---
+
+## -1. Scope 与工程决策原则
+
+本文件定义的是**完整第一正式版本**，不是“为了赶进度而裁剪的 MVP”。本项目主要由 AI 辅助开发，因此开发成本不是主动删除架构能力的理由。
+
+任何能力只能因为以下三类原因不实现：
+
+```text
+ARCHITECTURAL CHOICE
+DATA-CONSTRAINED LIMITATION
+EXPLICIT PRODUCT OUT-OF-SCOPE
+```
+
+不存在：
+
+```text
+TIME-CONSTRAINED SHORTCUT
+```
+
+因此：
+
+```text
+Architecture required -> implement completely
+Correctness required    -> implement completely
+Operability required    -> implement completely
+Verification required   -> test completely
+Owner removes scope     -> may remove
+```
+
+AI coding agent 不允许因为“TI 临近”“先做 MVP”“先跑起来再说”而跳过 migration、durable recovery、supervision、observability、integration tests、Historical、Draft、Live 或 Evaluation 中已经被本文定义为 Required 的内容。
+
+复杂度本身也不是目标。没有数据依据的复杂模型、无必要的微服务、Kafka/Kubernetes 等不会因为 AI 能写更多代码就被自动加入。
 
 ---
 
@@ -310,150 +349,196 @@ LIVE → POST_DRAFT
 
 ---
 
-# 3. 推荐技术栈
+# 3. 正式技术栈
 
-## Backend
+本项目采用 **modular monolith + durable PostgreSQL state + supervised async workers + React dashboard**。AI 降低开发成本，但不会降低生产运行复杂度，因此不采用无业务必要性的微服务拆分。
+
+## 3.1 Backend
 
 ```text
-Python 3.11+
+Python 3.14.x
 FastAPI
 Pydantic v2
-SQLAlchemy 2
+SQLAlchemy 2.x async style
 Alembic
-PostgreSQL 16+
+PostgreSQL 18
 asyncio
 httpx
+curl_cffi（RayBet HTTP transport fallback）
 websockets
 python-socketio[asyncio_client]
 ```
 
-## Frontend
+Python 版本在仓库中通过 `.python-version` / container image 锁定；依赖通过 lock file 固定。禁止生产环境依赖“本机刚好装了什么版本”。
 
-TI 前建议尽量轻：
+## 3.2 Frontend
 
-```text
-FastAPI + Jinja/HTMX
-```
-
-或如果团队已经习惯 React：
+正式 Dashboard：
 
 ```text
-React + Vite
+React 19
+TypeScript
+Vite 8
+TanStack Query
+WebSocket/SSE client
+ECharts 或等价成熟图表库
 ```
 
-不要为了 Dashboard 引入复杂前端架构。
+前端必须支持：赔率时间轴、DLTV state 时间轴、R.O.S.H. 曲线、Historical drill-down、多 AI decision、同步质量、Provider/Worker health、任务积压与回放状态。
 
-## Optional
+## 3.3 Persistence
+
+核心事实存储：
 
 ```text
-Redis
+PostgreSQL
 ```
 
-第一版不是必须。单实例情况下可直接 PostgreSQL + asyncio Queue。
+PostgreSQL 同时承担：
+
+```text
+canonical identities
+raw metadata references
+normalized observations
+feature snapshots
+decision snapshots
+durable jobs
+domain events / outbox
+worker checkpoints
+evaluation results
+```
+
+Redis **不是 correctness dependency**。如后续使用，只能承担 cache / ephemeral pub-sub / rate-limiter acceleration；Redis 丢失不能导致任务永久丢失或改变 DecisionSnapshot 真相。
+
+## 3.4 Runtime architecture
+
+```text
+One repository
+One deployable application
+One PostgreSQL cluster
+One supervised runtime
+Multiple isolated workers
+One React frontend
+```
+
+默认启动入口保持：
+
+```bash
+python -m app.main
+```
+
+前端可由同一部署单元托管静态产物，或独立静态部署；这不是业务服务拆分。
+
+## 3.5 明确不引入
+
+除非真实负载证明必要，否则不引入：
+
+```text
+Kafka
+Kubernetes
+service mesh
+多数据库分片
+独立微服务网络 RPC
+复杂 workflow SaaS
+```
+
+理由是运行故障面与维护成本，而不是开发时间。
 
 ---
 
-# 4. 推荐目录
+# 4. 正式目录结构
 
 ```text
 dota-ai-decision-lab/
-
-app/
-  main.py
-  config.py
-
-  domain/
-    identity.py
-    market.py
-    draft.py
-    live.py
-    history.py
-    snapshot.py
-    decision.py
-
-  providers/
-    raybet/
-      http.py
-      socket.py
-      parser.py
-      models.py
-
-    dltv/
-      bootstrap.py
-      socket.py
-      parser.py
-      reducer.py
-
-    stratz/
-      client.py
-      draft_queries.py
-      history_queries.py
-
-    opendota/
-      client.py
-
-  identity/
-    resolver.py
-    aliases.py
-
-  market/
-    discovery.py
-    odds_registry.py
-    collector.py
-    fair_probability.py
-    trajectory.py
-
-  draft/
-    identity.py
-    engine.py
-    minute_curve.py
-    features.py
-
-  history/
-    team.py
-    player.py
-    player_hero.py
-    sync.py
-
-  live/
-    collector.py
-    synchronizer.py
-    quality.py
-
-  snapshots/
-    builder.py
-    gates.py
-    canonical_json.py
-
-  ai/
-    schema.py
-    prompt.py
-    coordinator.py
-    providers/
-      openai.py
-      anthropic.py
-      gemini.py
-
-  evaluation/
-    future_odds.py
-    settlement.py
-    metrics.py
-
-  runtime/
-    supervisor.py
-    health.py
-
-  web/
-    api.py
-    dashboard.py
-
-migrations/
-tests/
-tools/
-  record_timeline.py
-  dltv_probe.py
-  raybet_probe.py
+├── AGENTS.md
+├── pyproject.toml
+├── uv.lock / equivalent lockfile
+├── .python-version
+├── docker-compose.yml
+├── docs/
+│   └── ARCHITECTURE.md
+├── app/
+│   ├── main.py
+│   ├── config.py
+│   ├── domain/
+│   │   ├── identity.py
+│   │   ├── market.py
+│   │   ├── draft.py
+│   │   ├── live.py
+│   │   ├── history.py
+│   │   ├── snapshot.py
+│   │   ├── decision.py
+│   │   ├── events.py
+│   │   └── jobs.py
+│   ├── providers/
+│   │   ├── raybet/
+│   │   │   ├── http.py
+│   │   │   ├── http_transport.py
+│   │   │   ├── socket.py
+│   │   │   ├── parser.py
+│   │   │   └── models.py
+│   │   ├── dltv/
+│   │   │   ├── bootstrap.py
+│   │   │   ├── socket.py
+│   │   │   ├── parser.py
+│   │   │   └── reducer.py
+│   │   ├── stratz/
+│   │   │   ├── client.py
+│   │   │   ├── draft_queries.py
+│   │   │   └── history_queries.py
+│   │   └── opendota/
+│   │       └── client.py
+│   ├── identity/
+│   ├── market/
+│   ├── draft/
+│   ├── history/
+│   ├── live/
+│   ├── temporal/
+│   ├── snapshots/
+│   ├── ai/
+│   ├── evaluation/
+│   ├── jobs/
+│   │   ├── repository.py
+│   │   ├── runner.py
+│   │   ├── handlers.py
+│   │   └── reconciliation.py
+│   ├── events/
+│   │   ├── outbox.py
+│   │   ├── dispatcher.py
+│   │   └── handlers.py
+│   ├── runtime/
+│   │   ├── supervisor.py
+│   │   ├── worker.py
+│   │   ├── health.py
+│   │   ├── reconciliation.py
+│   │   └── shutdown.py
+│   ├── observability/
+│   │   ├── logging.py
+│   │   ├── metrics.py
+│   │   └── tracing.py
+│   └── web/
+│       ├── api.py
+│       └── websocket.py
+├── frontend/
+│   ├── src/
+│   ├── package.json
+│   └── vite.config.ts
+├── migrations/
+├── tests/
+│   ├── unit/
+│   ├── contract/
+│   ├── integration/
+│   ├── replay/
+│   └── e2e/
+└── tools/
+    ├── record_timeline.py
+    ├── replay_timeline.py
+    ├── dltv_probe.py
+    ├── raybet_probe.py
+    └── sanitize_har.py
 ```
+
+边界原则：Provider 只负责 I/O 与 normalize；Domain 不读取第三方原始字段；Coordinator 不直接写 Provider-specific SQL；前端不直接依赖 Provider payload。
 
 ---
 
@@ -1153,7 +1238,7 @@ UNSAFE    > 8s
 
 ## 9.6 Timeline Recorder
 
-TI 前第一件事就是同时录两条流：
+运行时必须能够同时录两条流：
 
 ```text
 same machine monotonic/wall clock
@@ -1176,7 +1261,309 @@ payload_hash
 
 # 10. Draft Intelligence / Minute R.O.S.H.
 
-R.O.S.H. 是新项目原生模块。
+R.O.S.H. 是新项目原生模块，但**不是从零重新发明的模块**。
+
+新项目必须把旧项目中已经验证过的 STRATZ/R.O.S.H. 实现视为 **Reference Implementation**，在理解、迁移、解耦、测试之后形成新的本地 Draft Intelligence Engine。旧项目只提供算法、Query、字段语义和行为参考；新项目运行时不得依赖旧项目服务、旧数据库或旧 Python package。
+
+## 10.0 Required Reference Implementation — Coding Agent 强制阅读
+
+在实现、重构、修复或优化 Minute R.O.S.H. 之前，Coding Agent **必须优先阅读旧项目的参考实现**，不得仅根据本章节的摘要重新设计另一套不兼容算法。
+
+Reference repository：
+
+```text
+BeterXie/dota2-predictor
+```
+
+Primary reference file：
+
+```text
+prematch/stratz_rosh.py
+```
+
+推荐固定参考基线：
+
+```text
+commit c7a54b59299fb6f46988cb85ed85ebacfe9c0f04
+```
+
+如果该仓库后续存在更新版本，Coding Agent 可以检查新版差异，但必须先明确：
+
+```text
+1. 当前新项目实现参考的是哪个旧项目 commit
+2. 新旧实现有哪些行为差异
+3. 差异是有意的架构迁移，还是无意的算法漂移
+```
+
+### 10.0.1 必须重点阅读的旧实现锚点
+
+至少阅读并理解以下内容：
+
+```text
+ROSH_MIN_TIME
+ROSH_MAX_TIME
+ROSH_GRAPH_WINDOW_RADIUS
+
+HEROES_META_POSITIONS_QUERY
+HERO_STATS_BY_TIME_QUERY
+SYNERGY_QUERY
+PLAYER_HIGHLIGHT_FIELDS
+
+build_rosh_query_requests()
+normalize_player_hero_highlight()
+calculate_player_impact()
+score_rosh_lineups()
+score_rosh_picks()
+```
+
+其中旧实现已经覆盖的关键行为包括：
+
+```text
+Hero × Position meta
+Hero × Time statistics
+Synergy / matchup
+Player × Hero recent/all-time highlights
+Pure lineup score
+Player-adjusted lineup score
+Pure minute table
+Player-adjusted minute table
+Player adjustment fallback
+Sample/reliability handling
+```
+
+Coding Agent 不得因为新项目目录结构不同，就忽略这些已验证行为重新创造一套未经对照的评分逻辑。
+
+### 10.0.2 旧实现中需要保留的核心语义
+
+旧实现已经形成两条不同的阵容曲线：
+
+```text
+pure_minute_table
+minute_table
+```
+
+以及：
+
+```text
+pure_lineup_score
+player_adjusted_lineup_score
+player_analysis
+used_player_adjustment
+fell_back_to_pure_score
+```
+
+新项目必须保留这种**Pure 与 Player-adjusted 分离**的业务语义，不允许只留下一个无法解释来源的“最终阵容分”。
+
+对应关系：
+
+```text
+旧 pure_minute_table
+    ↓
+新 Pure Draft Curve
+
+旧 minute_table
+    ↓
+新 Player-Adjusted Draft Curve
+
+旧 player_analysis
+    ↓
+新 Historical Player×Hero / Draft Player Adjustment provenance
+```
+
+### 10.0.3 STRATZ Query 迁移要求
+
+旧实现中的 STRATZ Query 思路不是文档示例，而是新项目的起始数据合同。
+
+必须优先迁移/验证：
+
+```text
+Hero statistics by POSITION_1 ... POSITION_5
+Hero statistics grouped by game time
+Synergy / matchup data
+Player × Hero recent/all-time highlights
+```
+
+其中旧时间模型使用：
+
+```text
+ROSH_MIN_TIME = 20
+ROSH_MAX_TIME = 60
+```
+
+并且 by-time 查询覆盖大约：
+
+```text
+20–62 分钟
+```
+
+因此新项目的 20–60 分钟 Minute Draft Curve 是 **DATA-CONSTRAINED LIMITATION**，不是“为了赶进度先简化”。
+
+在没有新的可靠 early-game 数据模型之前：
+
+```text
+禁止把 20–60m 模型机械外推到 0–19m
+禁止伪造 0–19m minute score
+禁止通过插值假装存在 lane/early-game model
+```
+
+如果未来需要 0–19m，必须新增独立的：
+
+```text
+Lane / Early Game Draft Model
+```
+
+并独立版本化、验证和回测。
+
+### 10.0.4 迁移，不是 Runtime 依赖
+
+允许：
+
+```text
+阅读旧源码
+迁移算法
+迁移 GraphQL Query
+迁移经过验证的常量和 normalization 逻辑
+迁移 regression fixtures
+保留算法 provenance
+重构为新项目 domain/provider/scoring 架构
+```
+
+禁止：
+
+```text
+直接 import 旧 dota2-predictor package
+把旧仓库加入 PYTHONPATH
+通过旧项目 HTTP API 调 R.O.S.H.
+直接读取旧项目数据库
+让新项目启动依赖旧项目进程
+复制旧项目 Web/UI/runtime 耦合
+```
+
+新项目最终结构仍应是：
+
+```text
+app/providers/stratz/
+    client.py
+    draft_queries.py
+    models.py
+
+app/draft/
+    engine.py
+    pure.py
+    player_adjusted.py
+    minute_curve.py
+    features.py
+    models.py
+```
+
+### 10.0.5 新项目必须新增的工程能力
+
+即使旧算法直接迁移，仍必须补齐新架构要求：
+
+```text
+statistics_cutoff
+knowledge_cutoff / first_usable_at
+model_version
+data_version
+query_version
+parser_version
+provider provenance
+raw STRATZ payload archival or reproducible source reference
+append-only Draft Feature Snapshot
+immutable DecisionSnapshot integration
+structured quality/confidence output
+provider failure degradation
+```
+
+旧实现里如果没有这些能力，新项目必须补上；不能以“为了保持旧代码一致”为理由忽略新架构的不变量。
+
+### 10.0.6 Regression Equivalence Gate
+
+迁移完成不能只看“代码能跑”。必须建立旧实现与新实现的行为对照。
+
+至少准备固定 Draft fixtures，覆盖：
+
+```text
+普通阵容
+明显前中期阵容
+明显后期阵容
+高 synergy 阵容
+强 counter 阵容
+Player×Hero 高支持样本
+Player×Hero 低样本
+Player adjustment 缺失 fallback
+STRATZ 部分字段缺失
+```
+
+对于相同输入和相同历史数据快照，需要比较：
+
+```text
+Pure lineup score
+Player-adjusted lineup score
+20–60 minute curve
+peak minute
+peak edge
+cross-over minute
+player adjustment
+fallback behavior
+```
+
+允许因为新架构修复 bug、增加 cutoff、修正数据泄漏或改善 normalization 而产生差异，但差异必须：
+
+```text
+有测试
+有 model_version 变化
+有明确原因
+有可回放输入
+```
+
+禁止“因为重写后数字不一样”却没有解释。
+
+建议测试文件：
+
+```text
+tests/draft/test_rosh_reference_equivalence.py
+tests/draft/test_rosh_minute_curve.py
+tests/draft/test_rosh_player_adjustment.py
+tests/draft/test_rosh_cutoff_integrity.py
+```
+
+### 10.0.7 Reference Implementation 的优先级
+
+当以下三者冲突时：
+
+```text
+A. 本 ARCHITECTURE.md 明确规定的架构不变量
+B. 已验证旧 R.O.S.H. 行为
+C. Coding Agent 自己新提出的算法
+```
+
+优先级为：
+
+```text
+A > B > C
+```
+
+也就是说：
+
+- 架构不变量优先于旧实现；
+- 在架构不变量没有要求改变算法时，优先迁移已验证旧实现；
+- Coding Agent 不得无依据地把成熟实现替换成新的主观评分模型。
+
+如确实要改变核心 R.O.S.H. 算法，必须同时提供：
+
+```text
+旧模型版本
+新模型版本
+差异说明
+离线回放结果
+回归测试
+为什么新算法更合理的证据
+```
+
+而不是静默替换。
+
+R.O.S.H. 的职责不是识别比赛，不负责找玩家，不负责猜 Market。
 
 它的职责不是识别比赛，不负责找玩家，不负责猜 Market。
 
@@ -1621,7 +2008,7 @@ class TeamStrengthSnapshot(BaseModel):
 
 ## 11.7 Team Base Rating：V1 使用 Map-level Elo
 
-TI 前不需要复杂模型。
+V1 采用可解释、可回放的 Map-level Elo 作为 Team Base Rating 基线；这是模型选择，不是时间妥协。
 
 V1 自己维护 Map-level Elo 即可。
 
@@ -1804,7 +2191,7 @@ AI 必须能够区分：
 
 ---
 
-## 11.10 后续可升级为时间衰减，但 V1 不强制
+## 11.10 时间衰减属于数据验证后的模型扩展
 
 后续可用指数衰减：
 
@@ -1818,7 +2205,7 @@ weight(age_days) = 0.5 ^ (age_days / half_life_days)
 14–21 days
 ```
 
-但 TI V1 优先稳定和可解释性，不要求先完成复杂参数调优。
+只有在历史回放证明时间衰减优于固定窗口后才启用；模型复杂度由验证结果决定，不由开发进度决定。
 
 ---
 
@@ -1859,7 +2246,7 @@ V1 可以先采用位置等权平均：
 Roster Strength = mean(Player Combined Strength × 5)
 ```
 
-后续才考虑不同位置权重。
+位置权重只有在存在可靠数据证据后才版本化引入；缺乏证据时采用等权是防止无依据复杂化，而不是赶工。
 
 重要的是：
 
@@ -3170,9 +3557,9 @@ test_provider_conflict_is_flagged
 
 ---
 
-# 11.43 V1 Historical Intelligence 最终定义
+# 11.43 V1 Historical Intelligence 正式基线定义
 
-TI V1 不追求“最先进 Rating”。
+V1 Rating 的目标是稳定、可解释、可回放、无未来泄漏并可验证；不以缺乏数据支撑的复杂度为目标。
 
 我们只需要一个：
 
@@ -3383,7 +3770,7 @@ class AiDecision(BaseModel):
         "UNKNOWN",
     ]
 
-    max_acceptable_odds_a: float | None
+    max_acceptable_price: float | None
 
     primary_reasons: list[str]
     counter_arguments: list[str]
@@ -3622,35 +4009,170 @@ async def save_raw_event(
 
 ---
 
+# 20A. Durable Domain Events 与 Job System
+
+任何“必须最终发生”的工作都不能只存在于 `asyncio.Queue` 或进程内内存。
+
+必须持久化的业务事件至少包括：
+
+```text
+MARKET_DISCOVERED
+ODDS_REGISTRY_REFRESH_REQUIRED
+DLTV_MATCH_RESOLVED
+DRAFT_CONFIRMED
+MAP_STARTED
+DECISION_CHECKPOINT_DUE
+SIGNIFICANT_ODDS_MOVE
+MARKET_REOPENED
+MAP_ENDED
+BASIC_RESULT_READY
+ADVANCED_RESULT_READY
+SNAPSHOT_BUILD_REQUESTED
+AI_DECISION_REQUESTED
+FUTURE_ODDS_CAPTURE_DUE
+SETTLEMENT_REQUIRED
+EVALUATION_REQUIRED
+```
+
+推荐 PostgreSQL 表：
+
+```text
+domain_events
+durable_jobs
+job_attempts
+worker_checkpoints
+outbox_events
+```
+
+Job 至少包含：
+
+```text
+id
+job_type
+dedupe_key
+payload
+status
+priority
+not_before
+attempt_count
+max_attempts
+locked_by
+locked_at
+last_error
+created_at
+completed_at
+```
+
+状态：
+
+```text
+PENDING
+RUNNING
+RETRY_WAIT
+SUCCEEDED
+FAILED_TERMINAL
+CANCELLED
+```
+
+使用 `SELECT ... FOR UPDATE SKIP LOCKED` 或等价机制 claim jobs。所有 handler 必须幂等，重启/重复投递不能产生重复 DecisionSnapshot、重复 settlement 或重复 rating update。
+
+`asyncio.Queue` 仅允许作为低延迟 wake-up signal；真实待办必须能从 PostgreSQL 重建。
+
+## 20A.1 Reconciliation
+
+启动和周期运行 reconciliation：
+
+```text
+发现应该存在但缺失的 job -> 补建
+RUNNING 超过 lease -> reclaim
+Map ended 但未 settlement -> enqueue
+Decision snapshot 存在但 AI provider 未执行 -> enqueue
+AI decision 存在但 future-odds checkpoint 缺失 -> enqueue
+```
+
+因此进程 crash 不能永久中断业务链。
+
+---
+
+# 20B. PostgreSQL 时间序列与容量设计
+
+高频 append-only 表必须从第一版就具备正确索引和分区策略。
+
+重点表：
+
+```text
+provider_raw_events
+odds_observations
+dltv_live_observations
+decision_future_odds
+```
+
+生产 schema 应按时间做原生 PostgreSQL RANGE partition（建议日或周粒度由实测量决定），并至少配置：
+
+```text
+BRIN(received_at)
+BTREE(provider_match_id, received_at DESC)
+BTREE(canonical_map_id, received_at DESC)
+BTREE(odds_id, provider_updated_at DESC)
+```
+
+Raw body 可使用 JSONB + 压缩归档策略；任何归档都不得破坏 provenance。
+
+不要求 TimescaleDB。只有真实查询/保留策略证明原生 PostgreSQL 不足时才引入扩展。
+
+---
+
 # 21. Runtime
 
-只能有一个启动入口：
+唯一业务启动入口：
 
 ```bash
 python -m app.main
 ```
 
-启动：
+启动并由统一 Supervisor 管理：
 
 ```text
 RayBetDiscoveryWorker
 RayBetSocketWorker
+RayBetRegistryRefreshWorker
 DltvSocketWorker
+DltvBootstrapWorker
 HistoricalSyncWorker
+PostmatchResolverWorker
 DraftCoordinator
 TemporalAligner
 SnapshotCoordinator
-AiCoordinator
+DurableJobWorker
+DomainEventDispatcher
+AiCoordinatorWorker
 FutureOddsWorker
 SettlementWorker
+EvaluationWorker
+ReconciliationWorker
 WebServer
 ```
 
+启动流程：配置校验 → DB migration-head 校验 → DB readiness → durable reconciliation → Provider workers → coordinators → web readiness。
+
+Shutdown 必须停止接收新 job、等待在途事务安全提交、释放 lease、关闭 HTTP/Socket client 与 DB pool。
+
 ---
 
-# 22. Supervisor
+# 22. Supervisor 与 Crash Recovery
 
-所有 Worker 统一状态：
+每个 Worker 实现统一 contract：
+
+```python
+class RuntimeWorker(Protocol):
+    name: str
+    async def start(self) -> None: ...
+    async def run(self) -> None: ...
+    async def stop(self) -> None: ...
+    async def health(self) -> WorkerHealth: ...
+```
+
+状态：
 
 ```text
 STARTING
@@ -3658,22 +4180,31 @@ RUNNING
 DEGRADED
 RESTARTING
 FAILED
+STOPPING
+STOPPED
 ```
 
-记录：
+Supervisor 必须实现：
 
 ```text
+heartbeat
 last_attempt_at
 last_success_at
+last_message_at
 consecutive_failures
 last_error
-messages_received
-last_message_at
+restart_count
+exponential backoff + jitter
+max backoff cap
+dependency readiness
+graceful shutdown
+crash restart
+post-restart reconciliation
 ```
 
-Socket 断线必须自动重连。
+Socket 断线必须自动重连。Provider worker crash 不得带崩其他 provider。单个 AI provider crash 不得阻塞其他 AI。
 
-DLTV HAR 已经出现连接重建和 polling 502，因此这一点不是“以后优化”，而是 V1 必须有。
+DLTV HAR 已经出现连接重建和 polling 502，因此 reconnect/reconciliation 属于 correctness requirement。
 
 ---
 
@@ -3706,6 +4237,62 @@ ACTION_REQUIRED
 ```
 
 DLTV Live 不安全时仍可 POST_DRAFT。
+
+---
+
+# 23A. Observability
+
+Observability 是正式功能，不是调试附属品。
+
+## Structured logging
+
+所有日志使用结构化 JSON，至少包含：
+
+```text
+timestamp
+level
+service
+worker
+canonical_series_id
+canonical_map_id
+provider
+provider_match_id
+job_id
+event_id
+snapshot_id
+error_type
+```
+
+禁止把完整 secret/cookie/token 写日志。
+
+## Metrics
+
+至少采集：
+
+```text
+raybet_socket_connected
+raybet_messages_total
+raybet_odds_delta_total
+raybet_provider_to_receive_latency
+dltv_socket_connected
+dltv_messages_total
+dltv_effective_state_updates_total
+dltv_state_age
+live_sync_p50/p90/jitter
+historical_refresh_age
+durable_jobs_pending/running/retry/failed
+worker_restart_total
+snapshot_build_latency
+snapshot_gate_failures_by_reason
+ai_requests_total
+ai_latency
+ai_failures
+ai_cost
+settlement_backlog
+evaluation_backlog
+```
+
+OpenTelemetry / Prometheus-compatible exporter 是推荐实现；即使 exporter 暂时关闭，内部 metric domain 仍必须存在。
 
 ---
 
@@ -3755,7 +4342,7 @@ BUY A / 67%
 
 ---
 
-# 25. TI 前的验收链
+# 25. Full Implementation 验收链
 
 一次启动后必须自动形成：
 
@@ -3804,6 +4391,39 @@ POST_DRAFT Snapshot
 ```
 
 仍然正常工作。
+
+---
+
+# 25A. Deterministic Replay Harness
+
+系统必须能使用已录制的 Raw/Event timeline 离线重放，不访问公网：
+
+```text
+Recorded RayBet Events
++ Recorded DLTV Events
++ Historical fixture snapshot
+        ↓
+Virtual Clock
+        ↓
+Same reducers / coordinators / gates
+        ↓
+DecisionSnapshots
+        ↓
+Assertions
+```
+
+Replay 模式必须验证：
+
+```text
+same inputs + same model/config versions -> same snapshot_hash
+event ordering preserved
+future data never appears early
+restart at arbitrary point -> same final normalized state
+duplicate events -> idempotent result
+provider gap -> correct degradation
+```
+
+该 Harness 同时承担 HAR regression 和完整生命周期 E2E 的基础。
 
 ---
 
@@ -3859,9 +4479,32 @@ invalid JSON response → parse failure, not fabricated decision
 
 ---
 
+
+## 26.6 完整测试矩阵
+
+除上面的领域测试外，Required test classes：
+
+```text
+unit
+provider contract
+HAR fixture regression
+parser compatibility
+database migration
+integration
+crash/restart recovery
+durable job idempotency
+deterministic replay
+full lifecycle E2E
+frontend API contract
+```
+
+CI 必须至少执行 migration-to-head、unit、contract、integration、replay smoke。生产部署前不得依赖手工点页面证明正确。
+
+---
+
 # 27. 需要保留的待验证项
 
-下面这些不能在 TI 前被“猜成事实”：
+下面这些在没有实测证据前不能被“猜成事实”：
 
 1. RayBet raw `status` 1/2/4/5 的完整业务映射。
 2. DLTV `team_slot=1..5` 是否在所有职业比赛始终严格对应 Pos1..5。
@@ -3895,7 +4538,7 @@ UI 不是核心资产。
 
 ---
 
-# 29. V1 明确不做
+# 29. Explicit Product Out-of-Scope
 
 ```text
 自动下注
@@ -3910,7 +4553,7 @@ AI 辩论
 训练自己的 LLM
 ```
 
-第一目标只有：
+当前产品目标是：
 
 > **数据完整、时间正确、决策可审计。**
 
@@ -3974,8 +4617,28 @@ AI 辩论
 - Live：第一版只信 `game_time + kills + team NW lead`，个人详细数据必须经过 freshness 验证。
 - 最大剩余未知：RayBet ↔ DLTV 的真实时间偏移。
 
-因此 TI 前最关键的工程目标已经非常明确：
+因此 当前最关键的工程目标已经非常明确：
 
 > **把两个实时流稳定录下来、建立统一 Map Identity、生成不可变 Snapshot，并让多个 AI 在相同 Snapshot 上做独立判断。**
 
 这条链一旦跑通，系统就已经可以进入 TI 2026 Shadow 实战。
+
+---
+
+
+# 32. Technology Baseline Note（2026-08）
+
+技术栈版本在建仓时必须 pin，不应长期使用浮动 `latest`。本 V4 编写时的官方稳定线包括 Python 3.14、PostgreSQL 18、React 19 与 Vite 8；SQLAlchemy 使用 2.x API，Alembic 使用与其兼容的当前稳定版。选择这些版本是为了建立现代且受支持的基线，后续升级必须通过测试矩阵，而不是自动追随 latest。
+
+---
+
+# 33. 与 AGENTS.md 的关系
+
+```text
+AGENTS.md          -> HOW TO DEVELOP
+docs/ARCHITECTURE.md -> WHAT TO BUILD
+```
+
+开发代理必须读取二者。若旧实现、旧 README 或旧测试与本文冲突，应迁移实现和测试，而不是为旧结构堆兼容层。
+
+本文 Required Scope 不得因进度或“先 MVP”被擅自削减。

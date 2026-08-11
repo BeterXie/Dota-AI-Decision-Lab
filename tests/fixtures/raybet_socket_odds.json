@@ -1,0 +1,18 @@
+{
+  "event": "#publish",
+  "data": {
+    "channel": "match",
+    "data": {
+      "source": "odds",
+      "odds": [
+        {
+          "id": 75240285,
+          "match_id": 38423651,
+          "odds": "3.32",
+          "last_update": "1786467681",
+          "status": 1
+        }
+      ]
+    }
+  }
+}

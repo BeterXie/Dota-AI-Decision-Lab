@@ -39,6 +39,43 @@ Do not preserve an incorrect design merely to keep old tests green.
 
 ---
 
+# 1.5 Completeness is not negotiable for schedule
+
+This project is primarily developed with AI assistance. **Do not reduce required implementation scope merely to save development time, hit an artificial milestone, or produce an earlier-looking MVP.**
+
+The architecture document defines the required product scope. If a capability is required by `docs/ARCHITECTURE.md`, implement it completely unless the owner explicitly changes or removes that requirement.
+
+Forbidden schedule-driven behavior includes:
+
+```text
+"TI is close, so skip this required module"
+"Implement only the happy path for now"
+"Leave the rest as TODO because it is faster"
+"Use a stub/mocked implementation in production path temporarily"
+"Skip migration / tests / supervision / observability to save time"
+"Reduce Historical / Draft / Live / Evaluation scope because of deadline"
+"Return a partial vertical slice when the requested task is an integrated feature"
+```
+
+The correct rule is:
+
+```text
+required by architecture -> implement it
+required for correctness -> implement it
+required for operability -> implement it
+required for verification -> test it
+explicitly out of scope in architecture -> do not implement unless requested
+owner explicitly removes requirement -> it may be removed
+```
+
+**Time pressure may change implementation order, never silently change required scope or quality.**
+
+AI agents should use their ability to work quickly across multiple files to complete the full coherent change, rather than shrinking the change to imitate a human time-constrained MVP process.
+
+If a task is too large for one edit, continue implementing the remaining required parts in the same task context. Do not stop at an arbitrary partial milestone and ask for approval to continue.
+
+---
+
 # 2. Required operating mode
 
 ## 2.1 Execute, do not ask for routine approval
@@ -606,6 +643,17 @@ Once available, Valve Match ID should be treated as the strongest map identity a
 # 10. Draft Intelligence / R.O.S.H. rules
 
 Draft Intelligence is a **local native module in this repository**.
+
+Implementing or modifying Draft Intelligence / R.O.S.H.
+**MUST inspect the reference implementation first.**
+
+Reference implementation:
+
+- Repository: `BeterXie/dota2-predictor`
+- Primary file: `prematch/stratz_rosh.py`
+
+The reference implementation is an algorithm/provider-behavior reference, not a runtime dependency.
+Do not redesign or replace validated R.O.S.H. behavior without first understanding the existing implementation and demonstrating why the change is necessary.
 
 It must not call the old project as a runtime R.O.S.H. service.
 
@@ -1304,9 +1352,9 @@ Guidelines:
 
 ---
 
-# 26. Do not build out-of-scope V1 systems
+# 26. Respect explicit architecture scope — never invent schedule cuts
 
-Unless explicitly requested by the owner, do not spend TI V1 effort implementing:
+The following systems are excluded **because the architecture explicitly marks them out of scope**, not because development time is scarce. Unless explicitly requested by the owner, do not implement:
 
 ```text
 automatic betting
@@ -1322,7 +1370,7 @@ custom LLM training
 large BI platform
 ```
 
-Do not add these as “helpful extras” while required ingestion/snapshot/evaluation work remains incomplete.
+Do not add these as “helpful extras” unless the owner changes scope. Conversely, **never use this section to justify omitting anything that `docs/ARCHITECTURE.md` requires.**
 
 ---
 
@@ -1450,9 +1498,9 @@ Do not invent facts, but also do not block the entire project waiting for perfec
 
 ---
 
-# 30. Performance priorities
+# 30. Engineering priorities
 
-Optimize for the TI objective:
+When trade-offs are genuinely required between implementation qualities, prioritize correctness and system value in this order. This ordering **does not authorize dropping required features**:
 
 ```text
 1. data completeness
@@ -1469,6 +1517,8 @@ Do not optimize code elegance at the expense of missing market/live data.
 
 Do not prematurely optimize throughput before establishing correct event-time semantics and append-only storage.
 
+These are prioritization rules for engineering decisions, **not a license to reduce documented scope because of schedule or perceived implementation cost.**
+
 ---
 
 # 31. Definition of Done checklist
@@ -1477,6 +1527,7 @@ Before declaring a feature complete, check applicable items:
 
 ```text
 [ ] Behavior matches docs/ARCHITECTURE.md
+[ ] No documented requirement was omitted for schedule, convenience, or perceived MVP speed
 [ ] No unnecessary approval step was introduced
 [ ] No obsolete compatibility layer remains without a real consumer
 [ ] Raw provider input is retained where required
@@ -1507,6 +1558,7 @@ When the owner gives a clear development request:
 
 ```text
 DO NOT wait for approval.
+DO NOT reduce required scope to save time or hit an artificial deadline.
 DO NOT protect obsolete internal code merely because it exists.
 DO NOT split a coherent fix into approval-dependent stages.
 DO NOT invent data to make the system appear healthy.

@@ -1,0 +1,36 @@
+from datetime import datetime
+from enum import StrEnum
+from typing import Any
+
+from pydantic import BaseModel, ConfigDict
+
+
+class DomainEventType(StrEnum):
+    MARKET_DISCOVERED = "MARKET_DISCOVERED"
+    ODDS_REGISTRY_REFRESH_REQUIRED = "ODDS_REGISTRY_REFRESH_REQUIRED"
+    DLTV_MATCH_DISCOVERED = "DLTV_MATCH_DISCOVERED"
+    DLTV_MATCH_RESOLVED = "DLTV_MATCH_RESOLVED"
+    DRAFT_CONFIRMED = "DRAFT_CONFIRMED"
+    MAP_STARTED = "MAP_STARTED"
+    DECISION_CHECKPOINT_DUE = "DECISION_CHECKPOINT_DUE"
+    SIGNIFICANT_ODDS_MOVE = "SIGNIFICANT_ODDS_MOVE"
+    MARKET_REOPENED = "MARKET_REOPENED"
+    MAP_ENDED = "MAP_ENDED"
+    BASIC_RESULT_READY = "BASIC_RESULT_READY"
+    ADVANCED_RESULT_READY = "ADVANCED_RESULT_READY"
+    SNAPSHOT_BUILD_REQUESTED = "SNAPSHOT_BUILD_REQUESTED"
+    AI_DECISION_REQUESTED = "AI_DECISION_REQUESTED"
+    FUTURE_ODDS_CAPTURE_DUE = "FUTURE_ODDS_CAPTURE_DUE"
+    SETTLEMENT_REQUIRED = "SETTLEMENT_REQUIRED"
+    EVALUATION_REQUIRED = "EVALUATION_REQUIRED"
+
+
+class DomainEvent(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    event_type: DomainEventType
+    aggregate_type: str
+    aggregate_id: str
+    dedupe_key: str
+    payload: dict[str, Any]
+    occurred_at: datetime

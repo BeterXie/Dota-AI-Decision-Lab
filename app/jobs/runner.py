@@ -1,0 +1,106 @@
+import asyncio
+from collections.abc import Awaitable, Callable
+
+from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+
+from app.domain.jobs import DurableJob, JobType
+from app.jobs.repository import JobRepository
+
+JobHandler = Callable[[DurableJob], Awaitable[None]]
+
+
+class JobRunner:
+    def __init__(
+        self,
+        *,
+        worker_id: str,
+        session_factory: async_sessionmaker[AsyncSession],
+        repository: JobRepository,
+        handlers: dict[JobType, JobHandler],
+        poll_seconds: float,
+        lease_seconds: float,
+        job_types: tuple[JobType, ...] | None = None,
+    ) -> None:
+        self._worker_id = worker_id
+        self._session_factory = session_factory
+        self._repository = repository
+        self._handlers = handlers
+        self._poll_seconds = poll_seconds
+        self._lease_seconds = lease_seconds
+        self._job_types = job_types
+        self._stop = asyncio.Event()
+
+    async def run(self) -> None:
+        while not self._stop.is_set():
+            job = await self._claim_one()
+            if job is None:
+                try:
+                    await asyncio.wait_for(self._stop.wait(), timeout=self._poll_seconds)
+                except TimeoutError:
+                    pass
+                continue
+            await self._execute(job)
+
+    async def stop(self) -> None:
+        self._stop.set()
+
+    async def _claim_one(self) -> DurableJob | None:
+        async with self._session_factory() as session, session.begin():
+            jobs = await self._repository.claim(
+                session,
+                worker_id=self._worker_id,
+                limit=1,
+                job_types=self._job_types,
+            )
+            return jobs[0] if jobs else None
+
+    async def _execute(self, job: DurableJob) -> None:
+        handler = self._handlers.get(job.job_type)
+        if handler is None:
+            await self._mark_failed(job, f"no handler registered for {job.job_type.value}")
+            return
+        try:
+            renewal_stop = asyncio.Event()
+            renewal = asyncio.create_task(self._renew_lease(job, renewal_stop))
+            try:
+                await handler(job)
+            finally:
+                renewal_stop.set()
+                await renewal
+        except asyncio.CancelledError:
+            await self._mark_failed(job, "worker shutdown during job execution")
+            raise
+        except Exception as exc:
+            await self._mark_failed(job, f"{type(exc).__name__}: {exc}")
+            return
+        async with self._session_factory() as session, session.begin():
+            await self._repository.succeed(
+                session,
+                job_id=job.id,
+                worker_id=self._worker_id,
+            )
+
+    async def _mark_failed(self, job: DurableJob, error: str) -> None:
+        async with self._session_factory() as session, session.begin():
+            await self._repository.fail(
+                session,
+                job_id=job.id,
+                worker_id=self._worker_id,
+                error=error,
+            )
+
+    async def _renew_lease(self, job: DurableJob, stop: asyncio.Event) -> None:
+        interval = max(self._lease_seconds / 3.0, 1.0)
+        while not stop.is_set():
+            try:
+                await asyncio.wait_for(stop.wait(), timeout=interval)
+                return
+            except TimeoutError:
+                async with self._session_factory() as session, session.begin():
+                    renewed = await self._repository.renew_lease(
+                        session,
+                        job_id=job.id,
+                        worker_id=self._worker_id,
+                    )
+                if not renewed:
+                    raise RuntimeError("durable job lease ownership was lost") from None

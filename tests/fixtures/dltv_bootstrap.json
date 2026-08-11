@@ -1,0 +1,34 @@
+{
+  "match_id": 8940730389,
+  "radiant_score": 10,
+  "dire_score": 10,
+  "radiant_lead": -6643,
+  "game_time": 1061,
+  "first_blood": "radiant",
+  "is_picks_ended": true,
+  "draft_supreme_complete": true,
+  "live_league_data": {"stream_delay_s": 900},
+  "db": {
+    "first_team": {"id": 501, "title": "Radiant Sample"},
+    "second_team": {"id": 502, "title": "Dire Sample"},
+    "series": {
+      "id": 427609,
+      "event_id": 88,
+      "started_at": "2026-08-12T12:30:00Z",
+      "series_scores": {"first_team": 1, "second_team": 0}
+    },
+    "scores": {"first_team": 1, "second_team": 0}
+  },
+  "players": [
+    {"account_id": 1001, "hero_id": 1, "team": 0, "team_slot": 1},
+    {"account_id": 1002, "hero_id": 2, "team": 0, "team_slot": 2},
+    {"account_id": 1003, "hero_id": 3, "team": 0, "team_slot": 3},
+    {"account_id": 1004, "hero_id": 4, "team": 0, "team_slot": 4},
+    {"account_id": 1005, "hero_id": 5, "team": 0, "team_slot": 5},
+    {"account_id": 2001, "hero_id": 101, "team": 1, "team_slot": 1},
+    {"account_id": 2002, "hero_id": 102, "team": 1, "team_slot": 2},
+    {"account_id": 2003, "hero_id": 103, "team": 1, "team_slot": 3},
+    {"account_id": 2004, "hero_id": 104, "team": 1, "team_slot": 4},
+    {"account_id": 2005, "hero_id": 105, "team": 1, "team_slot": 5}
+  ]
+}

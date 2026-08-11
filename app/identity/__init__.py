@@ -1,0 +1,1 @@
+"""Canonical provider identity resolution."""

@@ -1,0 +1,28 @@
+{
+  "result": {
+    "odds": [
+      {
+        "odds_id": 75240285,
+        "match_id": 38423651,
+        "odds": "2.18",
+        "last_update": "1786467681",
+        "status": 4,
+        "team_id": 901,
+        "name": "Radiant Sample",
+        "group_short_name": "Winner",
+        "match_stage": "Map r2"
+      },
+      {
+        "odds_id": 75240286,
+        "match_id": 38423651,
+        "odds": "1.72",
+        "last_update": "1786467681",
+        "status": 5,
+        "team_id": 902,
+        "name": "Dire Sample",
+        "group_short_name": "Winner",
+        "match_stage": "Map r2"
+      }
+    ]
+  }
+}

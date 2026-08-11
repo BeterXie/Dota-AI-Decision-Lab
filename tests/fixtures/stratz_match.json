@@ -1,0 +1,48 @@
+{
+  "data": {
+    "match": {
+      "id": 8940730389,
+      "startDateTime": 1786492800,
+      "durationSeconds": 2110,
+      "didRadiantWin": true,
+      "radiantTeamId": 100,
+      "direTeamId": 200,
+      "gameVersionId": 61,
+      "league": {"id": 17701, "name": "The International 2026"},
+      "players": [
+        {
+          "steamAccountId": 1001,
+          "heroId": 10,
+          "position": 1,
+          "isRadiant": true,
+          "kills": 8,
+          "deaths": 2,
+          "assists": 9,
+          "goldPerMinute": 710,
+          "experiencePerMinute": 760,
+          "numLastHits": 401,
+          "heroDamage": 28100,
+          "towerDamage": 6200,
+          "networth": 24910,
+          "stats": {"imp": 24.5}
+        },
+        {
+          "steamAccountId": 2001,
+          "heroId": 20,
+          "position": 5,
+          "isRadiant": false,
+          "kills": 1,
+          "deaths": 7,
+          "assists": 12,
+          "goldPerMinute": null,
+          "experiencePerMinute": 390,
+          "numLastHits": 38,
+          "heroDamage": 9100,
+          "towerDamage": 0,
+          "networth": 9650,
+          "stats": {"imp": -18.0}
+        }
+      ]
+    }
+  }
+}

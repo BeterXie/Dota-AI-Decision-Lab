@@ -1,0 +1,25 @@
+{
+  "result": [
+    {
+      "id": 38423651,
+      "game_id": 151,
+      "tournament_id": 7712,
+      "tournament_name": "Recorded Invitational",
+      "round": "BO3",
+      "status": 1,
+      "start_time": "2026-08-12 20:30:00",
+      "team": [
+        {"pos": 2, "team_id": 902, "team_name": "Dire Sample"},
+        {"pos": 1, "team_id": 901, "team_name": "Radiant Sample"}
+      ]
+    },
+    {
+      "id": 999,
+      "game_id": 1,
+      "team": [
+        {"pos": 1, "team_id": 1, "team_name": "Other A"},
+        {"pos": 2, "team_id": 2, "team_name": "Other B"}
+      ]
+    }
+  ]
+}
