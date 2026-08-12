@@ -51,14 +51,14 @@ class OpenAiDecisionProvider:
             },
         )
         response.raise_for_status()
-        raw = _object(response.json(), "OpenAI response")
+        raw = _object(response.json(), f"{self.name} response")
         if raw.get("status") != "completed":
             raise AiProviderFailure(
-                f"OpenAI response status is {raw.get('status')}",
+                f"{self.name} response status is {raw.get('status')}",
                 parse_status="FAILED",
                 raw_response=raw,
             )
-        text = _output_text(raw)
+        text = _output_text(raw, provider_name=self.name)
         return AiProviderResponse(
             raw_response=raw,
             decision=parse_decision(text, raw),
@@ -70,14 +70,14 @@ class OpenAiDecisionProvider:
             await self._client.aclose()
 
 
-def _output_text(payload: dict[str, Any]) -> str:
+def _output_text(payload: dict[str, Any], *, provider_name: str) -> str:
     for item in payload.get("output", []):
         if not isinstance(item, dict) or item.get("type") != "message":
             continue
         for content in item.get("content", []):
             if isinstance(content, dict) and content.get("type") == "refusal":
                 raise AiProviderFailure(
-                    "OpenAI refused the decision request",
+                    f"{provider_name} refused the decision request",
                     parse_status="REFUSED",
                     raw_response=payload,
                 )
@@ -86,7 +86,7 @@ def _output_text(payload: dict[str, Any]) -> str:
                 if isinstance(text, str):
                     return text
     raise AiProviderFailure(
-        "OpenAI response has no output text",
+        f"{provider_name} response has no output text",
         parse_status="PARSE_FAILED",
         raw_response=payload,
     )

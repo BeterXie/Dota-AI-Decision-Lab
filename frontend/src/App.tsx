@@ -51,7 +51,9 @@ const DEPENDENCY_ORDER = [
   "HISTORY",
   "GPT",
   "CLAUDE",
-  "GEMINI"
+  "GEMINI",
+  "DEEPSEEK",
+  "KIMI"
 ];
 
 export function App() {
@@ -650,7 +652,7 @@ function AiPanel({ detail }: { detail: MapDetail }) {
   const { locale, t } = useI18n();
   return (
     <section className="ai-panel">
-      <PanelHeading title={t("independentAiDecisions")} status={`${detail.decisions.length}/3`} />
+      <PanelHeading title={t("independentAiDecisions")} status={`${detail.decisions.length}/5`} />
       {detail.decisions.length ? (
         <div className="decision-list">
           {detail.decisions.map((record) => (
@@ -1108,7 +1110,13 @@ function statusTone(status: string): string {
 }
 
 function providerName(provider: string): string {
-  return { openai: "GPT", anthropic: "Claude", gemini: "Gemini" }[provider] ?? provider;
+  return {
+    openai: "GPT",
+    anthropic: "Claude",
+    gemini: "Gemini",
+    deepseek: "DeepSeek",
+    kimi: "Kimi"
+  }[provider] ?? provider;
 }
 
 function percent(value: number, locale: Locale): string {

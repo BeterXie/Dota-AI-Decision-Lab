@@ -117,9 +117,7 @@ class ApplicationJobHandlers:
                 message=None if result.draft.complete else "DLTV draft is not complete yet",
                 canonical_map_id=str(result.resolved.canonical_map_id),
                 valve_match_id=valve_match_id,
-                roster_ready_count=sum(
-                    slot.account_id is not None for slot in result.draft.slots
-                ),
+                roster_ready_count=sum(slot.account_id is not None for slot in result.draft.slots),
                 hero_ready_count=sum(slot.hero_id is not None for slot in result.draft.slots),
                 blockers=list(result.draft.blockers),
             )
@@ -336,7 +334,13 @@ class ApplicationJobHandlers:
             if snapshot is None:
                 raise ValueError("decision snapshot does not exist")
             records = await self._d.ai.run_all(session, snapshot)
-            dependency_names = {"openai": "GPT", "anthropic": "CLAUDE", "gemini": "GEMINI"}
+            dependency_names = {
+                "openai": "GPT",
+                "anthropic": "CLAUDE",
+                "gemini": "GEMINI",
+                "deepseek": "DEEPSEEK",
+                "kimi": "KIMI",
+            }
             for record in records:
                 await self._d.health.dependency(
                     dependency_names.get(record.provider, record.provider.upper()),

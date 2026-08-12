@@ -259,7 +259,7 @@ Temporal Aligner
   ↓
 DecisionSnapshot @ exact T
 
-GPT / Claude / Gemini / ...
+GPT / Claude / Gemini / DeepSeek / Kimi
   ↓
 独立 Decision
 
@@ -582,7 +582,13 @@ STRATZ_TOKEN=...
 OPENAI_API_KEY=...
 ANTHROPIC_API_KEY=...
 GEMINI_API_KEY=...
+DEEPSEEK_API_KEY=...
+KIMI_API_KEY=...
 ```
+
+DeepSeek 使用 OpenAI Responses 兼容接口与严格 JSON Schema；Kimi 使用 OpenAI
+Chat Completions 兼容接口的 JSON Object 模式，并在本地执行同一 `AiDecision` 严格校验。
+所有 Provider 必须接收同一个不可变 Snapshot，独立失败和记录。
 
 ---
 
@@ -4233,6 +4239,8 @@ HISTORY            READY
 GPT                READY
 CLAUDE             READY
 GEMINI             READY
+DEEPSEEK           READY
+KIMI               READY
 ```
 
 整体：
@@ -4382,7 +4390,7 @@ Temporal Gate
         ↓
 DecisionSnapshot
         ↓
-GPT / Claude / Gemini
+GPT / Claude / Gemini / DeepSeek / Kimi
         ↓
 Decision Log
         ↓
@@ -4602,11 +4610,11 @@ AI 辩论
                             ↓
                    DecisionSnapshot @ T
                             │
-              ┌─────────────┼─────────────┐
-              ↓             ↓             ↓
-             GPT          Claude        Gemini
-              │             │             │
-              └─────────────┼─────────────┘
+       ┌────────┬────────┬───┴────┬──────────┐
+       ↓        ↓        ↓        ↓          ↓
+      GPT     Claude   Gemini  DeepSeek     Kimi
+       │        │        │        │          │
+       └────────┴────────┴───┬────┴──────────┘
                             ↓
                     Decision Evaluation
                             ↓

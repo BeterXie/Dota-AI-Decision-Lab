@@ -326,7 +326,7 @@ Temporal alignment + deterministic quality gates
         ↓
 immutable DecisionSnapshot @ exact T
         ↓
-independent GPT / Claude / Gemini decisions
+independent GPT / Claude / Gemini / DeepSeek / Kimi decisions
         ↓
 future odds + result evaluation
 ```
@@ -460,7 +460,8 @@ Do not update an old snapshot in place.
 
 All AI providers participating in one decision checkpoint must receive the exact same canonical snapshot payload / `snapshot_hash`.
 
-Never create separate “fresh” snapshots for GPT, Claude, and Gemini during the same checkpoint.
+Never create separate “fresh” snapshots for GPT, Claude, Gemini, DeepSeek, and Kimi during the
+same checkpoint.
 
 ---
 
@@ -1075,6 +1076,8 @@ HISTORY
 GPT
 CLAUDE
 GEMINI
+DEEPSEEK
+KIMI
 ```
 
 Overall status should distinguish:
@@ -1281,6 +1284,8 @@ STRATZ_TOKEN
 OPENAI_API_KEY
 ANTHROPIC_API_KEY
 GEMINI_API_KEY
+DEEPSEEK_API_KEY
+KIMI_API_KEY
 DATABASE_URL
 ```
 

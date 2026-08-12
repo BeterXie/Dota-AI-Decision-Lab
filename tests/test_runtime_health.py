@@ -87,3 +87,15 @@ async def test_dependency_health_restores_persisted_success_age() -> None:
     assert dependency["status"] == "READY"
     assert dependency["age_seconds"] >= 300
     assert dependency["metadata"]["maps_stored"] == 120
+
+
+@pytest.mark.asyncio
+async def test_all_registered_ai_providers_requiring_action_blocks_readiness() -> None:
+    health = HealthRegistry()
+    await health.dependency("DATABASE", "READY")
+    for provider in ("GPT", "CLAUDE", "GEMINI", "DEEPSEEK", "KIMI"):
+        await health.dependency(provider, "ACTION_REQUIRED")
+
+    snapshot = await health.snapshot()
+
+    assert snapshot["overall"] == "ACTION_REQUIRED"

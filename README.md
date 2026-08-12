@@ -1,6 +1,6 @@
 # Dota AI Decision Lab
 
-Dota AI Decision Lab is a standalone Dota 2 decision-intelligence runtime. It aligns RayBet market observations, DLTV draft/live state, STRATZ and OpenDota historical facts, local Draft Intelligence, deterministic quality gates, immutable DecisionSnapshots, and independent GPT, Claude, and Gemini decisions. The operational dashboard supports Chinese and English and keeps data quality, provenance, closing odds, result evidence, and worker readiness next to each decision.
+Dota AI Decision Lab is a standalone Dota 2 decision-intelligence runtime. It aligns RayBet market observations, DLTV draft/live state, STRATZ and OpenDota historical facts, local Draft Intelligence, deterministic quality gates, immutable DecisionSnapshots, and independent GPT, Claude, Gemini, DeepSeek, and Kimi decisions. The operational dashboard supports Chinese and English and keeps data quality, provenance, closing odds, result evidence, and worker readiness next to each decision.
 
 V1 is shadow decision only. It does not place bets or manage a bankroll.
 

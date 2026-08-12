@@ -15,7 +15,9 @@ from sqlalchemy import func, select, text
 from app.ai import (
     AiCoordinator,
     AnthropicDecisionProvider,
+    DeepSeekDecisionProvider,
     GeminiDecisionProvider,
+    KimiDecisionProvider,
     OpenAiDecisionProvider,
 )
 from app.ai.base import DECISION_POLICY_VERSION, PROMPT_VERSION
@@ -593,6 +595,24 @@ def _ai_providers(settings: Settings):
                 timeout_seconds=settings.ai_timeout_seconds,
             )
         )
+    if settings.deepseek_api_key:
+        providers.append(
+            DeepSeekDecisionProvider(
+                api_key=settings.deepseek_api_key,
+                model=settings.deepseek_model,
+                base_url=settings.deepseek_base_url,
+                timeout_seconds=settings.ai_timeout_seconds,
+            )
+        )
+    if settings.kimi_api_key:
+        providers.append(
+            KimiDecisionProvider(
+                api_key=settings.kimi_api_key,
+                model=settings.kimi_model,
+                base_url=settings.kimi_base_url,
+                timeout_seconds=settings.ai_timeout_seconds,
+            )
+        )
     return providers
 
 
@@ -617,7 +637,13 @@ async def _initialize_dependency_health(
     await health.dependency(
         "DRAFT_ENGINE", "UNKNOWN" if settings.stratz_token else "ACTION_REQUIRED"
     )
-    provider_dependencies = {"openai": "GPT", "anthropic": "CLAUDE", "gemini": "GEMINI"}
+    provider_dependencies = {
+        "openai": "GPT",
+        "anthropic": "CLAUDE",
+        "gemini": "GEMINI",
+        "deepseek": "DEEPSEEK",
+        "kimi": "KIMI",
+    }
     for provider, dependency in provider_dependencies.items():
         await health.dependency(
             dependency,

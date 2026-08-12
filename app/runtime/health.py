@@ -187,7 +187,11 @@ def _overall_status(dependencies: dict[str, dict[str, Any]]) -> str:
     database = dependencies.get("DATABASE", {}).get("status")
     if database not in {"READY"}:
         return "ACTION_REQUIRED"
-    ai_statuses = [dependencies.get(name, {}).get("status") for name in ("GPT", "CLAUDE", "GEMINI")]
+    ai_statuses = [
+        dependencies[name].get("status")
+        for name in ("GPT", "CLAUDE", "GEMINI", "DEEPSEEK", "KIMI")
+        if name in dependencies
+    ]
     if ai_statuses and all(status == "ACTION_REQUIRED" for status in ai_statuses):
         return "ACTION_REQUIRED"
     degraded = {

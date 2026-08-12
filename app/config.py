@@ -37,7 +37,13 @@ class Settings(BaseSettings):
     gemini_api_key: str | None = None
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
     gemini_model: str = "gemini-3.6-flash"
-    ai_timeout_seconds: float = 45.0
+    deepseek_api_key: str | None = None
+    deepseek_base_url: str = "https://api.deepseek.com"
+    deepseek_model: str = "deepseek-v4-flash"
+    kimi_api_key: str | None = None
+    kimi_base_url: str = "https://api.moonshot.cn/v1"
+    kimi_model: str = "kimi-k2.5"
+    ai_timeout_seconds: float = 120.0
 
     live_sync_safe_seconds: float = 3.0
     live_sync_caution_seconds: float = 8.0

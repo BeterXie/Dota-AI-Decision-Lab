@@ -443,7 +443,9 @@ const dependencyMessages: Record<string, Record<Locale, string>> = {
   HISTORY: { en: "HISTORY", "zh-CN": "历史数据" },
   GPT: { en: "GPT", "zh-CN": "GPT" },
   CLAUDE: { en: "CLAUDE", "zh-CN": "CLAUDE" },
-  GEMINI: { en: "GEMINI", "zh-CN": "GEMINI" }
+  GEMINI: { en: "GEMINI", "zh-CN": "GEMINI" },
+  DEEPSEEK: { en: "DEEPSEEK", "zh-CN": "DEEPSEEK" },
+  KIMI: { en: "KIMI", "zh-CN": "KIMI" }
 };
 
 export function translateDependency(name: string, locale: Locale): string {

@@ -31,7 +31,9 @@ const runtime = {
       "HISTORY",
       "GPT",
       "CLAUDE",
-      "GEMINI"
+      "GEMINI",
+      "DEEPSEEK",
+      "KIMI"
     ].map((name) => [
       name,
       { name, status: name === "LIVE_SYNC" ? "CAUTION" : "READY", message: null, updated_at: observedAt, metadata: {} }

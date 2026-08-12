@@ -108,11 +108,7 @@ def parse_draft(payload: dict[str, Any]) -> DraftValidation:
         raw_hero_id = player.get("hero_id")
         team = player.get("team")
         position = player.get("team_slot")
-        if (
-            team not in (0, 1)
-            or not _is_int(position)
-            or position not in range(1, 6)
-        ):
+        if team not in (0, 1) or not _is_int(position) or position not in range(1, 6):
             blockers.append("DRAFT_PARTIAL")
             continue
         hero_id = raw_hero_id if _is_int(raw_hero_id) and raw_hero_id > 0 else None
