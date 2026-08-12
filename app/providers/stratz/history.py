@@ -6,6 +6,7 @@ from app.providers.stratz.client import StratzClient
 from app.providers.stratz.history_queries import (
     MATCH_QUERY,
     NORMALIZER_VERSION,
+    TEAM_IDENTITY_QUERY,
     TEAM_MATCHES_QUERY,
     normalize_match,
 )
@@ -24,7 +25,14 @@ class StratzHistoricalProvider:
         return await self._client.execute(
             operation_name="HistoricalTeamMatches",
             query=TEAM_MATCHES_QUERY,
-            variables={"teamId": int(team_id), "take": limit},
+            variables={"teamId": int(team_id), "take": limit, "skip": 0},
+        )
+
+    async def get_team_identities(self, team_ids: list[int]) -> TimedPayload:
+        return await self._client.execute(
+            operation_name="HistoricalTeamIdentity",
+            query=TEAM_IDENTITY_QUERY,
+            variables={"teamIds": team_ids},
         )
 
     async def get_player_pro_maps(

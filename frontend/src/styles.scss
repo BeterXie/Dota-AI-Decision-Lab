@@ -246,8 +246,24 @@ textarea {
   border-right: 1px solid #393939;
 }
 
-.pending-market-section {
+.pending-market-section,
+.pending-history-section {
   padding: 1.5rem 2rem 2rem;
+}
+
+.pending-history-section {
+  border-top: 1px solid #393939;
+}
+
+.pending-history-metrics {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.pending-history-note {
+  margin: 1rem 0 0;
+  color: #8d8d8d;
+  font-size: 0.78rem;
+  line-height: 1.5;
 }
 
 .readiness-strip {
@@ -636,6 +652,11 @@ textarea {
   border-bottom: 1px solid #393939;
 }
 
+.failure-list {
+  max-height: 22rem;
+  overflow-y: auto;
+}
+
 .failure-list span,
 .failure-list small {
   color: #a8a8a8;
@@ -787,6 +808,14 @@ textarea {
   .pending-market-section {
     overflow-x: auto;
   }
+
+  .pending-history-section {
+    padding: 1rem;
+  }
+
+  .pending-history-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
 }
 
 @media (max-width: 520px) {
@@ -800,6 +829,10 @@ textarea {
   }
 
   .pending-identity-facts {
+    grid-template-columns: 1fr;
+  }
+
+  .pending-history-metrics {
     grid-template-columns: 1fr;
   }
 }

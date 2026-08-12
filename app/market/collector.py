@@ -162,7 +162,7 @@ class RayBetOddsCollector:
                 )
             )
             appended += 1
-            if previous is not None:
+            if previous is not None and canonical_series_id is not None:
                 move = abs(float(delta.price) / float(previous.price) - 1.0)
                 if move >= self._significant_move:
                     await self._events.record(

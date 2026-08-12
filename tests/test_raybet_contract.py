@@ -90,6 +90,45 @@ async def test_unknown_socket_odds_is_archived_and_requests_registry_refresh() -
 
 
 @pytest.mark.asyncio
+async def test_significant_move_requires_canonical_series_identity() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    collector = RayBetOddsCollector(
+        raw_events=RawEventRepository(),
+        registry=OddsRegistry(),
+        events=EventRepository(),
+        significant_move=0.05,
+    )
+    received_at = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
+
+    async with factory() as session, session.begin():
+        session.add(
+            RayBetOddsRegistry(
+                odds_id=75240285,
+                provider_match_id=38423651,
+                raw_event_id=UUID("11111111-1111-1111-1111-111111111111"),
+            )
+        )
+    first = _fixture("raybet_socket_odds.json")
+    moved = json.loads(json.dumps(first))
+    moved["data"]["data"]["odds"][0]["odds"] = "4.00"
+    moved["data"]["data"]["odds"][0]["last_update"] = "1786467682"
+    for offset, payload in enumerate((first, moved)):
+        async with factory() as session, session.begin():
+            await collector.collect(
+                session, payload, received_at=received_at.replace(second=offset)
+            )
+
+    async with factory() as session:
+        events = list((await session.scalars(select(DomainEventRecord))).all())
+        assert not any(event.event_type == "SIGNIFICANT_ODDS_MOVE" for event in events)
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_duplicate_socket_delta_keeps_raw_but_not_business_duplicate() -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:

@@ -1,4 +1,3 @@
-import asyncio
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from enum import StrEnum
@@ -49,7 +48,6 @@ class HealthRegistry:
     def __init__(self) -> None:
         self._workers: dict[str, WorkerHealth] = {}
         self._dependencies: dict[str, DependencyHealth] = {}
-        self._lock = asyncio.Lock()
 
     async def worker_state(
         self,
@@ -59,40 +57,35 @@ class HealthRegistry:
         error: str | None = None,
         restart: bool = False,
     ) -> None:
-        async with self._lock:
-            health = self._workers.setdefault(name, WorkerHealth(name=name))
-            health.state = state.value
-            health.last_error = error
-            if restart:
-                health.restart_count += 1
-            if state == WorkerState.RUNNING:
-                health.consecutive_failures = 0
+        health = self._workers.setdefault(name, WorkerHealth(name=name))
+        health.state = state.value
+        health.last_error = error
+        if restart:
+            health.restart_count += 1
+        if state == WorkerState.RUNNING:
+            health.consecutive_failures = 0
 
     async def attempt(self, name: str) -> None:
-        async with self._lock:
-            health = self._workers.setdefault(name, WorkerHealth(name=name))
-            health.last_attempt_at = datetime.now(UTC)
+        health = self._workers.setdefault(name, WorkerHealth(name=name))
+        health.last_attempt_at = datetime.now(UTC)
 
     async def success(self, name: str, **metadata: Any) -> None:
-        async with self._lock:
-            health = self._workers.setdefault(name, WorkerHealth(name=name))
-            health.last_success_at = datetime.now(UTC)
-            health.consecutive_failures = 0
-            health.last_error = None
-            health.metadata.update(metadata)
+        health = self._workers.setdefault(name, WorkerHealth(name=name))
+        health.last_success_at = datetime.now(UTC)
+        health.consecutive_failures = 0
+        health.last_error = None
+        health.metadata.update(metadata)
 
     async def message(self, name: str, **metadata: Any) -> None:
-        async with self._lock:
-            health = self._workers.setdefault(name, WorkerHealth(name=name))
-            health.last_message_at = datetime.now(UTC)
-            health.messages_received += 1
-            health.metadata.update(metadata)
+        health = self._workers.setdefault(name, WorkerHealth(name=name))
+        health.last_message_at = datetime.now(UTC)
+        health.messages_received += 1
+        health.metadata.update(metadata)
 
     async def failure(self, name: str, error: str) -> None:
-        async with self._lock:
-            health = self._workers.setdefault(name, WorkerHealth(name=name))
-            health.consecutive_failures += 1
-            health.last_error = error
+        health = self._workers.setdefault(name, WorkerHealth(name=name))
+        health.consecutive_failures += 1
+        health.last_error = error
 
     async def dependency(
         self,
@@ -106,42 +99,61 @@ class HealthRegistry:
         **metadata: Any,
     ) -> None:
         now = datetime.now(UTC)
-        async with self._lock:
-            health = self._dependencies.setdefault(
-                name,
-                DependencyHealth(name=name, status=status),
-            )
-            health.status = status
-            health.message = message
-            health.last_attempt_at = now
-            health.updated_at = now
-            if requires_message is not None:
-                health.requires_message = requires_message
-            if max_message_age_seconds is not None:
-                health.max_message_age_seconds = max_message_age_seconds
-            if business_message:
-                health.last_message_at = now
-            if status in {"READY", "SAFE"}:
-                health.last_success_at = now
-                health.consecutive_failures = 0
-                health.last_error = None
-            elif status in {"DEGRADED", "ACTION_REQUIRED", "FAILED", "UNSAFE"}:
-                health.consecutive_failures += 1
-                health.last_error = message
-            health.metadata.update(metadata)
+        health = self._dependencies.setdefault(
+            name,
+            DependencyHealth(name=name, status=status),
+        )
+        health.status = status
+        health.message = message
+        health.last_attempt_at = now
+        health.updated_at = now
+        if requires_message is not None:
+            health.requires_message = requires_message
+        if max_message_age_seconds is not None:
+            health.max_message_age_seconds = max_message_age_seconds
+        if business_message:
+            health.last_message_at = now
+        if status in {"READY", "SAFE"}:
+            health.last_success_at = now
+            health.consecutive_failures = 0
+            health.last_error = None
+        elif status in {"DEGRADED", "ACTION_REQUIRED", "FAILED", "UNSAFE"}:
+            health.consecutive_failures += 1
+            health.last_error = message
+        health.metadata.update(metadata)
+
+    async def restore_dependency(
+        self,
+        name: str,
+        status: str,
+        *,
+        last_success_at: datetime,
+        message: str | None = None,
+        **metadata: Any,
+    ) -> None:
+        now = datetime.now(UTC)
+        health = self._dependencies.setdefault(
+            name,
+            DependencyHealth(name=name, status=status),
+        )
+        health.status = status
+        health.message = message
+        health.last_success_at = last_success_at
+        health.updated_at = now
+        health.consecutive_failures = int(status == "DEGRADED")
+        health.last_error = message if status == "DEGRADED" else None
+        health.metadata.update(metadata)
 
     async def worker(self, name: str) -> dict[str, Any]:
-        async with self._lock:
-            return asdict(self._workers.setdefault(name, WorkerHealth(name=name)))
+        return asdict(self._workers.setdefault(name, WorkerHealth(name=name)))
 
     async def snapshot(self) -> dict[str, Any]:
         observed_at = datetime.now(UTC)
-        async with self._lock:
-            workers = {name: asdict(value) for name, value in self._workers.items()}
-            dependencies = {
-                name: _dependency_payload(value, observed_at)
-                for name, value in self._dependencies.items()
-            }
+        workers = {name: asdict(value) for name, value in self._workers.items()}
+        dependencies = {
+            name: _dependency_payload(value, observed_at)
+            for name, value in self._dependencies.items()
+        }
         return {
             "overall": _overall_status(dependencies),
             "workers": workers,

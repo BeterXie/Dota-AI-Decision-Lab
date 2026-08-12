@@ -51,6 +51,7 @@ class JobHandlerDependencies:
     dltv_bootstrap: DltvBootstrapCoordinator
     historical_team_resolver: HistoricalTeamResolver
     historical_sync: HistoricalSyncService
+    historical_primary: object | None
     historical_repository: HistoricalRepository
     historical_features: HistoricalFeatureBuilder
     opendota: OpenDotaClient
@@ -132,17 +133,33 @@ class ApplicationJobHandlers:
                     self._d.opendota,
                     canonical_team_ids=unresolved,
                 )
+            if self._d.historical_primary is not None:
+                await self._d.historical_team_resolver.refresh_stratz_identities(
+                    session,
+                    self._d.historical_primary,
+                    canonical_team_ids=team_ids,
+                )
             cutoff = datetime.now(UTC)
             sync_results = []
+            sync_errors = []
             for team_id in team_ids:
-                sync_results.append(
-                    await self._d.historical_sync.sync_team(
-                        session,
-                        canonical_team_id=team_id,
-                        before=cutoff,
-                        limit=self._d.settings.historical_prewarm_maps,
-                    )
-                )
+                try:
+                    async with session.begin_nested():
+                        sync_results.append(
+                            await self._d.historical_sync.sync_team(
+                                session,
+                                canonical_team_id=team_id,
+                                before=cutoff,
+                                limit=self._d.settings.historical_prewarm_maps,
+                            )
+                        )
+                except Exception as exc:
+                    sync_errors.append(f"{type(exc).__name__}: {exc}")
+            if not sync_results:
+                message = "; ".join(sync_errors) or "historical sync produced no team result"
+                await self._d.health.dependency("HISTORY", "DEGRADED", message=message)
+                await self._d.health.dependency("STRATZ", "DEGRADED", message=message)
+                return
             coverage = {
                 field: sum(getattr(item, field) for item in sync_results)
                 for field in (
@@ -158,13 +175,19 @@ class ApplicationJobHandlers:
                     "conflict_count",
                 )
             }
-            await self._d.health.dependency("HISTORY", "READY", **coverage)
+            await self._d.health.dependency(
+                "HISTORY",
+                "DEGRADED" if sync_errors else "READY",
+                message="; ".join(sync_errors) if sync_errors else None,
+                **coverage,
+            )
             if self._d.settings.stratz_token:
                 fallback_count = coverage["provider_fallback_count"]
                 identity_missing = coverage["identity_missing_count"]
                 await self._d.health.dependency(
                     "STRATZ",
-                    "DEGRADED" if fallback_count else "READY",
+                    "DEGRADED" if fallback_count or sync_errors else "READY",
+                    message="; ".join(sync_errors) if sync_errors else None,
                     provider_fallback_count=fallback_count,
                     identity_missing_count=identity_missing,
                     maps_fetched=coverage["maps_fetched"],

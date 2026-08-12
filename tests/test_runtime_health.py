@@ -69,3 +69,21 @@ async def test_dependency_health_preserves_attempt_success_and_failure_state() -
     assert dependency["consecutive_failures"] == 1
     assert dependency["last_error"] == "timeout"
     assert dependency["metadata"]["coverage"] == 12
+
+
+@pytest.mark.asyncio
+async def test_dependency_health_restores_persisted_success_age() -> None:
+    health = HealthRegistry()
+    observed_success = datetime.now(UTC) - timedelta(minutes=5)
+    await health.restore_dependency(
+        "HISTORY",
+        "READY",
+        last_success_at=observed_success,
+        maps_stored=120,
+    )
+
+    dependency = (await health.snapshot())["dependencies"]["HISTORY"]
+
+    assert dependency["status"] == "READY"
+    assert dependency["age_seconds"] >= 300
+    assert dependency["metadata"]["maps_stored"] == 120

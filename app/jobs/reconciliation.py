@@ -16,6 +16,7 @@ from app.models import (
     DraftSnapshotRecord,
     HistoricalMapRecord,
     MapResultRecord,
+    ProviderMatchMapping,
 )
 
 
@@ -191,6 +192,13 @@ class ReconciliationService:
                         HistoricalMapRecord.canonical_map_id.is_not(None),
                         HistoricalMapRecord.winner_team_id.is_not(None),
                         HistoricalMapRecord.sync_status != "DATA_CONFLICT",
+                        select(ProviderMatchMapping.id)
+                        .where(
+                            ProviderMatchMapping.provider == "raybet",
+                            ProviderMatchMapping.canonical_map_id
+                            == HistoricalMapRecord.canonical_map_id,
+                        )
+                        .exists(),
                     )
                 )
             ).all()

@@ -47,7 +47,10 @@ from app.market.registry_refresh import RayBetRegistryRefreshService
 from app.models import (
     CanonicalSeries,
     DltvLiveObservationRecord,
+    HistoricalMapRecord,
+    HistoricalPlayerMapRecord,
     LiveSyncEstimateRecord,
+    ProviderMatchMapping,
 )
 from app.observability import Metrics, configure_logging, configure_tracing
 from app.providers.dltv.bootstrap import DltvBootstrapClient
@@ -145,7 +148,7 @@ async def run() -> None:
         fallback=opendota,
         raw_events=raw_events,
         repository=historical_repository,
-        concurrency=settings.historical_fetch_concurrency,
+        batch_size=settings.historical_sync_batch_maps,
     )
     historical_features = HistoricalFeatureBuilder(
         initial_elo=settings.elo_initial_rating,
@@ -169,6 +172,11 @@ async def run() -> None:
     await _initialize_dependency_health(
         health, settings=settings, ai_provider_names=tuple(item.name for item in ai_providers)
     )
+    await _restore_historical_health(
+        health,
+        session_factory=session_factory,
+        stratz_configured=bool(settings.stratz_token),
+    )
 
     handlers = ApplicationJobHandlers(
         JobHandlerDependencies(
@@ -181,6 +189,7 @@ async def run() -> None:
             dltv_bootstrap=dltv_bootstrap,
             historical_team_resolver=HistoricalTeamResolver(raw_events),
             historical_sync=historical_sync,
+            historical_primary=stratz_history,
             historical_repository=historical_repository,
             historical_features=historical_features,
             opendota=opendota,
@@ -240,6 +249,12 @@ async def run() -> None:
                         select(CanonicalSeries.id).where(
                             CanonicalSeries.scheduled_at >= now - timedelta(hours=12),
                             CanonicalSeries.scheduled_at <= now + timedelta(days=2),
+                            select(ProviderMatchMapping.id)
+                            .where(
+                                ProviderMatchMapping.provider == "raybet",
+                                ProviderMatchMapping.canonical_series_id == CanonicalSeries.id,
+                            )
+                            .exists(),
                         )
                     )
                 ).all()
@@ -584,6 +599,49 @@ async def _initialize_dependency_health(
         await health.dependency(
             dependency,
             "UNKNOWN" if provider in ai_provider_names else "ACTION_REQUIRED",
+        )
+
+
+async def _restore_historical_health(
+    health: HealthRegistry,
+    *,
+    session_factory,
+    stratz_configured: bool,
+) -> None:
+    async with session_factory() as session:
+        map_count = await session.scalar(select(func.count()).select_from(HistoricalMapRecord)) or 0
+        player_map_count = (
+            await session.scalar(select(func.count()).select_from(HistoricalPlayerMapRecord)) or 0
+        )
+        latest_history = await session.scalar(select(func.max(HistoricalMapRecord.fetched_at)))
+        stratz_map_count = (
+            await session.scalar(
+                select(func.count())
+                .select_from(HistoricalMapRecord)
+                .where(HistoricalMapRecord.provider == "stratz")
+            )
+            or 0
+        )
+        latest_stratz = await session.scalar(
+            select(func.max(HistoricalMapRecord.fetched_at)).where(
+                HistoricalMapRecord.provider == "stratz"
+            )
+        )
+    if map_count and latest_history is not None:
+        await health.restore_dependency(
+            "HISTORY",
+            "READY",
+            last_success_at=latest_history,
+            maps_stored=map_count,
+            player_maps_stored=player_map_count,
+        )
+    if stratz_configured and stratz_map_count and latest_stratz is not None:
+        await health.restore_dependency(
+            "STRATZ",
+            "DEGRADED",
+            last_success_at=latest_stratz,
+            message="local STRATZ facts restored; live provider not verified since restart",
+            maps_stored=stratz_map_count,
         )
 
 

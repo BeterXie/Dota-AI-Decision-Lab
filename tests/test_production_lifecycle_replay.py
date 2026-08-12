@@ -359,7 +359,6 @@ async def test_production_lifecycle_replay_uses_postgres_and_converges() -> None
             fallback=historical_fallback,
             raw_events=raw_events,
             repository=HistoricalRepository(),
-            concurrency=1,
         )
         async with factory() as session, session.begin():
             sync_results = [
@@ -372,10 +371,10 @@ async def test_production_lifecycle_replay_uses_postgres_and_converges() -> None
                 for team_id in (resolved.team_a_id, resolved.team_b_id)
             ]
             assert all(result.provider == "opendota" for result in sync_results)
-            assert all(result.maps_requested == 1 for result in sync_results)
-            assert all(result.maps_normalized == 1 for result in sync_results)
-            assert all(result.maps_canonicalized == 1 for result in sync_results)
-            assert all(result.provider_fallback_count == 1 for result in sync_results)
+            assert sum(result.maps_requested for result in sync_results) == 1
+            assert sum(result.maps_normalized for result in sync_results) == 1
+            assert sum(result.maps_canonicalized for result in sync_results) == 1
+            assert sum(result.provider_fallback_count for result in sync_results) == 1
             assert all(result.identity_missing_count == 0 for result in sync_results)
             assert historical_primary.team_ids == ["100", "200"]
             assert historical_fallback.team_ids == ["100", "200"]

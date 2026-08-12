@@ -151,12 +151,15 @@ test("shows RayBet series while canonical map identity is pending", async () => 
   expect(await screen.findByRole("heading", { name: "Spirit vs Xtreme Gaming" })).toBeInTheDocument();
   expect(screen.getByText("1.90 / 2.10")).toBeInTheDocument();
   expect(screen.getAllByText("PENDING MAP IDENTITY").length).toBeGreaterThan(0);
-  expect(screen.getByText("RayBet data is available. Decision processing will begin after Valve/DLTV map identity is resolved.")).toBeInTheDocument();
+  expect(screen.getByText("RayBet data and team history prewarm are available. Valve/DLTV map identity is still required for the current roster, draft and live decision modes.")).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "Historical prewarm" })).toBeInTheDocument();
+  expect(screen.getByText("0/2")).toBeInTheDocument();
   expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/maps/"))).toBe(false);
 
   fireEvent.click(screen.getByRole("button", { name: "中文" }));
   expect((await screen.findAllByText("等待地图身份")).length).toBeGreaterThan(0);
-  expect(screen.getByText("RayBet 比赛与赔率数据已到达；解析 Valve/DLTV 地图身份后才会进入决策处理。")).toBeInTheDocument();
+  expect(screen.getByText("RayBet 比赛、赔率与队伍历史预热已开始；当前上场阵容、选人和实时决策仍需解析 Valve/DLTV 地图身份。")).toBeInTheDocument();
+  expect(screen.getByRole("heading", { name: "历史预热" })).toBeInTheDocument();
 });
 
 test("shows bilingual audit evidence for a decision lifecycle", async () => {

@@ -32,3 +32,20 @@ async def test_stratz_posts_to_exact_graphql_endpoint() -> None:
     assert captured["url"] == "https://api.stratz.com/graphql"
     assert result.payload == {"data": {"__typename": "Query"}}
     await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_stratz_client_serializes_requests_through_rate_limit_gate() -> None:
+    calls = 0
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal calls
+        calls += 1
+        return httpx.Response(200, json={"data": {"__typename": "Query"}})
+
+    client = httpx.AsyncClient(transport=httpx.MockTransport(handler))
+    provider = StratzClient("https://api.stratz.com/graphql", "fixture-token", client=client)
+    await provider.execute(operation_name="A", query="query A { __typename }", variables={})
+    await provider.execute(operation_name="B", query="query B { __typename }", variables={})
+    assert calls == 2
+    await client.aclose()

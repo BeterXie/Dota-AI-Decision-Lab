@@ -122,12 +122,17 @@ const messages = {
     invalidTime: "invalid time",
     unknownLatency: "unknown latency",
     unknownTournament: "Unknown tournament",
-    pendingIdentityDescription: "RayBet data is available. Decision processing will begin after Valve/DLTV map identity is resolved.",
+    pendingIdentityDescription: "RayBet data and team history prewarm are available. Valve/DLTV map identity is still required for the current roster, draft and live decision modes.",
     raybetMatchId: "RayBet match ID",
     format: "Format",
     scheduledAt: "Scheduled at",
     lastDiscoveredAt: "Last discovered at",
-    raybetMarkets: "RayBet markets"
+    raybetMarkets: "RayBet markets",
+    historicalPrewarm: "Historical prewarm",
+    teamHistoryReady: "Team history ready",
+    rosterPlayersReady: "Roster players ready",
+    playerHeroReady: "Player-hero ready",
+    waitingForDraftIdentity: "Current roster and player-hero history will populate after validated DLTV draft identity."
   },
   "zh-CN": {
     language: "语言",
@@ -246,12 +251,17 @@ const messages = {
     invalidTime: "时间无效",
     unknownLatency: "延迟未知",
     unknownTournament: "未知赛事",
-    pendingIdentityDescription: "RayBet 比赛与赔率数据已到达；解析 Valve/DLTV 地图身份后才会进入决策处理。",
+    pendingIdentityDescription: "RayBet 比赛、赔率与队伍历史预热已开始；当前上场阵容、选人和实时决策仍需解析 Valve/DLTV 地图身份。",
     raybetMatchId: "RayBet 比赛 ID",
     format: "赛制",
     scheduledAt: "计划时间",
     lastDiscoveredAt: "最近发现时间",
-    raybetMarkets: "RayBet 市场"
+    raybetMarkets: "RayBet 市场",
+    historicalPrewarm: "历史预热",
+    teamHistoryReady: "队伍历史就绪",
+    rosterPlayersReady: "上场选手就绪",
+    playerHeroReady: "选手英雄就绪",
+    waitingForDraftIdentity: "验证 DLTV 选人身份后，才会补齐当前上场选手与 Player-Hero 历史。"
   }
 } as const;
 

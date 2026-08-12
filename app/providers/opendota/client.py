@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime
 from typing import Any
 
@@ -28,6 +29,8 @@ class OpenDotaClient:
             verify=create_system_ssl_context(),
             headers=headers,
         )
+        self._last_request_at: datetime | None = None
+        self._min_request_interval_seconds = 60.0 / 30.0
 
     async def get_team_catalog(self, page: int = 0) -> TimedPayload:
         return await self._get("/teams", params={"page": page})
@@ -105,6 +108,15 @@ class OpenDotaClient:
         return response.model_copy(update={"payload": {"matches": filtered}})
 
     async def _get(self, path: str, *, params: dict[str, Any] | None = None) -> TimedPayload:
+        if self._last_request_at is not None:
+            elapsed = (datetime.now(UTC) - self._last_request_at).total_seconds()
+            if elapsed < self._min_request_interval_seconds:
+                await asyncio.sleep(self._min_request_interval_seconds - elapsed)
+        result = await self._request(path, params=params)
+        self._last_request_at = datetime.now(UTC)
+        return result
+
+    async def _request(self, path: str, *, params: dict[str, Any] | None = None) -> TimedPayload:
         started = datetime.now(UTC)
         response = await self._client.get(path, params=params)
         received = datetime.now(UTC)

@@ -1,4 +1,4 @@
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import uuid4
 
@@ -9,10 +9,12 @@ from starlette.testclient import TestClient
 
 from app.db import Base
 from app.models import (
+    CanonicalMap,
     CanonicalSeries,
     CanonicalTeam,
     ProviderMatchMapping,
     RayBetMatch,
+    TeamRatingSnapshotRecord,
 )
 from app.runtime.health import HealthRegistry
 from app.web.api import create_app
@@ -72,6 +74,7 @@ async def test_match_feed_includes_raybet_series_pending_map_identity() -> None:
         )
         session.add(series)
         await session.flush()
+        historical_cutoff = datetime.now(UTC) - timedelta(hours=1)
         session.add_all(
             (
                 ProviderMatchMapping(
@@ -98,6 +101,35 @@ async def test_match_feed_includes_raybet_series_pending_map_identity() -> None:
                 ),
             )
         )
+        await session.flush()
+        session.add_all(
+            (
+                TeamRatingSnapshotRecord(
+                    canonical_team_id=team_a.id,
+                    rating=1600,
+                    rating_before=1580,
+                    opponent_rating_before=1500,
+                    expected_probability=0.6,
+                    result=1.0,
+                    source_map_id=uuid4(),
+                    knowledge_cutoff=historical_cutoff,
+                    calculated_at=historical_cutoff,
+                    model_version="elo-v1",
+                ),
+                TeamRatingSnapshotRecord(
+                    canonical_team_id=team_b.id,
+                    rating=1500,
+                    rating_before=1510,
+                    opponent_rating_before=1580,
+                    expected_probability=0.4,
+                    result=0.0,
+                    source_map_id=uuid4(),
+                    knowledge_cutoff=historical_cutoff,
+                    calculated_at=historical_cutoff,
+                    model_version="elo-v1",
+                ),
+            )
+        )
     app = create_app(factory, HealthRegistry())
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -115,6 +147,8 @@ async def test_match_feed_includes_raybet_series_pending_map_identity() -> None:
     assert payload[0]["tournament_name"] == "TI15 International"
     assert payload[0]["team_a"] == {"id": str(team_a.id), "name": "Spirit"}
     assert payload[0]["team_b"] == {"id": str(team_b.id), "name": "Xtreme Gaming"}
+    assert payload[0]["historical_prewarm"]["team_strength_ready_count"] == 2
+    assert payload[0]["historical_prewarm"]["player_form_ready_count"] == 0
     await engine.dispose()
 
 
@@ -173,6 +207,52 @@ async def test_match_feed_orders_earliest_scheduled_match_first() -> None:
         payload = (await client.get("/api/matches")).json()
 
     assert [item["team_a"]["name"] for item in payload] == ["Level Up", "Spirit"]
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_match_feed_excludes_maps_created_only_from_historical_providers() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    observed_at = datetime(2026, 8, 12, 4, 0, tzinfo=UTC)
+    async with factory.begin() as session:
+        team_a = CanonicalTeam(name="Historical Team A")
+        team_b = CanonicalTeam(name="Historical Team B")
+        session.add_all((team_a, team_b))
+        await session.flush()
+        series = CanonicalSeries(
+            team_a_id=team_a.id,
+            team_b_id=team_b.id,
+            scheduled_at=observed_at,
+        )
+        session.add(series)
+        await session.flush()
+        historical_map = CanonicalMap(
+            series_id=series.id,
+            map_number=1,
+            scheduled_at=observed_at,
+        )
+        session.add(historical_map)
+        await session.flush()
+        session.add(
+            ProviderMatchMapping(
+                provider="stratz",
+                provider_match_id="8936072794",
+                canonical_series_id=series.id,
+                canonical_map_id=historical_map.id,
+                resolved_by="VALVE_MATCH_ID",
+                confidence=1.0,
+            )
+        )
+    app = create_app(factory, HealthRegistry())
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/api/matches")
+
+    assert response.status_code == 200
+    assert response.json() == []
     await engine.dispose()
 
 

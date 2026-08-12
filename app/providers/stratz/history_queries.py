@@ -3,15 +3,24 @@ from typing import Any
 
 from app.domain.history import HistoricalMap, HistoricalMatchBundle, PlayerHistoricalMap
 
-NORMALIZER_VERSION = "stratz-match-v1"
+NORMALIZER_VERSION = "stratz-match-v2"
 
 TEAM_MATCHES_QUERY = """
-query HistoricalTeamMatches($teamId: Long!, $take: Int!) {
-  team(id: $teamId) {
-    matches(request: { take: $take }) {
+query HistoricalTeamMatches($teamId: Int!, $take: Int!, $skip: Int!) {
+  team(teamId: $teamId) {
+    matches(request: { take: $take, skip: $skip }) {
       id
       startDateTime
     }
+  }
+}
+"""
+
+TEAM_IDENTITY_QUERY = """
+query HistoricalTeamIdentity($teamIds: [Int!]!) {
+  teams(teamIds: $teamIds) {
+    id
+    name
   }
 }
 """
@@ -41,7 +50,7 @@ query HistoricalMatch($matchId: Long!) {
       heroDamage
       towerDamage
       networth
-      stats { imp }
+      imp
     }
   }
 }
@@ -86,7 +95,7 @@ def normalize_match(payload: dict[str, Any], *, fetched_at: datetime) -> Histori
         if not isinstance(item, dict):
             warnings.append("HISTORICAL_PLAYER_PAYLOAD_INVALID")
             continue
-        account_id = _int(item.get("steamAccountId"))
+        account_id = _bounded_int(item.get("steamAccountId"), maximum=9_223_372_036_854_775_807)
         hero_id = _int(item.get("heroId"))
         is_radiant = item.get("isRadiant")
         if account_id is None or hero_id is None or not isinstance(is_radiant, bool):
@@ -117,7 +126,9 @@ def normalize_match(payload: dict[str, Any], *, fetched_at: datetime) -> Histori
                 hero_damage=_float(item.get("heroDamage")),
                 tower_damage=_float(item.get("towerDamage")),
                 networth=_float(item.get("networth")),
-                impact=_float(stats.get("imp")),
+                impact=_float(item.get("imp"))
+                if item.get("imp") is not None
+                else _float(stats.get("imp")),
             )
         )
     advanced = bool(players) and any(
@@ -162,6 +173,11 @@ def _datetime(value: object) -> datetime | None:
 
 def _int(value: object) -> int | None:
     return value if isinstance(value, int) and not isinstance(value, bool) else None
+
+
+def _bounded_int(value: object, *, maximum: int) -> int | None:
+    parsed = _int(value)
+    return parsed if parsed is not None and abs(parsed) <= maximum else None
 
 
 def _float(value: object) -> float | None:

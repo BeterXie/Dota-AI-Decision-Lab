@@ -260,6 +260,8 @@ function MatchButton({
 function PendingIdentityWorkspace({ match }: { match: MapSummary }) {
   const { locale, t } = useI18n();
   const title = `${match.team_a?.name ?? t("unknownTeam")} ${t("versus")} ${match.team_b?.name ?? t("unknownTeam")}`;
+  const historyCoverage = match.historical_prewarm ?? match.latest_snapshot?.history_coverage;
+  const teamHistoryReady = Number(historyCoverage?.team_strength_ready_count ?? 0);
   return (
     <section className="pending-identity-workspace">
       <header className="pending-identity-header">
@@ -275,6 +277,28 @@ function PendingIdentityWorkspace({ match }: { match: MapSummary }) {
         <Metric label={t("format")} value={match.round ?? t("unknown")} />
         <Metric label={t("scheduledAt")} value={formatDateTime(match.scheduled_at, locale)} />
         <Metric label={t("lastDiscoveredAt")} value={formatDateTime(match.provider_observed_at, locale)} />
+      </div>
+      <div className="pending-history-section">
+        <PanelHeading
+          title={t("historicalPrewarm")}
+          status={teamHistoryReady === 2 ? "READY" : "UNKNOWN"}
+        />
+        <div className="audit-grid pending-history-metrics">
+          <Metric label={t("teamHistoryReady")} value={`${teamHistoryReady}/2`} />
+          <Metric
+            label={t("rosterPlayersReady")}
+            value={`${metricText(historyCoverage?.player_form_ready_count, locale)}/10`}
+          />
+          <Metric
+            label={t("playerHeroReady")}
+            value={`${metricText(historyCoverage?.player_hero_ready_count, locale)}/10`}
+          />
+          <Metric
+            label={t("knowledgeCutoff")}
+            value={formatDateTime(stringValue(historyCoverage?.latest_knowledge_cutoff), locale)}
+          />
+        </div>
+        <p className="pending-history-note">{t("waitingForDraftIdentity")}</p>
       </div>
       <div className="pending-market-section">
         <PanelHeading title={t("raybetMarkets")} status={match.market.length ? "READY" : "UNKNOWN"} />

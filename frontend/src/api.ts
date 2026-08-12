@@ -162,6 +162,12 @@ export interface MapSummary {
     } | null;
   } | null;
   decisions: AiDecision[];
+  historical_prewarm?: {
+    team_strength_ready_count: number;
+    player_form_ready_count: number;
+    player_hero_ready_count: number;
+    latest_knowledge_cutoff: string | null;
+  };
 }
 
 export interface MapDetail extends MapSummary {
@@ -235,7 +241,10 @@ export const queryKeys = {
 };
 
 async function getJson<T>(path: string): Promise<T> {
-  const response = await fetch(path, { headers: { Accept: "application/json" } });
+  const response = await fetch(path, {
+    cache: "no-store",
+    headers: { Accept: "application/json" }
+  });
   if (!response.ok) {
     throw new Error(`${response.status} ${response.statusText}`);
   }

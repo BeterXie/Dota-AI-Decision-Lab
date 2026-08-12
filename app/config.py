@@ -26,7 +26,7 @@ class Settings(BaseSettings):
     opendota_api_key: str | None = None
     historical_refresh_seconds: float = 1_200.0
     historical_prewarm_maps: int = 100
-    historical_fetch_concurrency: int = 5
+    historical_sync_batch_maps: int = 20
 
     openai_api_key: str | None = None
     openai_base_url: str = "https://api.openai.com/v1"

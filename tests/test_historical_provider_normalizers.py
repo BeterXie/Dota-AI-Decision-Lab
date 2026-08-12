@@ -2,7 +2,9 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+from app.canonical import content_digest
 from app.providers.opendota.normalizer import normalize_match as normalize_opendota
+from app.providers.stratz.history_queries import MATCH_QUERY, TEAM_MATCHES_QUERY
 from app.providers.stratz.history_queries import normalize_match as normalize_stratz
 
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -39,3 +41,15 @@ def test_stratz_match_normalizes_imp_and_same_match_identity() -> None:
     assert bundle.players[0].impact == 24.5
     assert bundle.players[1].gpm is None
     assert bundle.players[1].won is False
+
+
+def test_stratz_queries_use_current_team_and_player_contract() -> None:
+    assert "team(teamId: $teamId)" in TEAM_MATCHES_QUERY
+    assert "skip: $skip" in TEAM_MATCHES_QUERY
+    assert "imp" in MATCH_QUERY
+    assert "stats { imp }" not in MATCH_QUERY
+
+
+def test_raw_digest_preserves_large_integer_deterministically() -> None:
+    payload = {"steamAccountId": 13_143_526_280_079_059_000}
+    assert content_digest(payload) == content_digest({"steamAccountId": "13143526280079059000"})

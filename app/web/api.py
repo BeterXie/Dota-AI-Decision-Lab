@@ -12,6 +12,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.history.service import HistoricalIntelligenceService
 from app.models import (
     AiDecisionRecord,
     CanonicalMap,
@@ -69,7 +70,21 @@ def create_app(
             map_records = list(
                 (
                     await session.scalars(
-                        select(CanonicalMap).order_by(CanonicalMap.scheduled_at.desc()).limit(24)
+                        select(CanonicalMap)
+                        .where(
+                            select(ProviderMatchMapping.id)
+                            .where(
+                                ProviderMatchMapping.provider == "raybet",
+                                or_(
+                                    ProviderMatchMapping.canonical_map_id == CanonicalMap.id,
+                                    ProviderMatchMapping.canonical_series_id
+                                    == CanonicalMap.series_id,
+                                ),
+                            )
+                            .exists()
+                        )
+                        .order_by(CanonicalMap.scheduled_at.desc())
+                        .limit(24)
                     )
                 ).all()
             )
@@ -534,6 +549,32 @@ async def _pending_series_payload(session: AsyncSession, series: CanonicalSeries
         latest_odds.values(),
         key=lambda item: (team_order.get(item.selection_team_id, 2), item.odds_id),
     )
+    snapshot = await session.scalar(
+        select(DecisionSnapshotRecord)
+        .where(
+            DecisionSnapshotRecord.canonical_map_id.is_(None),
+            DecisionSnapshotRecord.canonical_payload["identity"]["series_id"].as_string()
+            == str(series.id),
+        )
+        .order_by(DecisionSnapshotRecord.decision_at.desc())
+        .limit(1)
+    )
+    snapshot_history = snapshot.canonical_payload.get("history", {}) if snapshot else {}
+    snapshot_market = snapshot.canonical_payload.get("market", {}) if snapshot else {}
+    snapshot_quality = snapshot.canonical_payload.get("quality", {}) if snapshot else {}
+    historical = HistoricalIntelligenceService()
+    history_as_of = datetime.now(UTC)
+    team_a_history = await historical.get_team_payload(
+        session, series.team_a_id, as_of=history_as_of
+    )
+    team_b_history = await historical.get_team_payload(
+        session, series.team_b_id, as_of=history_as_of
+    )
+    history_cutoffs = [
+        item["knowledge_cutoff"]
+        for item in (team_a_history, team_b_history)
+        if item["knowledge_cutoff"] is not None
+    ]
     observed_at = datetime.now(UTC)
     return {
         "entity_type": "SERIES",
@@ -572,8 +613,33 @@ async def _pending_series_payload(session: AsyncSession, series: CanonicalSeries
         "draft": None,
         "live": None,
         "sync": None,
-        "latest_snapshot": None,
+        "latest_snapshot": (
+            {
+                "id": snapshot.id,
+                "decision_at": snapshot.decision_at,
+                "created_at": snapshot.created_at,
+                "mode": snapshot.mode,
+                "snapshot_hash": snapshot.snapshot_hash,
+                "quality": snapshot_quality,
+                "market_quality": (
+                    snapshot_market.get("quality") if isinstance(snapshot_market, dict) else None
+                ),
+                "history_coverage": (
+                    snapshot_history.get("coverage") if isinstance(snapshot_history, dict) else None
+                ),
+            }
+            if snapshot
+            else None
+        ),
         "decisions": [],
+        "historical_prewarm": {
+            "team_strength_ready_count": sum(
+                item["base_rating"] is not None for item in (team_a_history, team_b_history)
+            ),
+            "player_form_ready_count": 0,
+            "player_hero_ready_count": 0,
+            "latest_knowledge_cutoff": max(history_cutoffs) if history_cutoffs else None,
+        },
     }
 
 

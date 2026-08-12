@@ -1,4 +1,3 @@
-import asyncio
 from dataclasses import dataclass
 from datetime import datetime
 from uuid import UUID
@@ -7,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.history.repository import HistoricalRepository
-from app.models import ProviderTeamMapping
+from app.models import HistoricalMapRecord, ProviderTeamMapping
 from app.providers.history import HistoricalProvider
 from app.providers.opendota.client import OpenDotaClient
 from app.providers.stratz.history_queries import team_match_ids
@@ -22,6 +21,7 @@ class HistoricalSyncResult:
     maps_normalized: int
     maps_canonicalized: int
     maps_eligible_team_rating: int
+    maps_eligible_player_form: int
     maps_advanced_ready: int
     identity_missing_count: int
     provider_fallback_count: int
@@ -37,15 +37,15 @@ class HistoricalSyncService:
         fallback: OpenDotaClient,
         raw_events: RawEventRepository,
         repository: HistoricalRepository,
-        concurrency: int,
+        batch_size: int = 20,
     ) -> None:
-        if concurrency <= 0:
-            raise ValueError("historical fetch concurrency must be positive")
+        if batch_size <= 0:
+            raise ValueError("historical sync batch size must be positive")
         self._primary = primary
         self._fallback = fallback
         self._raw_events = raw_events
         self._repository = repository
-        self._concurrency = concurrency
+        self._batch_size = batch_size
 
     async def sync_team(
         self,
@@ -110,21 +110,35 @@ class HistoricalSyncService:
             )
             match_ids = _match_ids("opendota", response.payload, before, limit)
 
-        semaphore = asyncio.Semaphore(self._concurrency)
-
-        async def fetch(match_id: int):
-            async with semaphore:
-                return await self._fetch_match(
-                    match_id,
-                    allow_primary=not primary_identity_missing,
+        existing_match_ids = set(
+            (
+                await session.scalars(
+                    select(HistoricalMapRecord.provider_match_id).where(
+                        HistoricalMapRecord.provider == list_provider.name,
+                        HistoricalMapRecord.provider_match_id.in_(
+                            [str(match_id) for match_id in match_ids]
+                        ),
+                    )
                 )
+            ).all()
+        )
+        match_ids = [match_id for match_id in match_ids if str(match_id) not in existing_match_ids][
+            : self._batch_size
+        ]
 
-        fetched = await asyncio.gather(*(fetch(match_id) for match_id in match_ids))
+        fetched = [
+            await self._fetch_match(
+                match_id,
+                allow_primary=not primary_identity_missing,
+            )
+            for match_id in match_ids
+        ]
         persisted = 0
         fallback_count = 0
         normalized = 0
         canonicalized = 0
         eligible_team_rating = 0
+        eligible_player_form = 0
         advanced_ready = 0
         identity_missing = 0
         conflict_count = 0
@@ -157,6 +171,7 @@ class HistoricalSyncService:
             eligible_team_rating += int(canonical_teams == 2 and fact.winner_team_id is not None)
             identity_missing += int(canonical_teams < 2)
             advanced_ready += int(bundle.advanced_available)
+            eligible_player_form += int(bundle.advanced_available and bool(bundle.players))
             conflict_count += int(fact.sync_status == "DATA_CONFLICT")
             fallback_count += int(provider is self._fallback and self._primary is not None)
             warnings.extend(bundle.warnings)
@@ -167,6 +182,7 @@ class HistoricalSyncService:
             maps_normalized=normalized,
             maps_canonicalized=canonicalized,
             maps_eligible_team_rating=eligible_team_rating,
+            maps_eligible_player_form=eligible_player_form,
             maps_advanced_ready=advanced_ready,
             identity_missing_count=identity_missing,
             provider_fallback_count=fallback_count,

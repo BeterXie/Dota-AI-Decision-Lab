@@ -30,6 +30,10 @@ EVENT_JOB_MAP: dict[DomainEventType, JobType] = {
     DomainEventType.EVALUATION_REQUIRED: JobType.EVALUATE_DECISION,
 }
 
+EVENT_ADDITIONAL_JOBS: dict[DomainEventType, tuple[JobType, ...]] = {
+    DomainEventType.MARKET_DISCOVERED: (JobType.SYNC_HISTORICAL,),
+}
+
 
 def utc_now() -> datetime:
     return datetime.now(UTC)
@@ -60,6 +64,13 @@ class DomainEventDispatcher:
                 dedupe_key=f"event:{record.id}",
                 payload={**record.payload, "domain_event_id": str(record.id)},
             )
+            for additional_job_type in EVENT_ADDITIONAL_JOBS.get(event_type, ()):
+                await self._jobs.enqueue(
+                    session,
+                    job_type=additional_job_type,
+                    dedupe_key=f"event:{record.id}:{additional_job_type.value}",
+                    payload={**record.payload, "domain_event_id": str(record.id)},
+                )
             if event_type is DomainEventType.MAP_STARTED:
                 await self._enqueue_closing_captures(session, record)
             record.processed_at = utc_now()
