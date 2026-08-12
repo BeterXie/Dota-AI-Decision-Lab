@@ -83,13 +83,22 @@ function Dashboard() {
   });
 
   useEffect(() => {
-    if (!selectedMapId && maps.data?.length) setSelectedMapId(maps.data[0].id);
+    if (!maps.data?.length) {
+      setSelectedMapId(null);
+      return;
+    }
+    if (!maps.data.some((match) => match.id === selectedMapId)) {
+      setSelectedMapId(maps.data[0].id);
+    }
   }, [maps.data, selectedMapId]);
 
+  const selectedMatch = maps.data?.find((match) => match.id === selectedMapId);
+  const selectedCanonicalMapId = selectedMatch?.canonical_map_id ?? null;
+
   const detail = useQuery({
-    queryKey: selectedMapId ? queryKeys.map(selectedMapId) : ["map", "none"],
-    queryFn: () => fetchMap(selectedMapId!),
-    enabled: Boolean(selectedMapId),
+    queryKey: selectedCanonicalMapId ? queryKeys.map(selectedCanonicalMapId) : ["map", "none"],
+    queryFn: () => fetchMap(selectedCanonicalMapId!),
+    enabled: Boolean(selectedCanonicalMapId),
     refetchInterval: 4000
   });
 
@@ -157,7 +166,9 @@ function Dashboard() {
 
         <main className="workspace">
           <ReadinessStrip runtime={runtime.data} loading={runtime.isLoading} />
-          {detail.isLoading && selectedMapId ? (
+          {selectedMatch?.identity_status === "PENDING_MAP_IDENTITY" ? (
+            <PendingIdentityWorkspace match={selectedMatch} />
+          ) : detail.isLoading && selectedCanonicalMapId ? (
             <WorkspaceSkeleton />
           ) : detail.isError ? (
             <InlineNotification
@@ -220,6 +231,7 @@ function MatchButton({
 }) {
   const { locale, t } = useI18n();
   const title = `${map.team_a?.name ?? t("unknownTeam")} ${t("versus")} ${map.team_b?.name ?? t("unknownTeam")}`;
+  const headlineMarket = marketHeadline(map);
   return (
     <button
       type="button"
@@ -228,15 +240,70 @@ function MatchButton({
     >
       <span className="match-button-title">{title}</span>
       <span className="match-button-meta">
-        {t("map")} {map.map_number ?? "?"}
-        <span>{translateStatus(map.latest_snapshot?.mode ?? "NO_SNAPSHOT", locale)}</span>
+        {map.entity_type === "MAP"
+          ? `${t("map")} ${map.map_number ?? "?"}`
+          : map.round ?? t("series")}
+        <span>{translateStatus(
+          map.identity_status === "PENDING_MAP_IDENTITY"
+            ? map.identity_status
+            : map.latest_snapshot?.mode ?? "NO_SNAPSHOT",
+          locale
+        )}</span>
       </span>
       <span className="match-button-market">
-        {map.market.length
-          ? map.market.map((item) => Number(item.price).toFixed(2)).join(" / ")
-          : t("marketUnavailable")}
+        {headlineMarket ?? t("marketUnavailable")}
       </span>
     </button>
+  );
+}
+
+function PendingIdentityWorkspace({ match }: { match: MapSummary }) {
+  const { locale, t } = useI18n();
+  const title = `${match.team_a?.name ?? t("unknownTeam")} ${t("versus")} ${match.team_b?.name ?? t("unknownTeam")}`;
+  return (
+    <section className="pending-identity-workspace">
+      <header className="pending-identity-header">
+        <div>
+          <span className="eyebrow">{match.tournament_name ?? t("unknownTournament")}</span>
+          <h1>{title}</h1>
+          <p>{t("pendingIdentityDescription")}</p>
+        </div>
+        <StatusLabel status={match.identity_status} />
+      </header>
+      <div className="pending-identity-facts">
+        <Metric label={t("raybetMatchId")} value={String(match.provider_match_id ?? t("unknown"))} />
+        <Metric label={t("format")} value={match.round ?? t("unknown")} />
+        <Metric label={t("scheduledAt")} value={formatDateTime(match.scheduled_at, locale)} />
+        <Metric label={t("lastDiscoveredAt")} value={formatDateTime(match.provider_observed_at, locale)} />
+      </div>
+      <div className="pending-market-section">
+        <PanelHeading title={t("raybetMarkets")} status={match.market.length ? "READY" : "UNKNOWN"} />
+        {match.market.length ? (
+          <table className="cds--data-table cds--data-table--sm">
+            <thead>
+              <tr>
+                <th>{t("selection")}</th>
+                <th>{t("market")}</th>
+                <th>{t("odds")}</th>
+                <th>{t("observed")}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {match.market.slice(0, 12).map((item) => (
+                <tr key={item.odds_id}>
+                  <td>{teamNameForSelection(match, item.selection_team_id, t("unknown"))}</td>
+                  <td>{[item.market_type, item.match_stage].filter(Boolean).join(" / ") || t("unknown")}</td>
+                  <td>{Number(item.price).toFixed(2)}</td>
+                  <td>{formatDateTime(item.received_at, locale)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ) : (
+          <PanelEmpty text={t("marketUnavailable")} />
+        )}
+      </div>
+    </section>
   );
 }
 
@@ -900,7 +967,7 @@ function statusTone(status: string): string {
   if (["FAILED", "FAILED_TERMINAL", "ACTION_REQUIRED", "UNSAFE", "MISSING"].includes(status)) {
     return "negative";
   }
-  if (["DEGRADED", "CAUTION", "RESTARTING", "PARTIAL", "POST_DRAFT"].includes(status)) {
+  if (["DEGRADED", "CAUTION", "RESTARTING", "PARTIAL", "POST_DRAFT", "PENDING_MAP_IDENTITY"].includes(status)) {
     return "warning";
   }
   return "neutral";
@@ -955,6 +1022,58 @@ function formatTime(value: string | null | undefined, locale: Locale): string {
   if (!value) return translate("notObserved", locale);
   const date = new Date(value);
   return Number.isNaN(date.valueOf()) ? translate("invalidTime", locale) : date.toLocaleTimeString(locale);
+}
+
+function formatDateTime(value: string | null | undefined, locale: Locale): string {
+  if (!value) return translate("notObserved", locale);
+  const date = new Date(value);
+  return Number.isNaN(date.valueOf())
+    ? translate("invalidTime", locale)
+    : date.toLocaleString(locale);
+}
+
+function teamNameForSelection(
+  match: MapSummary,
+  selectionTeamId: string | null,
+  fallback: string
+): string {
+  if (selectionTeamId === match.team_a?.id) return match.team_a.name;
+  if (selectionTeamId === match.team_b?.id) return match.team_b.name;
+  return fallback;
+}
+
+function marketHeadline(match: MapSummary): string | null {
+  const teamAId = match.team_a?.id;
+  const teamBId = match.team_b?.id;
+  if (!teamAId || !teamBId) return null;
+  const groups = new Map<string, typeof match.market>();
+  for (const item of match.market) {
+    if (item.selection_team_id !== teamAId && item.selection_team_id !== teamBId) continue;
+    const key = `${item.market_type ?? ""}\u0000${item.match_stage ?? ""}`;
+    const group = groups.get(key) ?? [];
+    group.push(item);
+    groups.set(key, group);
+  }
+  const candidates = [...groups.entries()]
+    .filter(([, group]) =>
+      group.some((item) => item.selection_team_id === teamAId)
+      && group.some((item) => item.selection_team_id === teamBId)
+    )
+    .sort(([left], [right]) => marketPriority(left) - marketPriority(right));
+  const selected = candidates[0]?.[1];
+  if (!selected) return null;
+  const priceA = selected.find((item) => item.selection_team_id === teamAId)?.price;
+  const priceB = selected.find((item) => item.selection_team_id === teamBId)?.price;
+  return priceA != null && priceB != null
+    ? `${Number(priceA).toFixed(2)} / ${Number(priceB).toFixed(2)}`
+    : null;
+}
+
+function marketPriority(key: string): number {
+  const normalized = key.toLowerCase();
+  if (normalized.startsWith("winner\u0000final")) return 0;
+  if (normalized.startsWith("winner\u0000")) return 1;
+  return 2;
 }
 
 function objectValue(value: unknown): Record<string, unknown> | null {

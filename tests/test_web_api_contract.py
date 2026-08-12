@@ -1,10 +1,19 @@
+from datetime import UTC, datetime
 from pathlib import Path
+from uuid import uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+from starlette.testclient import TestClient
 
 from app.db import Base
+from app.models import (
+    CanonicalSeries,
+    CanonicalTeam,
+    ProviderMatchMapping,
+    RayBetMatch,
+)
 from app.runtime.health import HealthRegistry
 from app.web.api import create_app
 
@@ -24,14 +33,14 @@ async def test_operational_api_contract_without_business_data(tmp_path: Path) ->
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         process = await client.get("/health")
         readiness = await client.get("/ready")
-        maps = await client.get("/api/maps")
+        matches = await client.get("/api/matches")
         jobs = await client.get("/api/jobs/summary")
         missing = await client.get("/api/maps/11111111-1111-1111-1111-111111111111")
 
     assert process.status_code == 200
     assert readiness.status_code == 503
     assert readiness.json()["overall"] == "ACTION_REQUIRED"
-    assert maps.status_code == 200 and maps.json() == []
+    assert matches.status_code == 200 and matches.json() == []
     assert jobs.status_code == 200
     assert jobs.json() == {
         "by_status": {},
@@ -41,3 +50,82 @@ async def test_operational_api_contract_without_business_data(tmp_path: Path) ->
     }
     assert missing.status_code == 404
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_match_feed_includes_raybet_series_pending_map_identity() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    observed_at = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
+    async with factory.begin() as session:
+        team_a = CanonicalTeam(name="Spirit")
+        team_b = CanonicalTeam(name="Xtreme Gaming")
+        session.add_all((team_a, team_b))
+        await session.flush()
+        series = CanonicalSeries(
+            team_a_id=team_a.id,
+            team_b_id=team_b.id,
+            best_of=3,
+            scheduled_at=observed_at,
+        )
+        session.add(series)
+        await session.flush()
+        session.add_all(
+            (
+                ProviderMatchMapping(
+                    provider="raybet",
+                    provider_match_id="38423260",
+                    canonical_series_id=series.id,
+                    resolved_by="PROVIDER_DISCOVERY",
+                    confidence=1.0,
+                ),
+                RayBetMatch(
+                    provider_match_id=38423260,
+                    game_id=4,
+                    tournament_id=100,
+                    tournament_name="TI15 International",
+                    team_a_provider_id=1,
+                    team_a_name="Spirit",
+                    team_b_provider_id=2,
+                    team_b_name="Xtreme Gaming",
+                    round="bo3",
+                    raw_status=1,
+                    scheduled_at=observed_at,
+                    observed_at=observed_at,
+                    raw_event_id=uuid4(),
+                ),
+            )
+        )
+    app = create_app(factory, HealthRegistry())
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/api/matches")
+
+    assert response.status_code == 200
+    payload = response.json()
+    assert len(payload) == 1
+    assert payload[0]["entity_type"] == "SERIES"
+    assert payload[0]["identity_status"] == "PENDING_MAP_IDENTITY"
+    assert payload[0]["series_id"] == str(series.id)
+    assert payload[0]["canonical_map_id"] is None
+    assert payload[0]["valve_match_id"] is None
+    assert payload[0]["provider_match_id"] == 38423260
+    assert payload[0]["tournament_name"] == "TI15 International"
+    assert payload[0]["team_a"] == {"id": str(team_a.id), "name": "Spirit"}
+    assert payload[0]["team_b"] == {"id": str(team_b.id), "name": "Xtreme Gaming"}
+    await engine.dispose()
+
+
+def test_status_websocket_serializes_runtime_timestamps(tmp_path: Path) -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    health = HealthRegistry()
+    app = create_app(factory, health, frontend_dist=tmp_path / "missing")
+
+    with TestClient(app) as client:
+        with client.websocket_connect("/ws/status") as websocket:
+            payload = websocket.receive_json()
+
+    assert isinstance(payload["observed_at"], str)

@@ -4,6 +4,7 @@ from pathlib import Path
 from uuid import UUID
 
 from fastapi import FastAPI, HTTPException, Response, WebSocket, WebSocketDisconnect
+from fastapi.encoders import jsonable_encoder
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
@@ -26,6 +27,8 @@ from app.models import (
     MapResultEvidenceRecord,
     MapResultRecord,
     OddsObservationRecord,
+    ProviderMatchMapping,
+    RayBetMatch,
 )
 from app.runtime.health import HealthRegistry
 from app.time import elapsed_seconds
@@ -60,17 +63,42 @@ def create_app(
     async def runtime() -> dict:
         return await health.snapshot()
 
-    @app.get("/api/maps")
-    async def maps() -> list[dict]:
+    @app.get("/api/matches")
+    async def matches() -> list[dict]:
         async with session_factory() as session:
-            records = list(
+            map_records = list(
                 (
                     await session.scalars(
                         select(CanonicalMap).order_by(CanonicalMap.scheduled_at.desc()).limit(24)
                     )
                 ).all()
             )
-            return [await _map_payload(session, record) for record in records]
+            pending_series = list(
+                (
+                    await session.scalars(
+                        select(CanonicalSeries)
+                        .where(
+                            ~select(CanonicalMap.id)
+                            .where(CanonicalMap.series_id == CanonicalSeries.id)
+                            .exists()
+                        )
+                        .order_by(CanonicalSeries.scheduled_at.desc())
+                        .limit(24)
+                    )
+                ).all()
+            )
+            payloads = [await _map_payload(session, record) for record in map_records]
+            for series in pending_series:
+                payload = await _pending_series_payload(session, series)
+                if payload is not None:
+                    payloads.append(payload)
+            payloads.sort(
+                key=lambda item: item["scheduled_at"]
+                or item.get("provider_observed_at")
+                or datetime.min.replace(tzinfo=UTC),
+                reverse=True,
+            )
+            return payloads[:24]
 
     @app.get("/api/maps/{canonical_map_id}")
     async def map_detail(canonical_map_id: UUID) -> dict:
@@ -171,7 +199,7 @@ def create_app(
         await websocket.accept()
         try:
             while True:
-                await websocket.send_json(await health.snapshot())
+                await websocket.send_json(jsonable_encoder(await health.snapshot()))
                 await asyncio.sleep(2)
         except WebSocketDisconnect:
             return
@@ -201,6 +229,7 @@ async def _map_payload(
     )
     team_a = await session.get(CanonicalTeam, series.team_a_id) if series else None
     team_b = await session.get(CanonicalTeam, series.team_b_id) if series else None
+    raybet_match = await _latest_raybet_match(session, canonical_map.series_id)
     odds = list(
         (
             await session.scalars(
@@ -309,11 +338,19 @@ async def _map_payload(
     snapshot_market = snapshot.canonical_payload.get("market", {}) if snapshot is not None else {}
     snapshot_quality = snapshot.canonical_payload.get("quality", {}) if snapshot is not None else {}
     payload = {
+        "entity_type": "MAP",
+        "identity_status": "RESOLVED",
         "id": canonical_map.id,
         "series_id": canonical_map.series_id,
+        "canonical_map_id": canonical_map.id,
         "map_number": canonical_map.map_number,
         "valve_match_id": canonical_map.valve_match_id,
         "scheduled_at": canonical_map.scheduled_at,
+        "provider_match_id": raybet_match.provider_match_id if raybet_match else None,
+        "tournament_name": raybet_match.tournament_name if raybet_match else None,
+        "round": raybet_match.round if raybet_match else None,
+        "raw_status": raybet_match.raw_status if raybet_match else None,
+        "provider_observed_at": raybet_match.observed_at if raybet_match else None,
         "team_a": {"id": team_a.id, "name": team_a.name} if team_a else None,
         "team_b": {"id": team_b.id, "name": team_b.name} if team_b else None,
         "market": [
@@ -469,6 +506,101 @@ async def _map_payload(
             for item in result_evidence
         ]
     return payload
+
+
+async def _pending_series_payload(
+    session: AsyncSession, series: CanonicalSeries
+) -> dict | None:
+    raybet_match = await _latest_raybet_match(session, series.id)
+    if raybet_match is None:
+        return None
+    team_a = await session.get(CanonicalTeam, series.team_a_id)
+    team_b = await session.get(CanonicalTeam, series.team_b_id)
+    odds = list(
+        (
+            await session.scalars(
+                select(OddsObservationRecord)
+                .where(OddsObservationRecord.canonical_series_id == series.id)
+                .order_by(OddsObservationRecord.received_at.desc())
+                .limit(64)
+            )
+        ).all()
+    )
+    latest_odds: dict[int, OddsObservationRecord] = {}
+    for observation in odds:
+        latest_odds.setdefault(observation.odds_id, observation)
+    team_order = {
+        team_id: index
+        for index, team_id in enumerate((series.team_a_id, series.team_b_id))
+    }
+    current_market = sorted(
+        latest_odds.values(),
+        key=lambda item: (team_order.get(item.selection_team_id, 2), item.odds_id),
+    )
+    observed_at = datetime.now(UTC)
+    return {
+        "entity_type": "SERIES",
+        "identity_status": "PENDING_MAP_IDENTITY",
+        "id": series.id,
+        "series_id": series.id,
+        "canonical_map_id": None,
+        "map_number": None,
+        "valve_match_id": None,
+        "scheduled_at": series.scheduled_at,
+        "provider_match_id": raybet_match.provider_match_id,
+        "tournament_name": raybet_match.tournament_name,
+        "round": raybet_match.round,
+        "raw_status": raybet_match.raw_status,
+        "provider_observed_at": raybet_match.observed_at,
+        "team_a": {"id": team_a.id, "name": team_a.name} if team_a else None,
+        "team_b": {"id": team_b.id, "name": team_b.name} if team_b else None,
+        "market": [
+            {
+                "odds_id": item.odds_id,
+                "selection_team_id": item.selection_team_id,
+                "price": item.price,
+                "fair_probability": item.fair_probability,
+                "raw_status": item.raw_status,
+                "received_at": item.received_at,
+                "normalized_status": item.normalized_status,
+                "metadata_version": item.metadata_version,
+                "provider_updated_at": item.provider_updated_at,
+                "age_seconds": elapsed_seconds(observed_at, item.received_at),
+                "market_type": item.market_type,
+                "match_stage": item.match_stage,
+            }
+            for item in current_market
+        ],
+        "market_quality": None,
+        "draft": None,
+        "live": None,
+        "sync": None,
+        "latest_snapshot": None,
+        "decisions": [],
+    }
+
+
+async def _latest_raybet_match(
+    session: AsyncSession, series_id: UUID | None
+) -> RayBetMatch | None:
+    if series_id is None:
+        return None
+    provider_match_id = await session.scalar(
+        select(ProviderMatchMapping.provider_match_id)
+        .where(
+            ProviderMatchMapping.provider == "raybet",
+            ProviderMatchMapping.canonical_series_id == series_id,
+        )
+        .limit(1)
+    )
+    if provider_match_id is None:
+        return None
+    return await session.scalar(
+        select(RayBetMatch)
+        .where(RayBetMatch.provider_match_id == int(provider_match_id))
+        .order_by(RayBetMatch.observed_at.desc())
+        .limit(1)
+    )
 
 
 def _decision_payload(record: AiDecisionRecord) -> dict:

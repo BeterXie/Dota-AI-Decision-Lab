@@ -202,6 +202,54 @@ textarea {
   min-width: 0;
 }
 
+.pending-identity-workspace {
+  min-width: 0;
+}
+
+.pending-identity-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 2rem;
+  padding: 2rem;
+  border-bottom: 1px solid #393939;
+}
+
+.pending-identity-header h1 {
+  margin: 0.4rem 0 0.6rem;
+  font-size: 1.75rem;
+  line-height: 1.2;
+}
+
+.pending-identity-header p {
+  max-width: 48rem;
+  margin: 0;
+  color: #a8a8a8;
+  line-height: 1.5;
+}
+
+.eyebrow {
+  color: #78a9ff;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.75rem;
+}
+
+.pending-identity-facts {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border-bottom: 1px solid #393939;
+}
+
+.pending-identity-facts .metric {
+  min-height: 5rem;
+  padding: 1rem 2rem;
+  border-right: 1px solid #393939;
+}
+
+.pending-market-section {
+  padding: 1.5rem 2rem 2rem;
+}
+
 .readiness-strip {
   display: grid;
   grid-template-columns: repeat(11, minmax(7.5rem, 1fr));
@@ -721,6 +769,24 @@ textarea {
   .chart {
     height: 14rem;
   }
+
+  .pending-identity-header {
+    display: grid;
+    padding: 1.25rem 1rem;
+  }
+
+  .pending-identity-facts {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .pending-identity-facts .metric,
+  .pending-market-section {
+    padding: 1rem;
+  }
+
+  .pending-market-section {
+    overflow-x: auto;
+  }
 }
 
 @media (max-width: 520px) {
@@ -731,5 +797,9 @@ textarea {
   .language-switcher button {
     min-width: 2rem;
     padding: 0 0.35rem;
+  }
+
+  .pending-identity-facts {
+    grid-template-columns: 1fr;
   }
 }

@@ -26,7 +26,7 @@ beforeEach(() => {
     "fetch",
     vi.fn(async (input: RequestInfo | URL) => {
       const url = String(input);
-      const payload = url.endsWith("/api/maps")
+      const payload = url.endsWith("/api/matches")
         ? []
         : url.endsWith("/api/jobs/summary")
           ? { by_status: {}, by_type: [], oldest_pending_at: null, recent_failures: [] }
@@ -53,7 +53,7 @@ test("renders operational empty and readiness states", async () => {
   );
 
   expect((await screen.findAllByText("ACTION REQUIRED")).length).toBeGreaterThan(0);
-  expect(await screen.findByText("No canonical maps")).toBeInTheDocument();
+  expect(await screen.findByText("No discovered matches")).toBeInTheDocument();
   expect(screen.getByText("Waiting for canonical map discovery")).toBeInTheDocument();
 });
 
@@ -66,7 +66,7 @@ test("switches to Chinese and restores the choice after remount", async () => {
   );
 
   fireEvent.click(await screen.findByRole("button", { name: "中文" }));
-  expect(await screen.findByText("暂无规范化地图")).toBeInTheDocument();
+  expect(await screen.findByText("暂无已发现比赛")).toBeInTheDocument();
   expect(screen.getByText("等待规范化地图发现")).toBeInTheDocument();
   expect(window.localStorage.getItem("dota-ai-decision-lab-locale")).toBe("zh-CN");
   expect(document.documentElement.lang).toBe("zh-CN");
@@ -79,17 +79,101 @@ test("switches to Chinese and restores the choice after remount", async () => {
     </QueryClientProvider>
   );
 
-  expect(await screen.findByText("暂无规范化地图")).toBeInTheDocument();
+  expect(await screen.findByText("暂无已发现比赛")).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "中文" })).toHaveAttribute("aria-pressed", "true");
+});
+
+test("shows RayBet series while canonical map identity is pending", async () => {
+  const pending = {
+    entity_type: "SERIES",
+    identity_status: "PENDING_MAP_IDENTITY",
+    id: "22222222-2222-2222-2222-222222222222",
+    series_id: "22222222-2222-2222-2222-222222222222",
+    canonical_map_id: null,
+    map_number: null,
+    valve_match_id: null,
+    scheduled_at: "2026-08-13T05:00:00Z",
+    provider_match_id: 38423260,
+    tournament_name: "TI15 International",
+    round: "bo3",
+    raw_status: 1,
+    provider_observed_at: "2026-08-12T12:00:00Z",
+    team_a: { id: "team-a", name: "Spirit" },
+    team_b: { id: "team-b", name: "Xtreme Gaming" },
+    market: [{
+      odds_id: 10,
+      selection_team_id: "team-a",
+      price: "1.90",
+      fair_probability: null,
+      raw_status: 1,
+      normalized_status: "UNKNOWN",
+      metadata_version: "registry-v1",
+      market_type: "Winner",
+      match_stage: "Full Time",
+      received_at: "2026-08-12T12:00:01Z",
+      age_seconds: 1
+    }, {
+      odds_id: 20,
+      selection_team_id: "team-b",
+      price: "2.10",
+      fair_probability: null,
+      raw_status: 1,
+      normalized_status: "UNKNOWN",
+      metadata_version: "registry-v1",
+      market_type: "Winner",
+      match_stage: "Full Time",
+      received_at: "2026-08-12T12:00:01Z",
+      age_seconds: 1
+    }],
+    market_quality: null,
+    draft: null,
+    live: null,
+    sync: null,
+    latest_snapshot: null,
+    decisions: []
+  };
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    const payload = url.endsWith("/api/matches")
+      ? [pending]
+      : url.endsWith("/api/jobs/summary")
+        ? { by_status: {}, by_type: [], oldest_pending_at: null, recent_failures: [] }
+        : runtime;
+    return new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(<QueryClientProvider client={client}><App /></QueryClientProvider>);
+
+  expect(await screen.findByRole("heading", { name: "Spirit vs Xtreme Gaming" })).toBeInTheDocument();
+  expect(screen.getByText("1.90 / 2.10")).toBeInTheDocument();
+  expect(screen.getAllByText("PENDING MAP IDENTITY").length).toBeGreaterThan(0);
+  expect(screen.getByText("RayBet data is available. Decision processing will begin after Valve/DLTV map identity is resolved.")).toBeInTheDocument();
+  expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/maps/"))).toBe(false);
+
+  fireEvent.click(screen.getByRole("button", { name: "中文" }));
+  expect((await screen.findAllByText("等待地图身份")).length).toBeGreaterThan(0);
+  expect(screen.getByText("RayBet 比赛与赔率数据已到达；解析 Valve/DLTV 地图身份后才会进入决策处理。")).toBeInTheDocument();
 });
 
 test("shows bilingual audit evidence for a decision lifecycle", async () => {
   const map = {
+    entity_type: "MAP",
+    identity_status: "RESOLVED",
     id: "11111111-1111-1111-1111-111111111111",
     series_id: "22222222-2222-2222-2222-222222222222",
+    canonical_map_id: "11111111-1111-1111-1111-111111111111",
     map_number: 1,
     valve_match_id: 8940730389,
     scheduled_at: "2026-08-12T12:00:00Z",
+    provider_match_id: 38423260,
+    tournament_name: "TI15 International",
+    round: "bo3",
+    raw_status: 1,
+    provider_observed_at: "2026-08-12T11:59:00Z",
     team_a: { id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", name: "Radiant" },
     team_b: { id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", name: "Dire" },
     market: [
@@ -115,7 +199,7 @@ test("shows bilingual audit evidence for a decision lifecycle", async () => {
       const url = String(input);
       const payload = url.endsWith(`/api/maps/${map.id}`)
         ? map
-        : url.endsWith("/api/maps")
+        : url.endsWith("/api/matches")
           ? [map]
           : url.endsWith("/api/jobs/summary")
             ? { by_status: {}, by_type: [], oldest_pending_at: null, recent_failures: [] }

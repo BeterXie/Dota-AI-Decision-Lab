@@ -8,9 +8,9 @@ const messages = {
   en: {
     language: "Language",
     refreshData: "Refresh data",
-    trackedMaps: "Tracked maps",
-    noCanonicalMaps: "No canonical maps",
-    waitingForProviderDiscovery: "Waiting for provider discovery.",
+    trackedMaps: "Discovered matches",
+    noCanonicalMaps: "No discovered matches",
+    waitingForProviderDiscovery: "Waiting for RayBet match discovery.",
     mapFeedUnavailable: "Map feed unavailable",
     mapDetailUnavailable: "Map detail unavailable",
     loadingReadiness: "Loading readiness",
@@ -20,6 +20,7 @@ const messages = {
     teamA: "Team A",
     teamB: "Team B",
     map: "Map",
+    series: "Series",
     valve: "Valve",
     unresolved: "unresolved",
     versus: "vs",
@@ -119,14 +120,21 @@ const messages = {
     unknown: "unknown",
     notObserved: "not observed",
     invalidTime: "invalid time",
-    unknownLatency: "unknown latency"
+    unknownLatency: "unknown latency",
+    unknownTournament: "Unknown tournament",
+    pendingIdentityDescription: "RayBet data is available. Decision processing will begin after Valve/DLTV map identity is resolved.",
+    raybetMatchId: "RayBet match ID",
+    format: "Format",
+    scheduledAt: "Scheduled at",
+    lastDiscoveredAt: "Last discovered at",
+    raybetMarkets: "RayBet markets"
   },
   "zh-CN": {
     language: "语言",
     refreshData: "刷新数据",
-    trackedMaps: "跟踪中的地图",
-    noCanonicalMaps: "暂无规范化地图",
-    waitingForProviderDiscovery: "正在等待 Provider 发现比赛。",
+    trackedMaps: "已发现比赛",
+    noCanonicalMaps: "暂无已发现比赛",
+    waitingForProviderDiscovery: "正在等待 RayBet 发现比赛。",
     mapFeedUnavailable: "地图数据源不可用",
     mapDetailUnavailable: "地图详情不可用",
     loadingReadiness: "正在加载就绪状态",
@@ -136,6 +144,7 @@ const messages = {
     teamA: "队伍 A",
     teamB: "队伍 B",
     map: "地图",
+    series: "系列赛",
     valve: "Valve",
     unresolved: "未解析",
     versus: "对阵",
@@ -235,7 +244,14 @@ const messages = {
     unknown: "未知",
     notObserved: "尚未观测",
     invalidTime: "时间无效",
-    unknownLatency: "延迟未知"
+    unknownLatency: "延迟未知",
+    unknownTournament: "未知赛事",
+    pendingIdentityDescription: "RayBet 比赛与赔率数据已到达；解析 Valve/DLTV 地图身份后才会进入决策处理。",
+    raybetMatchId: "RayBet 比赛 ID",
+    format: "赛制",
+    scheduledAt: "计划时间",
+    lastDiscoveredAt: "最近发现时间",
+    raybetMarkets: "RayBet 市场"
   }
 } as const;
 
@@ -307,6 +323,7 @@ const statusMessages: Record<string, Record<Locale, string>> = {
   PARSE_FAILED: { en: "PARSE FAILED", "zh-CN": "解析失败" },
   PARTIAL: { en: "PARTIAL", "zh-CN": "部分可用" },
   PENDING: { en: "PENDING", "zh-CN": "待处理" },
+  PENDING_MAP_IDENTITY: { en: "PENDING MAP IDENTITY", "zh-CN": "等待地图身份" },
   POST_DRAFT: { en: "POST DRAFT", "zh-CN": "选人后" },
   PREMATCH: { en: "PREMATCH", "zh-CN": "赛前" },
   READY: { en: "READY", "zh-CN": "就绪" },

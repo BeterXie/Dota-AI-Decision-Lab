@@ -46,11 +46,19 @@ const market = [
 ];
 
 const summary = {
+  entity_type: "MAP",
+  identity_status: "RESOLVED",
   id: mapId,
   series_id: "22222222-2222-2222-2222-222222222222",
+  canonical_map_id: mapId,
   map_number: 2,
   valve_match_id: 8940730389,
   scheduled_at: observedAt,
+  provider_match_id: 38423260,
+  tournament_name: "TI15 International",
+  round: "bo3",
+  raw_status: 1,
+  provider_observed_at: observedAt,
   team_a: { id: "team-a", name: "Team Spirit" },
   team_b: { id: "team-b", name: "Tundra" },
   market,
@@ -166,7 +174,7 @@ async function mockApi(page: Page): Promise<void> {
     const path = new URL(route.request().url()).pathname;
     const payload = path === "/api/runtime"
       ? runtime
-      : path === "/api/maps"
+      : path === "/api/matches"
         ? [summary]
         : path === `/api/maps/${mapId}`
           ? detail

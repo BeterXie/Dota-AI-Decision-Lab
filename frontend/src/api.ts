@@ -106,11 +106,19 @@ export interface AiDecision {
 }
 
 export interface MapSummary {
+  entity_type: "MAP" | "SERIES";
+  identity_status: "RESOLVED" | "PENDING_MAP_IDENTITY";
   id: string;
   series_id: string;
+  canonical_map_id: string | null;
   map_number: number | null;
   valve_match_id: number | null;
   scheduled_at: string | null;
+  provider_match_id: number | null;
+  tournament_name: string | null;
+  round: string | null;
+  raw_status: number | null;
+  provider_observed_at: string | null;
   team_a: { id: string; name: string } | null;
   team_b: { id: string; name: string } | null;
   market: MarketObservation[];
@@ -235,7 +243,7 @@ async function getJson<T>(path: string): Promise<T> {
 }
 
 export const fetchRuntime = () => getJson<RuntimeSnapshot>("/api/runtime");
-export const fetchMaps = () => getJson<MapSummary[]>("/api/maps");
+export const fetchMaps = () => getJson<MapSummary[]>("/api/matches");
 export const fetchMap = (id: string) => getJson<MapDetail>(`/api/maps/${id}`);
 export const fetchJobs = () => getJson<JobSummary>("/api/jobs/summary");
 
