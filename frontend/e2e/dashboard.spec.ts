@@ -87,7 +87,20 @@ const summary = {
     model_version: "rosh-v1",
     data_version: "stratz-2026-08-12"
   },
-  live: { game_time_seconds: 1540, radiant_kills: 18, dire_kills: 14, radiant_nw_lead: 3200, received_at: observedAt },
+  live: {
+    game_time_seconds: 1540,
+    radiant_kills: 18,
+    dire_kills: 14,
+    radiant_nw_lead: 3200,
+    first_blood: "radiant",
+    received_at: observedAt,
+    last_message_received_at: observedAt,
+    last_state_change_received_at: observedAt,
+    message_age_seconds: 2.4,
+    effective_state_age_seconds: 4.1,
+    connection_id: "connection-1",
+    reconnect_generation: 1
+  },
   sync: { status: "CAUTION", p50_seconds: 2.1, p90_seconds: 4.7, jitter_seconds: 1.4, sample_size: 8 },
   latest_snapshot: {
     id: "33333333-3333-3333-3333-333333333333",
@@ -125,7 +138,18 @@ const detail = {
     market[1]
   ],
   live_timeline: [
-    { game_time_seconds: 1480, radiant_kills: 16, dire_kills: 13, radiant_nw_lead: 2400, received_at: "2026-08-12T11:59:00Z" },
+    {
+      game_time_seconds: 1480,
+      radiant_kills: 16,
+      dire_kills: 13,
+      radiant_nw_lead: 2400,
+      first_blood: "radiant",
+      received_at: "2026-08-12T11:59:00Z",
+      last_message_received_at: "2026-08-12T11:59:00Z",
+      last_state_change_received_at: "2026-08-12T11:59:00Z",
+      connection_id: "connection-1",
+      reconnect_generation: 1
+    },
     summary.live
   ],
   snapshot_payload: {
@@ -205,6 +229,13 @@ test("renders the operational decision lifecycle without page overflow", async (
   await page.goto("/?e2e=bilingual");
 
   await expect(page.getByRole("heading", { name: "Team Spirit vs Tundra" })).toBeVisible();
+  const matchOverview = page.getByLabel("Match overview");
+  await expect(matchOverview.getByRole("heading", { name: "Current lineup" })).toBeVisible();
+  await expect(matchOverview.getByRole("heading", { name: "Live match state" })).toBeVisible();
+  await expect(matchOverview.getByText("Collapse", { exact: true })).toBeVisible();
+  await expect(matchOverview.getByText("Magnus", { exact: true })).toBeVisible();
+  await expect(matchOverview.getByText("18 - 14", { exact: true })).toBeVisible();
+  await expect(matchOverview.locator(".live-facts").getByText("Radiant", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Draft Intelligence" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Independent AI decisions" })).toBeVisible();
   await expect(page.getByRole("img", { name: "Market odds timeline" })).toBeVisible();
@@ -228,6 +259,8 @@ test("renders the operational decision lifecycle without page overflow", async (
   const chineseButton = page.getByRole("button", { name: "中文" });
   await chineseButton.click({ force: true });
   await expect(page.getByRole("heading", { name: "Team Spirit 对阵 Tundra", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "当前阵容", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "实时赛况", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "选人情报", exact: true })).toBeVisible();
   await expect(page.getByRole("tab", { name: "历史", exact: true })).toBeVisible();
   await page.locator("details.readiness-summary > summary").click();

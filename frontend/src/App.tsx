@@ -422,6 +422,8 @@ function MapWorkspace({
         </details>
       </section>
 
+      <MatchOverview detail={detail} />
+
       <section className="decision-layout">
         <MarketPanel detail={detail} />
         <AiPanel detail={detail} />
@@ -452,6 +454,73 @@ function MapWorkspace({
         </TabPanels>
       </Tabs>
     </>
+  );
+}
+
+function MatchOverview({ detail }: { detail: MapDetail }) {
+  const { locale, t } = useI18n();
+  const latest = detail.live;
+  const draftStatus = detail.draft?.complete ? "READY" : detail.draft ? "PARTIAL" : "MISSING";
+  const liveStatus = latest ? detail.sync?.status ?? "UNKNOWN" : "MISSING";
+  return (
+    <section className="match-overview" aria-label={t("matchOverview")}>
+      <div className="lineup-overview">
+        <PanelHeading title={t("lineup")} status={draftStatus} />
+        {detail.draft ? <LineupOverview detail={detail} /> : <PanelEmpty text={t("noValidatedLineup")} />}
+      </div>
+      <div className="live-state-overview">
+        <PanelHeading title={t("liveState")} status={liveStatus} />
+        {latest ? (
+          <>
+            <div className="live-scoreline">
+              <Metric label={t("gameTime")} value={formatGameTime(latest.game_time_seconds, locale)} />
+              <Metric
+                label={t("kills")}
+                value={
+                  latest.radiant_kills == null || latest.dire_kills == null
+                    ? t("unknown")
+                    : `${latest.radiant_kills} - ${latest.dire_kills}`
+                }
+              />
+              <Metric label={t("radiantNetWorth")} value={signed(latest.radiant_nw_lead, locale)} />
+            </div>
+            <dl className="live-facts">
+              <div><dt>{t("firstBlood")}</dt><dd>{formatFirstBlood(latest.first_blood, locale)}</dd></div>
+              <div><dt>{t("effectiveStateAge")}</dt><dd>{seconds(latest.effective_state_age_seconds, locale)}</dd></div>
+              <div><dt>{t("sync")}</dt><dd>{translateStatus(detail.sync?.status ?? "UNKNOWN", locale)}</dd></div>
+              <div><dt>{t("latestLiveUpdate")}</dt><dd>{formatTime(latest.last_message_received_at, locale)}</dd></div>
+            </dl>
+          </>
+        ) : <PanelEmpty text={t("noLiveState")} />}
+      </div>
+    </section>
+  );
+}
+
+function LineupOverview({ detail }: { detail: MapDetail }) {
+  const { t } = useI18n();
+  const slots = detail.draft?.slots ?? [];
+  const sideSlots = (side: "radiant" | "dire") =>
+    slots.filter((slot) => slot.side === side).sort((a, b) => a.position - b.position);
+  return (
+    <div className="lineup-grid">
+      {(["radiant", "dire"] as const).map((side) => (
+        <div className={`lineup-side ${side}`} key={side}>
+          <h3>{t(side)}</h3>
+          {sideSlots(side).map((slot) => (
+            <div className="lineup-row" key={`${side}-${slot.position}`}>
+              <span className="lineup-position">Pos{slot.position}</span>
+              <span className="lineup-player">
+                {slot.player_name ?? (slot.account_id ? `#${slot.account_id}` : t("playerUnknown"))}
+              </span>
+              <span className={`lineup-hero ${slot.hero_id == null ? "unknown" : ""}`}>
+                {slot.hero_name ?? (slot.hero_id ? `Hero #${slot.hero_id}` : t("heroUnknown"))}
+              </span>
+            </div>
+          ))}
+        </div>
+      ))}
+    </div>
   );
 }
 
@@ -525,9 +594,6 @@ function DraftPanel({ detail }: { detail: MapDetail }) {
   const features = detail.draft?.features ?? {};
   const data = (key: keyof (typeof curve)[number]) =>
     curve.map((point) => [point.minute, point[key]]);
-  const slots = detail.draft?.slots ?? [];
-  const sideSlots = (side: "radiant" | "dire") =>
-    slots.filter((slot) => slot.side === side).sort((a, b) => a.position - b.position);
   return (
     <section className="tab-content draft-panel">
       <PanelHeading
@@ -546,29 +612,6 @@ function DraftPanel({ detail }: { detail: MapDetail }) {
         <Metric label={t("peakMinute")} value={metricText(features.peak_minute, locale)} />
         <Metric label={t("peakEdge")} value={signed(features.peak_edge, locale)} />
       </div>
-      {detail.draft && (
-        <div className="lineup-block">
-          <div className="lineup-heading">{t("lineup")}</div>
-          <div className="lineup-grid">
-            {(["radiant", "dire"] as const).map((side) => (
-              <div className="lineup-side" key={side}>
-                <h3>{t(side)}</h3>
-                {sideSlots(side).map((slot) => (
-                  <div className="lineup-row" key={`${side}-${slot.position}`}>
-                    <span className="lineup-position">Pos{slot.position}</span>
-                    <span className="lineup-player">
-                      {slot.player_name ?? (slot.account_id ? `#${slot.account_id}` : t("playerUnknown"))}
-                    </span>
-                    <span className={`lineup-hero ${slot.hero_id == null ? "unknown" : ""}`}>
-                      {slot.hero_name ?? (slot.hero_id ? `Hero #${slot.hero_id}` : t("heroUnknown"))}
-                    </span>
-                  </div>
-                ))}
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
       {curve.length ? (
         <Chart
           option={{
@@ -676,6 +719,7 @@ function LivePanel({ detail }: { detail: MapDetail }) {
           }
         />
         <Metric label={t("radiantNetWorth")} value={signed(latest?.radiant_nw_lead, locale)} />
+        <Metric label={t("firstBlood")} value={formatFirstBlood(latest?.first_blood, locale)} />
         <Metric label={t("sync")} value={translateStatus(detail.sync?.status ?? "UNKNOWN", locale)} />
         <Metric label={t("syncConfidence")} value={translateStatus(detail.sync?.confidence ?? "UNKNOWN", locale)} />
         <Metric label={t("p50Lag")} value={seconds(detail.sync?.p50_seconds, locale)} />
@@ -688,6 +732,8 @@ function LivePanel({ detail }: { detail: MapDetail }) {
           label={t("effectiveStateAge")}
           value={seconds(latest?.effective_state_age_seconds, locale)}
         />
+        <Metric label={t("latestLiveUpdate")} value={formatTime(latest?.last_message_received_at, locale)} />
+        <Metric label={t("connectionGeneration")} value={metricText(latest?.reconnect_generation, locale)} />
       </div>
       {detail.live_timeline.length ? (
         <Chart
@@ -1104,6 +1150,13 @@ function formatLatency(value: number | null, locale: Locale): string {
 function formatGameTime(value: number | null | undefined, locale: Locale): string {
   if (value == null) return translate("unknown", locale);
   return `${Math.floor(value / 60)}:${String(value % 60).padStart(2, "0")}`;
+}
+
+function formatFirstBlood(value: string | null | undefined, locale: Locale): string {
+  if (!value) return translate("unknown", locale);
+  const side = value.toLowerCase();
+  if (side === "radiant" || side === "dire") return translate(side, locale);
+  return value;
 }
 
 function formatTime(value: string | null | undefined, locale: Locale): string {

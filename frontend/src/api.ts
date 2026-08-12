@@ -72,6 +72,7 @@ export interface LiveObservation {
   radiant_kills: number | null;
   dire_kills: number | null;
   radiant_nw_lead: number | null;
+  first_blood: string | null;
   received_at: string;
   last_message_received_at: string;
   last_state_change_received_at: string;

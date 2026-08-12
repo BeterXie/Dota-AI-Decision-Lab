@@ -16,6 +16,7 @@ from app.models import (
     CanonicalTeam,
     DraftSlotRecord,
     DraftSnapshotRecord,
+    DltvLiveObservationRecord,
     ProviderMatchMapping,
     RayBetMatch,
     TeamRatingSnapshotRecord,
@@ -270,6 +271,25 @@ async def test_map_api_exposes_partial_lineup_and_readiness_counts() -> None:
                 ),
             )
         )
+        session.add(
+            DltvLiveObservationRecord(
+                canonical_map_id=canonical_map.id,
+                valve_match_id=8941656460,
+                game_time_seconds=125,
+                radiant_kills=3,
+                dire_kills=1,
+                radiant_nw_lead=850,
+                first_blood="radiant",
+                source_game_time=125,
+                received_at=observed_at,
+                payload_hash="live-state",
+                connection_id="connection-1",
+                reconnect_generation=2,
+                last_message_received_at=observed_at,
+                last_state_change_received_at=observed_at,
+                raw_event_id=uuid4(),
+            )
+        )
     app = create_app(factory, HealthRegistry())
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
@@ -281,6 +301,8 @@ async def test_map_api_exposes_partial_lineup_and_readiness_counts() -> None:
     assert payload["draft"]["slots"][0]["hero_id"] is None
     assert payload["draft"]["slots"][1]["account_id"] == 418942836
     assert payload["draft"]["slots"][1]["hero_id"] == 145
+    assert payload["live"]["first_blood"] == "radiant"
+    assert payload["live_timeline"][0]["first_blood"] == "radiant"
     await engine.dispose()
 
 
