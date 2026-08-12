@@ -63,7 +63,9 @@ class RoshService:
         )
         radiant, dire = _ordered_slots(slots)
         ordered_slots = [*radiant, *dire]
-        hero_ids = [slot.hero_id for slot in ordered_slots]
+        hero_ids = [slot.hero_id for slot in ordered_slots if slot.hero_id is not None]
+        if len(hero_ids) != 10:
+            raise ValueError("DRAFT_PARTIAL")
         cutoff = snapshot.statistics_cutoff
         requests = build_rosh_query_requests(hero_ids, int(cutoff.timestamp()))
         response_items = await asyncio.gather(
@@ -93,7 +95,8 @@ class RoshService:
         analysis = normalize_rosh_analysis(responses)
 
         players = [
-            {"steamAccountId": slot.account_id, "heroId": slot.hero_id} for slot in ordered_slots
+            {"steamAccountId": slot.account_id, "heroId": hero_id}
+            for slot, hero_id in zip(ordered_slots, hero_ids, strict=True)
         ]
         highlight_request = build_player_highlights_query(players)
         highlights: dict[int, dict | None] = {}
@@ -126,8 +129,8 @@ class RoshService:
             for index, slot in enumerate(ordered_slots)
         ]
         result = score_rosh_lineups(
-            [slot.hero_id for slot in radiant],
-            [slot.hero_id for slot in dire],
+            hero_ids[:5],
+            hero_ids[5:],
             analysis,
             radiant_player_highlights=radiant_highlights,
             dire_player_highlights=dire_highlights,

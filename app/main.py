@@ -24,6 +24,7 @@ from app.db import create_engine, create_session_factory
 from app.db_partitions import ensure_weekly_partitions
 from app.domain.jobs import JobType
 from app.draft.coordinator import DltvBootstrapCoordinator
+from app.draft.refresh import schedule_incomplete_draft_refreshes
 from app.draft.rosh_service import RoshService
 from app.evaluation import EvaluationService, FutureOddsService, SettlementService
 from app.events.dispatcher import DomainEventDispatcher, OutboxDispatcher
@@ -240,6 +241,22 @@ async def run() -> None:
     async def maintain_partitions() -> None:
         await ensure_weekly_partitions(engine)
 
+    async def refresh_incomplete_drafts() -> None:
+        async with session_factory() as session, session.begin():
+            result = await schedule_incomplete_draft_refreshes(
+                session,
+                jobs,
+                interval_seconds=settings.dltv_bootstrap_interval_seconds,
+            )
+        if result.enqueued:
+            await health.dependency(
+                "DLTV_DRAFT",
+                "DEGRADED",
+                message="waiting for a complete DLTV draft",
+                active_maps=result.active_maps,
+                refreshes_enqueued=result.enqueued,
+            )
+
     async def schedule_historical_refresh() -> None:
         now = datetime.now(UTC)
         async with session_factory() as session, session.begin():
@@ -339,6 +356,12 @@ async def run() -> None:
                 name="HistoricalRefreshScheduler",
                 interval_seconds=settings.historical_refresh_seconds,
                 action=schedule_historical_refresh,
+                health_registry=health,
+            ),
+            PeriodicWorker(
+                name="DltvDraftRefreshScheduler",
+                interval_seconds=settings.dltv_bootstrap_interval_seconds,
+                action=refresh_incomplete_drafts,
                 health_registry=health,
             ),
             PeriodicWorker(

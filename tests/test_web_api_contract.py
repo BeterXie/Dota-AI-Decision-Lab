@@ -9,9 +9,13 @@ from starlette.testclient import TestClient
 
 from app.db import Base
 from app.models import (
+    CanonicalHero,
     CanonicalMap,
+    CanonicalPlayer,
     CanonicalSeries,
     CanonicalTeam,
+    DraftSlotRecord,
+    DraftSnapshotRecord,
     ProviderMatchMapping,
     RayBetMatch,
     TeamRatingSnapshotRecord,
@@ -207,6 +211,76 @@ async def test_match_feed_orders_earliest_scheduled_match_first() -> None:
         payload = (await client.get("/api/matches")).json()
 
     assert [item["team_a"]["name"] for item in payload] == ["Level Up", "Spirit"]
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_map_api_exposes_partial_lineup_and_readiness_counts() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    observed_at = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
+    async with factory.begin() as session:
+        team_a = CanonicalTeam(name="Level Up")
+        team_b = CanonicalTeam(name="Rune Eaters")
+        player = CanonicalPlayer(account_id=418942836, name=None)
+        hero = CanonicalHero(hero_id=145, name=None)
+        session.add_all((team_a, team_b, player, hero))
+        await session.flush()
+        series = CanonicalSeries(team_a_id=team_a.id, team_b_id=team_b.id)
+        session.add(series)
+        await session.flush()
+        canonical_map = CanonicalMap(series_id=series.id, valve_match_id=8941656460)
+        session.add(canonical_map)
+        await session.flush()
+        draft = DraftSnapshotRecord(
+            canonical_map_id=canonical_map.id,
+            valve_match_id=8941656460,
+            complete=False,
+            blockers=["DRAFT_PARTIAL"],
+            warnings=[],
+            payload_hash="partial-draft",
+            statistics_cutoff=observed_at,
+            observed_at=observed_at,
+            raw_event_id=uuid4(),
+        )
+        session.add(draft)
+        await session.flush()
+        session.add_all(
+            (
+                DraftSlotRecord(
+                    draft_snapshot_id=draft.id,
+                    side="radiant",
+                    position=1,
+                    account_id=player.account_id,
+                    canonical_player_id=player.id,
+                    hero_id=hero.hero_id,
+                    source="DLTV_SLOT",
+                    confidence=1.0,
+                ),
+                DraftSlotRecord(
+                    draft_snapshot_id=draft.id,
+                    side="dire",
+                    position=1,
+                    account_id=93526520,
+                    hero_id=None,
+                    source="DLTV_SLOT",
+                    confidence=1.0,
+                ),
+            )
+        )
+    app = create_app(factory, HealthRegistry())
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        payload = (await client.get(f"/api/maps/{canonical_map.id}")).json()
+
+    assert payload["draft"]["roster_ready_count"] == 2
+    assert payload["draft"]["hero_ready_count"] == 1
+    assert payload["draft"]["slots"][0]["account_id"] == 93526520
+    assert payload["draft"]["slots"][0]["hero_id"] is None
+    assert payload["draft"]["slots"][1]["account_id"] == 418942836
+    assert payload["draft"]["slots"][1]["hero_id"] == 145
     await engine.dispose()
 
 

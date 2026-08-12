@@ -11,7 +11,7 @@ class DraftSlot(BaseModel):
     position: Literal[1, 2, 3, 4, 5]
     account_id: int | None
     canonical_player_id: str | None = None
-    hero_id: int = Field(gt=0)
+    hero_id: int | None = Field(default=None, gt=0)
     source: Literal["DLTV_SLOT", "DLTV_PLAYER_HERO", "INFERRED", "MANUAL"]
     confidence: float = Field(ge=0, le=1)
 

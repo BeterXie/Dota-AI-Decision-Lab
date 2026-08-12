@@ -66,6 +66,17 @@ const summary = {
     complete: true,
     blockers: [],
     warnings: [],
+    roster_ready_count: 10,
+    hero_ready_count: 10,
+    slots: Array.from({ length: 10 }, (_, index) => ({
+      side: index < 5 ? "radiant" : "dire",
+      position: (index % 5) + 1,
+      account_id: 1000 + index,
+      canonical_player_id: `player-${index}`,
+      player_name: index === 0 ? "Collapse" : null,
+      hero_id: index + 1,
+      hero_name: index === 0 ? "Magnus" : null
+    })),
     observed_at: observedAt,
     features: { current_edge: 3.2, next_5m_edge: 2.6, peak_minute: 35, peak_edge: 5.1 },
     curve: [
@@ -219,6 +230,7 @@ test("renders the operational decision lifecycle without page overflow", async (
   await expect(page.getByRole("heading", { name: "Team Spirit 对阵 Tundra", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "选人情报", exact: true })).toBeVisible();
   await expect(page.getByRole("tab", { name: "历史", exact: true })).toBeVisible();
+  await page.locator("details.readiness-summary > summary").click();
   await expect(
     page.getByRole("region", { name: "业务就绪状态" }).getByText("DLTV 实时", { exact: true })
   ).toBeAttached();

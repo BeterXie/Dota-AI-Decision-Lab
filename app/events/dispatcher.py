@@ -32,6 +32,7 @@ EVENT_JOB_MAP: dict[DomainEventType, JobType] = {
 
 EVENT_ADDITIONAL_JOBS: dict[DomainEventType, tuple[JobType, ...]] = {
     DomainEventType.MARKET_DISCOVERED: (JobType.SYNC_HISTORICAL,),
+    DomainEventType.DRAFT_CONFIRMED: (JobType.SYNC_HISTORICAL,),
 }
 
 

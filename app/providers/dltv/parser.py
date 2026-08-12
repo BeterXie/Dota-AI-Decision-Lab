@@ -6,7 +6,7 @@ from app.domain.draft import DraftSlot, DraftValidation
 from app.domain.live import DltvFastPatch
 from app.providers.dltv.models import DltvBootstrapIdentity, DltvSeries, DltvSeriesFrame
 
-PARSER_VERSION = "dltv-v1"
+PARSER_VERSION = "dltv-v2"
 
 
 def parse_series_frame(payload: dict[str, Any]) -> DltvSeriesFrame:
@@ -105,18 +105,19 @@ def parse_draft(payload: dict[str, Any]) -> DraftValidation:
         if not isinstance(player, dict):
             blockers.append("DRAFT_PARTIAL")
             continue
-        hero_id = player.get("hero_id")
+        raw_hero_id = player.get("hero_id")
         team = player.get("team")
         position = player.get("team_slot")
         if (
-            not _is_int(hero_id)
-            or hero_id <= 0
-            or team not in (0, 1)
+            team not in (0, 1)
             or not _is_int(position)
             or position not in range(1, 6)
         ):
             blockers.append("DRAFT_PARTIAL")
             continue
+        hero_id = raw_hero_id if _is_int(raw_hero_id) and raw_hero_id > 0 else None
+        if hero_id is None:
+            blockers.append("DRAFT_PARTIAL")
         account_id = player.get("account_id")
         slots.append(
             DraftSlot(
@@ -131,7 +132,8 @@ def parse_draft(payload: dict[str, Any]) -> DraftValidation:
 
     if len(slots) != 10:
         blockers.append("DRAFT_PARTIAL")
-    if len({slot.hero_id for slot in slots}) != 10:
+    known_heroes = [slot.hero_id for slot in slots if slot.hero_id is not None]
+    if len(known_heroes) != len(set(known_heroes)):
         blockers.append("DRAFT_HERO_DUPLICATE")
     for side in ("radiant", "dire"):
         side_slots = [slot for slot in slots if slot.side == side]
@@ -145,6 +147,50 @@ def parse_draft(payload: dict[str, Any]) -> DraftValidation:
         blockers=tuple(dict.fromkeys(blockers)),
         warnings=tuple(dict.fromkeys(warnings)),
     )
+
+
+def parse_draft_labels(payload: dict[str, Any]) -> tuple[dict[int, str], dict[int, str]]:
+    player_names: dict[int, str] = {}
+    hero_names: dict[int, str] = {}
+    live_league_data = payload.get("live_league_data")
+    if isinstance(live_league_data, dict):
+        raw_players = live_league_data.get("players")
+        for item in raw_players if isinstance(raw_players, list) else []:
+            if not isinstance(item, dict):
+                continue
+            account_id = _optional_int(item.get("account_id"))
+            name = item.get("name")
+            if account_id is not None and isinstance(name, str) and name.strip():
+                player_names[account_id] = name.strip()
+
+    full_stats = payload.get("full_stats")
+    if isinstance(full_stats, dict):
+        for side in ("radiant", "dire"):
+            team = full_stats.get(side)
+            if not isinstance(team, dict):
+                continue
+            raw_players = team.get("players")
+            for item in raw_players if isinstance(raw_players, list) else []:
+                if not isinstance(item, dict):
+                    continue
+                player = item.get("player")
+                hero = item.get("hero")
+                if isinstance(player, dict):
+                    account_id = _optional_int(player.get("steam_id"))
+                    name = player.get("title")
+                    if account_id is not None and isinstance(name, str) and name.strip():
+                        player_names[account_id] = name.strip()
+                if isinstance(hero, dict):
+                    hero_id = _optional_int(hero.get("steam_id"))
+                    name = hero.get("title")
+                    if (
+                        hero_id is not None
+                        and hero_id > 0
+                        and isinstance(name, str)
+                        and name.strip()
+                    ):
+                        hero_names[hero_id] = name.strip()
+    return player_names, hero_names
 
 
 def parse_fast_patch(

@@ -25,6 +25,7 @@ import {
   type JobSummary,
   type MapDetail,
   type MapSummary,
+  type MarketObservation,
   queryKeys,
   type RuntimeSnapshot,
   useRuntimeSocket
@@ -165,7 +166,7 @@ function Dashboard() {
         </aside>
 
         <main className="workspace">
-          <ReadinessStrip runtime={runtime.data} loading={runtime.isLoading} />
+          <ReadinessSummary runtime={runtime.data} loading={runtime.isLoading} />
           {selectedMatch?.identity_status === "PENDING_MAP_IDENTITY" ? (
             <PendingIdentityWorkspace match={selectedMatch} />
           ) : detail.isLoading && selectedCanonicalMapId ? (
@@ -230,28 +231,33 @@ function MatchButton({
   onSelect: () => void;
 }) {
   const { locale, t } = useI18n();
-  const title = `${map.team_a?.name ?? t("unknownTeam")} ${t("versus")} ${map.team_b?.name ?? t("unknownTeam")}`;
-  const headlineMarket = marketHeadline(map);
+  const teamA = map.team_a?.name ?? t("unknownTeam");
+  const teamB = map.team_b?.name ?? t("unknownTeam");
+  const headlinePair = primaryMarketPair(map.market, map.team_a?.id, map.team_b?.id);
+  const status = map.identity_status === "PENDING_MAP_IDENTITY"
+    ? map.identity_status
+    : map.latest_snapshot?.mode ?? "NO_SNAPSHOT";
   return (
     <button
       type="button"
       className={`match-button${selected ? " selected" : ""}`}
       onClick={onSelect}
     >
-      <span className="match-button-title">{title}</span>
-      <span className="match-button-meta">
-        {map.entity_type === "MAP"
-          ? `${t("map")} ${map.map_number ?? "?"}`
-          : map.round ?? t("series")}
-        <span>{translateStatus(
-          map.identity_status === "PENDING_MAP_IDENTITY"
-            ? map.identity_status
-            : map.latest_snapshot?.mode ?? "NO_SNAPSHOT",
-          locale
-        )}</span>
+      <span className="match-button-kicker">
+        <time dateTime={map.scheduled_at ?? undefined}>{formatSchedule(map.scheduled_at, locale)}</time>
+        <span>{map.tournament_name ?? t("unknownTournament")}</span>
       </span>
-      <span className="match-button-market">
-        {headlineMarket ?? t("marketUnavailable")}
+      <span className="match-button-teams">
+        <span>{teamA}</span>
+        <span>{teamB}</span>
+      </span>
+      <span className="match-button-footer">
+        <span>{map.entity_type === "MAP" ? `${t("map")} ${map.map_number ?? "?"}` : map.round ?? t("series")}</span>
+        <span className={`match-button-status ${statusTone(status)}`}>{translateStatus(status, locale)}</span>
+      </span>
+      <span className="match-button-prices" aria-label={t("headlineOdds")}>
+        <span>{headlinePair ? Number(headlinePair.teamA.price).toFixed(2) : "-"}</span>
+        <span>{headlinePair ? Number(headlinePair.teamB.price).toFixed(2) : "-"}</span>
       </span>
     </button>
   );
@@ -262,76 +268,76 @@ function PendingIdentityWorkspace({ match }: { match: MapSummary }) {
   const title = `${match.team_a?.name ?? t("unknownTeam")} ${t("versus")} ${match.team_b?.name ?? t("unknownTeam")}`;
   const historyCoverage = match.historical_prewarm ?? match.latest_snapshot?.history_coverage;
   const teamHistoryReady = Number(historyCoverage?.team_strength_ready_count ?? 0);
+  const pair = primaryMarketPair(match.market, match.team_a?.id, match.team_b?.id);
   return (
     <section className="pending-identity-workspace">
       <header className="pending-identity-header">
         <div>
-          <span className="eyebrow">{match.tournament_name ?? t("unknownTournament")}</span>
+          <span className="eyebrow">{match.tournament_name ?? t("unknownTournament")} · {formatSchedule(match.scheduled_at, locale)}</span>
           <h1>{title}</h1>
           <p>{t("pendingIdentityDescription")}</p>
         </div>
         <StatusLabel status={match.identity_status} />
       </header>
-      <div className="pending-identity-facts">
-        <Metric label={t("raybetMatchId")} value={String(match.provider_match_id ?? t("unknown"))} />
-        <Metric label={t("format")} value={match.round ?? t("unknown")} />
-        <Metric label={t("scheduledAt")} value={formatDateTime(match.scheduled_at, locale)} />
-        <Metric label={t("lastDiscoveredAt")} value={formatDateTime(match.provider_observed_at, locale)} />
+      <div className="pending-workbench">
+        <section className="pending-market-section">
+          <PanelHeading title={t("primaryWinnerMarket")} status={pair ? "READY" : "UNKNOWN"} />
+          {pair ? (
+            <>
+              <MarketPair pair={pair} teamA={match.team_a?.name} teamB={match.team_b?.name} />
+              <div className="market-quality-line">
+                <span>{marketLabel(pair.teamA, t("winnerMarket"))}</span>
+                <span>{t("updatedAt")} {formatTime(latestReceivedAt([pair.teamA, pair.teamB]), locale)}</span>
+              </div>
+            </>
+          ) : <PanelEmpty text={t("marketUnavailable")} />}
+          {match.market.length > 2 && (
+            <details className="market-disclosure">
+              <summary>{t("allMarkets")} <span>{match.market.length}</span></summary>
+              <div className="market-table-wrap">
+                <table className="cds--data-table cds--data-table--sm">
+                  <thead><tr><th>{t("selection")}</th><th>{t("market")}</th><th>{t("odds")}</th><th>{t("observed")}</th></tr></thead>
+                  <tbody>{match.market.slice(0, 24).map((item) => (
+                    <tr key={item.odds_id}>
+                      <td>{teamNameForSelection(match, item.selection_team_id, t("unknown"))}</td>
+                      <td>{marketLabel(item, t("unknown"))}</td>
+                      <td>{Number(item.price).toFixed(2)}</td>
+                      <td>{formatTime(item.received_at, locale)}</td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+              </div>
+            </details>
+          )}
+        </section>
+        <section className="pending-history-section">
+          <PanelHeading title={t("historicalPrewarm")} status={teamHistoryReady === 2 ? "READY" : "UNKNOWN"} />
+          <div className="pending-history-metrics">
+            <Metric label={t("teamHistoryReady")} value={`${teamHistoryReady}/2`} />
+            <Metric label={t("rosterPlayersReady")} value={`${metricText(historyCoverage?.player_form_ready_count, locale)}/10`} />
+            <Metric label={t("playerHeroReady")} value={`${metricText(historyCoverage?.player_hero_ready_count, locale)}/10`} />
+          </div>
+          <p className="pending-history-note">{t("waitingForDraftIdentity")}</p>
+          <div className="pending-provenance">
+            <span>{t("knowledgeCutoff")}</span>
+            <time>{formatDateTime(stringValue(historyCoverage?.latest_knowledge_cutoff), locale)}</time>
+          </div>
+        </section>
       </div>
-      <div className="pending-history-section">
-        <PanelHeading
-          title={t("historicalPrewarm")}
-          status={teamHistoryReady === 2 ? "READY" : "UNKNOWN"}
-        />
-        <div className="audit-grid pending-history-metrics">
-          <Metric label={t("teamHistoryReady")} value={`${teamHistoryReady}/2`} />
-          <Metric
-            label={t("rosterPlayersReady")}
-            value={`${metricText(historyCoverage?.player_form_ready_count, locale)}/10`}
-          />
-          <Metric
-            label={t("playerHeroReady")}
-            value={`${metricText(historyCoverage?.player_hero_ready_count, locale)}/10`}
-          />
-          <Metric
-            label={t("knowledgeCutoff")}
-            value={formatDateTime(stringValue(historyCoverage?.latest_knowledge_cutoff), locale)}
-          />
+      <details className="match-metadata">
+        <summary>{t("matchDetails")}</summary>
+        <div className="pending-identity-facts">
+          <Metric label={t("raybetMatchId")} value={String(match.provider_match_id ?? t("unknown"))} />
+          <Metric label={t("format")} value={match.round ?? t("unknown")} />
+          <Metric label={t("scheduledAt")} value={formatDateTime(match.scheduled_at, locale)} />
+          <Metric label={t("lastDiscoveredAt")} value={formatDateTime(match.provider_observed_at, locale)} />
         </div>
-        <p className="pending-history-note">{t("waitingForDraftIdentity")}</p>
-      </div>
-      <div className="pending-market-section">
-        <PanelHeading title={t("raybetMarkets")} status={match.market.length ? "READY" : "UNKNOWN"} />
-        {match.market.length ? (
-          <table className="cds--data-table cds--data-table--sm">
-            <thead>
-              <tr>
-                <th>{t("selection")}</th>
-                <th>{t("market")}</th>
-                <th>{t("odds")}</th>
-                <th>{t("observed")}</th>
-              </tr>
-            </thead>
-            <tbody>
-              {match.market.slice(0, 12).map((item) => (
-                <tr key={item.odds_id}>
-                  <td>{teamNameForSelection(match, item.selection_team_id, t("unknown"))}</td>
-                  <td>{[item.market_type, item.match_stage].filter(Boolean).join(" / ") || t("unknown")}</td>
-                  <td>{Number(item.price).toFixed(2)}</td>
-                  <td>{formatDateTime(item.received_at, locale)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        ) : (
-          <PanelEmpty text={t("marketUnavailable")} />
-        )}
-      </div>
+      </details>
     </section>
   );
 }
 
-function ReadinessStrip({
+function ReadinessSummary({
   runtime,
   loading
 }: {
@@ -340,21 +346,30 @@ function ReadinessStrip({
 }) {
   const { locale, t } = useI18n();
   if (loading) {
-    return <div className="readiness-strip loading" aria-label={t("loadingReadiness")} />;
+    return <div className="readiness-summary loading" aria-label={t("loadingReadiness")} />;
   }
+  const dependencies = DEPENDENCY_ORDER.map((name) => ({ name, value: runtime?.dependencies[name] }));
+  const readyCount = dependencies.filter(({ value }) => value?.status === "READY").length;
+  const attentionCount = dependencies.length - readyCount;
   return (
-    <section className="readiness-strip" aria-label={t("businessReadiness")}>
-      {DEPENDENCY_ORDER.map((name) => {
-        const dependency = runtime?.dependencies[name];
-        return (
-          <div className="dependency" key={name} title={dependency?.message ?? undefined}>
+    <details className="readiness-summary">
+      <summary>
+        <span>{t("systemReadiness")}</span>
+        <StatusLabel status={runtime?.overall ?? "UNKNOWN"} compact />
+        <span className="readiness-count positive">{readyCount} {t("ready")}</span>
+        <span className="readiness-count">{attentionCount} {t("needAttention")}</span>
+        <span className="readiness-expand">{t("viewDetails")}</span>
+      </summary>
+      <section className="readiness-details" aria-label={t("businessReadiness")}>
+        {dependencies.map(({ name, value }) => (
+          <div className="dependency" key={name} title={value?.message ?? undefined}>
             <span>{translateDependency(name, locale)}</span>
-            <StatusLabel status={dependency?.status ?? "UNKNOWN"} compact />
-            <small>{t("dependencyAge")} {seconds(dependency?.age_seconds, locale)}</small>
+            <StatusLabel status={value?.status ?? "UNKNOWN"} compact />
+            <small>{t("dependencyAge")} {seconds(value?.age_seconds, locale)}</small>
           </div>
-        );
-      })}
-    </section>
+        ))}
+      </section>
+    </details>
   );
 }
 
@@ -371,12 +386,13 @@ function MapWorkspace({
   const quality = detail.latest_snapshot?.quality;
   const blockers = quality?.blockers ?? [];
   const warnings = quality?.warnings ?? [];
+  const decisionStatus = blockers.length ? "ACTION_REQUIRED" : warnings.length ? "DEGRADED" : "READY";
   return (
     <>
       <header className="map-header">
         <div>
           <p className="map-context">
-            {t("map")} {detail.map_number ?? "?"} / {t("valve")} {detail.valve_match_id ?? t("unresolved")}
+            {detail.tournament_name ?? t("unknownTournament")} · {t("map")} {detail.map_number ?? "?"}
           </p>
           <h1>
             {detail.team_a?.name ?? t("unknownTeam")} <span>{t("versus")}</span>{" "}
@@ -386,49 +402,41 @@ function MapWorkspace({
         <div className="map-state">
           <StatusLabel status={detail.latest_snapshot?.mode ?? "NO SNAPSHOT"} />
           <span>{t("decisionAt")} {formatTime(detail.latest_snapshot?.decision_at, locale)}</span>
-          <code title={detail.latest_snapshot?.snapshot_hash}>
-            {t("snapshotHash")} {shortHash(detail.latest_snapshot?.snapshot_hash)}
-          </code>
         </div>
       </header>
 
-      {(blockers.length > 0 || warnings.length > 0) && (
-        <section className="quality-band" aria-label={t("dataQuality")}>
-          <div>
-            <strong>{t("dataQuality")}</strong>
-            <span>{blockers.length ? t("decisionBlocked") : t("decisionDegraded")}</span>
-          </div>
-          <div className="quality-tags">
-            {blockers.map((item) => (
-              <Tag key={item} type="red" size="sm" title={item}>
-                {translateStatus(item, locale)}
-              </Tag>
-            ))}
-            {warnings.map((item) => (
-              <Tag key={item} type="warm-gray" size="sm" title={item}>
-                {translateStatus(item, locale)}
-              </Tag>
-            ))}
-          </div>
-        </section>
-      )}
+      <section className={`decision-readiness ${statusTone(decisionStatus)}`} aria-label={t("decisionReadiness")}>
+        <div className="decision-readiness-title">
+          <span>{t("decisionReadiness")}</span>
+          <strong>{blockers.length ? t("cannotDecide") : warnings.length ? t("limitedDecision") : t("decisionReady")}</strong>
+        </div>
+        <div className="quality-tags">
+          {blockers.map((item) => <Tag key={item} type="red" size="sm" title={item}>{translateStatus(item, locale)}</Tag>)}
+          {warnings.map((item) => <Tag key={item} type="warm-gray" size="sm" title={item}>{translateStatus(item, locale)}</Tag>)}
+          {!blockers.length && !warnings.length && <span>{t("qualityChecksPassed")}</span>}
+        </div>
+        <details className="snapshot-details">
+          <summary>{t("snapshotDetails")}</summary>
+          <code title={detail.latest_snapshot?.snapshot_hash}>{t("snapshotHash")} {shortHash(detail.latest_snapshot?.snapshot_hash)}</code>
+          <span>{t("valve")} {detail.valve_match_id ?? t("unresolved")}</span>
+        </details>
+      </section>
 
       <section className="decision-layout">
-        <div className="primary-intelligence">
-          <MarketPanel detail={detail} />
-          <DraftPanel detail={detail} />
-        </div>
+        <MarketPanel detail={detail} />
         <AiPanel detail={detail} />
       </section>
 
       <Tabs>
         <TabList aria-label={t("mapIntelligenceViews")} contained>
+          <Tab>{t("draftIntelligence")}</Tab>
           <Tab>{t("live")}</Tab>
           <Tab>{t("historical")}</Tab>
           <Tab>{t("evaluation")}</Tab>
           <Tab>{t("runtime")}</Tab>
         </TabList>
         <TabPanels>
+          <TabPanel><DraftPanel detail={detail} /></TabPanel>
           <TabPanel>
             <LivePanel detail={detail} />
           </TabPanel>
@@ -450,60 +458,54 @@ function MapWorkspace({
 function MarketPanel({ detail }: { detail: MapDetail }) {
   const { locale, t } = useI18n();
   const quality = detail.market_quality;
+  const pair = useMemo(
+    () => primaryMarketPair(detail.market, detail.team_a?.id, detail.team_b?.id),
+    [detail.market, detail.team_a?.id, detail.team_b?.id]
+  );
   const series = useMemo(() => {
+    if (!pair) return [];
+    const wanted = new Set([pair.teamA.odds_id, pair.teamB.odds_id]);
     const grouped = new Map<number, Array<[string, number]>>();
     detail.market_timeline.forEach((item) => {
+      if (!wanted.has(item.odds_id)) return;
       const values = grouped.get(item.odds_id) ?? [];
       values.push([item.received_at, Number(item.price)]);
       grouped.set(item.odds_id, values);
     });
-    return [...grouped.entries()].map(([oddsId, data], index) => ({
-      name: detail.market.find((item) => item.odds_id === oddsId)?.selection_team_id
-        ? `${t("selection")} ${index + 1}`
-        : `${t("odds")} ${oddsId}`,
+    return [pair.teamA, pair.teamB].map((market, index) => ({
+      name: index === 0 ? detail.team_a?.name ?? t("teamA") : detail.team_b?.name ?? t("teamB"),
       type: "line",
       showSymbol: false,
-      data
-    }));
-  }, [detail.market, detail.market_timeline, t]);
+      symbol: "circle",
+      lineStyle: { width: 2 },
+      data: grouped.get(market.odds_id) ?? []
+    })).filter((item) => item.data.length);
+  }, [detail.market_timeline, detail.team_a?.name, detail.team_b?.name, pair, t]);
+  const maxAge = pair ? Math.max(pair.teamA.age_seconds, pair.teamB.age_seconds) : null;
+  const marketStatus = pair?.teamA.normalized_status ?? pair?.teamB.normalized_status ?? "UNKNOWN";
+  const metadataVersion = quality?.metadata_version ?? pair?.teamA.metadata_version ?? pair?.teamB.metadata_version;
+  const hasTrend = series.length === 2 && series.every((item) => item.data.length >= 2);
   return (
     <section className="intel-panel market-panel">
       <PanelHeading
-        title={t("market")}
-        status={quality?.eligible ? "FRESH" : detail.market.length ? "DEGRADED" : "MISSING"}
+        title={t("primaryWinnerMarket")}
+        status={quality?.eligible ? "FRESH" : pair ? "DEGRADED" : "MISSING"}
       />
-      <div className="metric-row">
-        {detail.market.slice(0, 2).map((item, index) => (
-          <div className="metric" key={item.odds_id}>
-            <span>{index === 0 ? detail.team_a?.name : detail.team_b?.name}</span>
-            <strong>{Number(item.price).toFixed(2)}</strong>
-            <small>
-              {t("fair")} {item.fair_probability == null ? t("unknown") : percent(item.fair_probability, locale)}
-            </small>
-          </div>
-        ))}
+      {pair ? <MarketPair pair={pair} teamA={detail.team_a?.name} teamB={detail.team_b?.name} /> : <PanelEmpty text={t("marketUnavailable")} />}
+      <div className={`market-quality-line ${quality?.eligible ? "positive" : "warning"}`}>
+        <strong>{quality?.eligible ? t("marketUsable") : t("marketLimited")}</strong>
+        <span>{t("marketState")} {translateStatus(marketStatus, locale)}</span>
+        <span>{t("freshness")} {seconds(maxAge, locale)}</span>
+        <span>{t("pairSkew")} {seconds(quality?.pair_skew_seconds, locale)}</span>
+        <span title={metadataVersion ?? undefined}>{t("metadataVersion")} {shortVersion(metadataVersion, t("unknown"))}</span>
       </div>
-      <div className="audit-grid">
-        <Metric
-          label={t("pairQuality")}
-          value={translateStatus(quality?.eligible ? "READY" : "MISSING", locale)}
-        />
-        <Metric label={t("pairSkew")} value={seconds(quality?.pair_skew_seconds, locale)} />
-        <Metric
-          label={t("oddsAge")}
-          value={seconds(Math.max(...detail.market.map((item) => item.age_seconds), 0), locale)}
-        />
-        <Metric
-          label={t("metadataVersion")}
-          value={quality?.metadata_version ?? detail.market[0]?.metadata_version ?? t("unknown")}
-        />
-      </div>
-      {series.length ? (
+      {hasTrend ? (
         <Chart
           option={{
             tooltip: { trigger: "axis" },
-            legend: { top: 0, textStyle: { color: "#c6c6c6" } },
-            grid: { left: 44, right: 16, top: 42, bottom: 30 },
+            color: ["#78a9ff", "#f1c21b"],
+            legend: { top: 0, left: 0, textStyle: { color: "#c6c6c6" } },
+            grid: { left: 44, right: 16, top: 38, bottom: 30 },
             xAxis: { type: "time", axisLabel: { color: "#8d8d8d" } },
             yAxis: { type: "value", scale: true, axisLabel: { color: "#8d8d8d" } },
             series
@@ -511,7 +513,7 @@ function MarketPanel({ detail }: { detail: MapDetail }) {
           label={t("marketOddsTimeline")}
         />
       ) : (
-        <PanelEmpty text={t("noRayBetOdds")} />
+        <div className="trend-empty">{t("waitingForOddsTrend")}</div>
       )}
     </section>
   );
@@ -523,18 +525,50 @@ function DraftPanel({ detail }: { detail: MapDetail }) {
   const features = detail.draft?.features ?? {};
   const data = (key: keyof (typeof curve)[number]) =>
     curve.map((point) => [point.minute, point[key]]);
+  const slots = detail.draft?.slots ?? [];
+  const sideSlots = (side: "radiant" | "dire") =>
+    slots.filter((slot) => slot.side === side).sort((a, b) => a.position - b.position);
   return (
-    <section className="intel-panel draft-panel">
+    <section className="tab-content draft-panel">
       <PanelHeading
         title={t("draftIntelligence")}
         status={detail.draft?.complete ? "READY" : detail.draft ? "PARTIAL" : "MISSING"}
       />
+      <div className="draft-readiness-line">
+        <span>{t("playersIdentified")} <strong>{detail.draft?.roster_ready_count ?? 0}/10</strong></span>
+        <span>{t("heroesIdentified")} <strong>{detail.draft?.hero_ready_count ?? 0}/10</strong></span>
+        <span>{t("playerFormReady")} <strong>{detail.historical_prewarm?.player_form_ready_count ?? 0}/10</strong></span>
+        <span>{t("playerHeroHistoryReady")} <strong>{detail.historical_prewarm?.player_hero_ready_count ?? 0}/10</strong></span>
+      </div>
       <div className="compact-metrics">
         <Metric label={t("currentEdge")} value={signed(features.current_edge, locale)} />
         <Metric label={t("next5m")} value={signed(features.next_5m_edge, locale)} />
         <Metric label={t("peakMinute")} value={metricText(features.peak_minute, locale)} />
         <Metric label={t("peakEdge")} value={signed(features.peak_edge, locale)} />
       </div>
+      {detail.draft && (
+        <div className="lineup-block">
+          <div className="lineup-heading">{t("lineup")}</div>
+          <div className="lineup-grid">
+            {(["radiant", "dire"] as const).map((side) => (
+              <div className="lineup-side" key={side}>
+                <h3>{t(side)}</h3>
+                {sideSlots(side).map((slot) => (
+                  <div className="lineup-row" key={`${side}-${slot.position}`}>
+                    <span className="lineup-position">Pos{slot.position}</span>
+                    <span className="lineup-player">
+                      {slot.player_name ?? (slot.account_id ? `#${slot.account_id}` : t("playerUnknown"))}
+                    </span>
+                    <span className={`lineup-hero ${slot.hero_id == null ? "unknown" : ""}`}>
+                      {slot.hero_name ?? (slot.hero_id ? `Hero #${slot.hero_id}` : t("heroUnknown"))}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
       {curve.length ? (
         <Chart
           option={{
@@ -617,7 +651,10 @@ function AiPanel({ detail }: { detail: MapDetail }) {
           ))}
         </div>
       ) : (
-        <PanelEmpty text={t("noAiDecisions")} />
+        <div className="ai-empty">
+          <strong>{t("aiWaiting")}</strong>
+          <span>{t("noAiDecisions")}</span>
+        </div>
       )}
     </section>
   );
@@ -930,6 +967,33 @@ function Metric({ label, value }: { label: string; value: string }) {
   );
 }
 
+function MarketPair({
+  pair,
+  teamA,
+  teamB
+}: {
+  pair: { teamA: MarketObservation; teamB: MarketObservation };
+  teamA?: string | null;
+  teamB?: string | null;
+}) {
+  const { locale, t } = useI18n();
+  return (
+    <div className="market-pair">
+      <article>
+        <span>{teamA ?? t("teamA")}</span>
+        <strong>{Number(pair.teamA.price).toFixed(2)}</strong>
+        <small>{t("fair")} {pair.teamA.fair_probability == null ? t("unknown") : percent(pair.teamA.fair_probability, locale)}</small>
+      </article>
+      <span className="market-pair-versus">{t("versus")}</span>
+      <article>
+        <span>{teamB ?? t("teamB")}</span>
+        <strong>{Number(pair.teamB.price).toFixed(2)}</strong>
+        <small>{t("fair")} {pair.teamB.fair_probability == null ? t("unknown") : percent(pair.teamB.fair_probability, locale)}</small>
+      </article>
+    </div>
+  );
+}
+
 function ReasonList({ title, values }: { title: string; values?: string[] }) {
   if (!values?.length) return null;
   return (
@@ -1030,7 +1094,7 @@ function metricText(value: unknown, locale: Locale): string {
 }
 
 function seconds(value: number | null | undefined, locale: Locale): string {
-  return value == null ? translate("unknown", locale) : `${value.toFixed(1)}s`;
+  return value == null || !Number.isFinite(value) ? translate("unknown", locale) : `${value.toFixed(1)}s`;
 }
 
 function formatLatency(value: number | null, locale: Locale): string {
@@ -1056,6 +1120,19 @@ function formatDateTime(value: string | null | undefined, locale: Locale): strin
     : date.toLocaleString(locale);
 }
 
+function formatSchedule(value: string | null | undefined, locale: Locale): string {
+  if (!value) return translate("scheduleUnknown", locale);
+  const date = new Date(value);
+  if (Number.isNaN(date.valueOf())) return translate("invalidTime", locale);
+  const today = new Date();
+  const sameDay = date.getFullYear() === today.getFullYear()
+    && date.getMonth() === today.getMonth()
+    && date.getDate() === today.getDate();
+  return sameDay
+    ? date.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" })
+    : date.toLocaleString(locale, { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" });
+}
+
 function teamNameForSelection(
   match: MapSummary,
   selectionTeamId: string | null,
@@ -1066,12 +1143,14 @@ function teamNameForSelection(
   return fallback;
 }
 
-function marketHeadline(match: MapSummary): string | null {
-  const teamAId = match.team_a?.id;
-  const teamBId = match.team_b?.id;
+function primaryMarketPair(
+  markets: MarketObservation[],
+  teamAId: string | null | undefined,
+  teamBId: string | null | undefined
+): { teamA: MarketObservation; teamB: MarketObservation } | null {
   if (!teamAId || !teamBId) return null;
-  const groups = new Map<string, typeof match.market>();
-  for (const item of match.market) {
+  const groups = new Map<string, MarketObservation[]>();
+  for (const item of markets) {
     if (item.selection_team_id !== teamAId && item.selection_team_id !== teamBId) continue;
     const key = `${item.market_type ?? ""}\u0000${item.match_stage ?? ""}`;
     const group = groups.get(key) ?? [];
@@ -1085,12 +1164,9 @@ function marketHeadline(match: MapSummary): string | null {
     )
     .sort(([left], [right]) => marketPriority(left) - marketPriority(right));
   const selected = candidates[0]?.[1];
-  if (!selected) return null;
-  const priceA = selected.find((item) => item.selection_team_id === teamAId)?.price;
-  const priceB = selected.find((item) => item.selection_team_id === teamBId)?.price;
-  return priceA != null && priceB != null
-    ? `${Number(priceA).toFixed(2)} / ${Number(priceB).toFixed(2)}`
-    : null;
+  const teamA = selected?.find((item) => item.selection_team_id === teamAId);
+  const teamB = selected?.find((item) => item.selection_team_id === teamBId);
+  return teamA && teamB ? { teamA, teamB } : null;
 }
 
 function marketPriority(key: string): number {
@@ -1098,6 +1174,23 @@ function marketPriority(key: string): number {
   if (normalized.startsWith("winner\u0000final")) return 0;
   if (normalized.startsWith("winner\u0000")) return 1;
   return 2;
+}
+
+function marketLabel(item: MarketObservation, fallback: string): string {
+  return [item.market_type, item.match_stage].filter(Boolean).join(" / ") || fallback;
+}
+
+function latestReceivedAt(items: MarketObservation[]): string | null {
+  return items.map((item) => item.received_at).sort().at(-1) ?? null;
+}
+
+function shortVersion(value: string | null | undefined, fallback: string): string {
+  if (!value) return fallback;
+  const date = new Date(value);
+  if (!Number.isNaN(date.valueOf())) {
+    return date.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
+  }
+  return value.length > 18 ? `${value.slice(0, 15)}...` : value;
 }
 
 function objectValue(value: unknown): Record<string, unknown> | null {

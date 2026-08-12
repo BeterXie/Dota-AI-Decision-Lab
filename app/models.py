@@ -305,7 +305,7 @@ class DraftSlotRecord(Base):
     position: Mapped[int] = mapped_column(Integer, nullable=False)
     account_id: Mapped[int | None] = mapped_column(BigInteger)
     canonical_player_id: Mapped[UUID | None] = mapped_column(ForeignKey("canonical_players.id"))
-    hero_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    hero_id: Mapped[int | None] = mapped_column(Integer)
     source: Mapped[str] = mapped_column(String(32), nullable=False)
     confidence: Mapped[float] = mapped_column(Float, nullable=False)
 

@@ -258,7 +258,7 @@ async def test_production_lifecycle_replay_uses_postgres_and_converges() -> None
         async with engine.connect() as connection:
             assert await connection.scalar(text("select 1")) == 1
             revision = await connection.scalar(text("select version_num from alembic_version"))
-            assert revision == "0011_result_evidence"
+            assert revision == "0012_nullable_draft_heroes"
 
         start = datetime.now(UTC).replace(microsecond=0)
         raw_events = RawEventRepository()
@@ -277,7 +277,8 @@ async def test_production_lifecycle_replay_uses_postgres_and_converges() -> None
             significant_move=settings.significant_odds_move,
         )
         async with factory() as session, session.begin():
-            resolved = await dltv.bootstrap(session, valve_match_id=VALVE_MATCH_ID)
+            bootstrap = await dltv.bootstrap(session, valve_match_id=VALVE_MATCH_ID)
+            resolved = bootstrap.resolved
         async with factory() as session, session.begin():
             session.add_all(
                 [

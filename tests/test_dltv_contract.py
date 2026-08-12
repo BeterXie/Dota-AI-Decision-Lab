@@ -21,6 +21,7 @@ from app.providers.dltv.parser import (
     delayed_detail_is_fresh,
     parse_bootstrap_identity,
     parse_draft,
+    parse_draft_labels,
     parse_fast_patch,
 )
 from app.providers.dltv.reducer import reduce_fast_state
@@ -48,6 +49,46 @@ def test_recorded_bootstrap_resolves_identity_and_ten_draft_slots() -> None:
     assert len(draft.slots) == 10
     for side in ("radiant", "dire"):
         assert {slot.position for slot in draft.slots if slot.side == side} == set(range(1, 6))
+
+
+def test_prepick_bootstrap_preserves_player_slots_with_unknown_heroes() -> None:
+    payload = _fixture()
+    for player in payload["players"]:
+        player["hero_id"] = 0
+
+    draft = parse_draft(payload)
+
+    assert draft.complete is False
+    assert len(draft.slots) == 10
+    assert all(slot.account_id is not None for slot in draft.slots)
+    assert all(slot.hero_id is None for slot in draft.slots)
+    assert draft.blockers == ("DRAFT_PARTIAL",)
+    for side in ("radiant", "dire"):
+        assert {slot.position for slot in draft.slots if slot.side == side} == set(range(1, 6))
+
+
+def test_draft_labels_use_structured_identity_fields_not_live_metrics() -> None:
+    payload = _fixture()
+    payload["live_league_data"] = {
+        "stream_delay_s": 900,
+        "players": [{"account_id": 1001, "name": "Player One", "hero_id": 1}],
+    }
+    payload["full_stats"] = {
+        "radiant": {
+            "players": [
+                {
+                    "player": {"steam_id": 1001, "title": "Player One Updated"},
+                    "hero": {"steam_id": 1, "title": "Anti-Mage"},
+                    "net_worth": 99999,
+                }
+            ]
+        }
+    }
+
+    player_names, hero_names = parse_draft_labels(payload)
+
+    assert player_names == {1001: "Player One Updated"}
+    assert hero_names == {1: "Anti-Mage"}
 
 
 def test_fast_state_sparse_merge_and_duplicate_timestamps() -> None:

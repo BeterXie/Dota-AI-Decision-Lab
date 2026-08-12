@@ -15,19 +15,24 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.history.service import HistoricalIntelligenceService
 from app.models import (
     AiDecisionRecord,
+    CanonicalHero,
     CanonicalMap,
+    CanonicalPlayer,
     CanonicalSeries,
     CanonicalTeam,
     DecisionFutureOdds,
     DecisionSnapshotRecord,
     DltvLiveObservationRecord,
     DraftMinuteCurveRecord,
+    DraftSlotRecord,
     DraftSnapshotRecord,
     DurableJobRecord,
     LiveSyncEstimateRecord,
     MapResultEvidenceRecord,
     MapResultRecord,
     OddsObservationRecord,
+    PlayerFormSnapshotRecord,
+    PlayerHeroSnapshotRecord,
     ProviderMatchMapping,
     RayBetMatch,
 )
@@ -279,6 +284,65 @@ async def _map_payload(
         .order_by(DraftSnapshotRecord.observed_at.desc())
         .limit(1)
     )
+    draft_slots = (
+        list(
+            (
+                await session.scalars(
+                    select(DraftSlotRecord)
+                    .where(DraftSlotRecord.draft_snapshot_id == draft.id)
+                    .order_by(DraftSlotRecord.side, DraftSlotRecord.position)
+                )
+            ).all()
+        )
+        if draft is not None
+        else []
+    )
+    player_form_ready_count = 0
+    player_hero_ready_count = 0
+    player_feature_cutoffs: list[datetime] = []
+    historical = HistoricalIntelligenceService()
+    history_as_of = datetime.now(UTC)
+    team_histories = (
+        (
+            await historical.get_team_payload(session, series.team_a_id, as_of=history_as_of),
+            await historical.get_team_payload(session, series.team_b_id, as_of=history_as_of),
+        )
+        if series is not None
+        else ()
+    )
+    for team_history in team_histories:
+        if team_history["knowledge_cutoff"] is not None:
+            player_feature_cutoffs.append(team_history["knowledge_cutoff"])
+    for slot in draft_slots:
+        if slot.canonical_player_id is None:
+            continue
+        player_form = await session.scalar(
+            select(PlayerFormSnapshotRecord)
+            .where(
+                PlayerFormSnapshotRecord.canonical_player_id == slot.canonical_player_id,
+                PlayerFormSnapshotRecord.position == slot.position,
+            )
+            .order_by(PlayerFormSnapshotRecord.knowledge_cutoff.desc())
+            .limit(1)
+        )
+        if player_form is not None:
+            player_form_ready_count += 1
+            player_feature_cutoffs.append(player_form.knowledge_cutoff)
+        if slot.hero_id is None:
+            continue
+        player_hero = await session.scalar(
+            select(PlayerHeroSnapshotRecord)
+            .where(
+                PlayerHeroSnapshotRecord.canonical_player_id == slot.canonical_player_id,
+                PlayerHeroSnapshotRecord.hero_id == slot.hero_id,
+                PlayerHeroSnapshotRecord.position == slot.position,
+            )
+            .order_by(PlayerHeroSnapshotRecord.knowledge_cutoff.desc())
+            .limit(1)
+        )
+        if player_hero is not None:
+            player_hero_ready_count += 1
+            player_feature_cutoffs.append(player_hero.knowledge_cutoff)
     curve = (
         await session.scalar(
             select(DraftMinuteCurveRecord)
@@ -398,6 +462,9 @@ async def _map_payload(
                 "features": curve.derived_features if curve else None,
                 "model_version": curve.model_version if curve else None,
                 "data_version": curve.data_version if curve else None,
+                "roster_ready_count": sum(slot.account_id is not None for slot in draft_slots),
+                "hero_ready_count": sum(slot.hero_id is not None for slot in draft_slots),
+                "slots": [await _draft_slot_payload(session, slot) for slot in draft_slots],
             }
             if draft
             else None
@@ -454,6 +521,16 @@ async def _map_payload(
             else None
         ),
         "decisions": [_decision_payload(item) for item in decisions],
+        "historical_prewarm": {
+            "team_strength_ready_count": sum(
+                item["base_rating"] is not None for item in team_histories
+            ),
+            "player_form_ready_count": player_form_ready_count,
+            "player_hero_ready_count": player_hero_ready_count,
+            "latest_knowledge_cutoff": max(player_feature_cutoffs)
+            if player_feature_cutoffs
+            else None,
+        },
     }
     if detailed and snapshot is not None:
         payload["snapshot_payload"] = snapshot.canonical_payload
@@ -521,6 +598,26 @@ async def _map_payload(
             for item in result_evidence
         ]
     return payload
+
+
+async def _draft_slot_payload(session: AsyncSession, slot: DraftSlotRecord) -> dict:
+    player = (
+        await session.get(CanonicalPlayer, slot.canonical_player_id)
+        if slot.canonical_player_id is not None
+        else None
+    )
+    hero = await session.get(CanonicalHero, slot.hero_id) if slot.hero_id is not None else None
+    return {
+        "side": slot.side,
+        "position": slot.position,
+        "account_id": slot.account_id,
+        "canonical_player_id": str(slot.canonical_player_id)
+        if slot.canonical_player_id is not None
+        else None,
+        "player_name": player.name if player is not None else None,
+        "hero_id": slot.hero_id,
+        "hero_name": hero.name if hero is not None else None,
+    }
 
 
 async def _pending_series_payload(session: AsyncSession, series: CanonicalSeries) -> dict | None:

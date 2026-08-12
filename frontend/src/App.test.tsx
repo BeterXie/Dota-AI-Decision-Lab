@@ -149,7 +149,8 @@ test("shows RayBet series while canonical map identity is pending", async () => 
   render(<QueryClientProvider client={client}><App /></QueryClientProvider>);
 
   expect(await screen.findByRole("heading", { name: "Spirit vs Xtreme Gaming" })).toBeInTheDocument();
-  expect(screen.getByText("1.90 / 2.10")).toBeInTheDocument();
+  expect(screen.getByLabelText("Headline odds")).toHaveTextContent("1.90");
+  expect(screen.getByLabelText("Headline odds")).toHaveTextContent("2.10");
   expect(screen.getAllByText("PENDING MAP IDENTITY").length).toBeGreaterThan(0);
   expect(screen.getByText("RayBet data and team history prewarm are available. Valve/DLTV map identity is still required for the current roster, draft and live decision modes.")).toBeInTheDocument();
   expect(screen.getByRole("heading", { name: "Historical prewarm" })).toBeInTheDocument();
@@ -214,7 +215,7 @@ test("shows bilingual audit evidence for a decision lifecycle", async () => {
   render(<QueryClientProvider client={client}><App /></QueryClientProvider>);
 
   expect(await screen.findByText(/Snapshot hash abcdef123456/)).toBeInTheDocument();
-  expect(await screen.findByText("Pair quality")).toBeInTheDocument();
+  expect(await screen.findByText("Market pair usable")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("tab", { name: "Evaluation" }));
   expect(await screen.findByText("Closing odds")).toBeInTheDocument();
   expect(screen.getByText("Result evidence")).toBeInTheDocument();

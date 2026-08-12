@@ -133,6 +133,17 @@ export interface MapSummary {
     curve?: DraftPoint[];
     model_version?: string;
     data_version?: string;
+    roster_ready_count: number;
+    hero_ready_count: number;
+    slots: Array<{
+      side: "radiant" | "dire";
+      position: number;
+      account_id: number | null;
+      canonical_player_id: string | null;
+      player_name: string | null;
+      hero_id: number | null;
+      hero_name: string | null;
+    }>;
   } | null;
   live: LiveObservation | null;
   sync: {

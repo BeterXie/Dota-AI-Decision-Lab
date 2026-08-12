@@ -106,12 +106,23 @@ class ApplicationJobHandlers:
         valve_match_id = _required_int(job.payload, "valve_match_id")
         series_id = _optional_int(job.payload.get("dltv_series_id"))
         async with self._d.session_factory() as session, session.begin():
-            await self._d.dltv_bootstrap.bootstrap(
+            result = await self._d.dltv_bootstrap.bootstrap(
                 session,
                 valve_match_id=valve_match_id,
                 dltv_series_id=series_id,
             )
-            await self._d.health.dependency("DLTV_DRAFT", "READY")
+            await self._d.health.dependency(
+                "DLTV_DRAFT",
+                "READY" if result.draft.complete else "DEGRADED",
+                message=None if result.draft.complete else "DLTV draft is not complete yet",
+                canonical_map_id=str(result.resolved.canonical_map_id),
+                valve_match_id=valve_match_id,
+                roster_ready_count=sum(
+                    slot.account_id is not None for slot in result.draft.slots
+                ),
+                hero_ready_count=sum(slot.hero_id is not None for slot in result.draft.slots),
+                blockers=list(result.draft.blockers),
+            )
 
     async def sync_historical(self, job: DurableJob) -> None:
         async with self._d.session_factory() as session, session.begin():
@@ -239,6 +250,8 @@ class ApplicationJobHandlers:
                     position=slot.position,
                     as_of=cutoff,
                 )
+                if slot.hero_id is None:
+                    continue
                 await self._d.historical_features.build_player_hero(
                     session,
                     canonical_player_id=slot.canonical_player_id,
