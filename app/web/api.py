@@ -93,10 +93,10 @@ def create_app(
                 if payload is not None:
                     payloads.append(payload)
             payloads.sort(
-                key=lambda item: item["scheduled_at"]
-                or item.get("provider_observed_at")
-                or datetime.min.replace(tzinfo=UTC),
-                reverse=True,
+                key=lambda item: (
+                    item["scheduled_at"] is None,
+                    item["scheduled_at"] or datetime.max.replace(tzinfo=UTC),
+                )
             )
             return payloads[:24]
 
@@ -508,9 +508,7 @@ async def _map_payload(
     return payload
 
 
-async def _pending_series_payload(
-    session: AsyncSession, series: CanonicalSeries
-) -> dict | None:
+async def _pending_series_payload(session: AsyncSession, series: CanonicalSeries) -> dict | None:
     raybet_match = await _latest_raybet_match(session, series.id)
     if raybet_match is None:
         return None
@@ -530,8 +528,7 @@ async def _pending_series_payload(
     for observation in odds:
         latest_odds.setdefault(observation.odds_id, observation)
     team_order = {
-        team_id: index
-        for index, team_id in enumerate((series.team_a_id, series.team_b_id))
+        team_id: index for index, team_id in enumerate((series.team_a_id, series.team_b_id))
     }
     current_market = sorted(
         latest_odds.values(),
@@ -580,9 +577,7 @@ async def _pending_series_payload(
     }
 
 
-async def _latest_raybet_match(
-    session: AsyncSession, series_id: UUID | None
-) -> RayBetMatch | None:
+async def _latest_raybet_match(session: AsyncSession, series_id: UUID | None) -> RayBetMatch | None:
     if series_id is None:
         return None
     provider_match_id = await session.scalar(

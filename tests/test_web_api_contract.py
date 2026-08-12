@@ -118,6 +118,64 @@ async def test_match_feed_includes_raybet_series_pending_map_identity() -> None:
     await engine.dispose()
 
 
+@pytest.mark.asyncio
+async def test_match_feed_orders_earliest_scheduled_match_first() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    observed_at = datetime(2026, 8, 12, 4, 0, tzinfo=UTC)
+    async with factory.begin() as session:
+        for index, (team_a_name, team_b_name, scheduled_at) in enumerate(
+            (
+                ("Spirit", "Xtreme Gaming", datetime(2026, 8, 13, 5, 0, tzinfo=UTC)),
+                ("Level Up", "Rune Eaters", datetime(2026, 8, 12, 9, 0, tzinfo=UTC)),
+            ),
+            start=1,
+        ):
+            team_a = CanonicalTeam(name=team_a_name)
+            team_b = CanonicalTeam(name=team_b_name)
+            session.add_all((team_a, team_b))
+            await session.flush()
+            series = CanonicalSeries(
+                team_a_id=team_a.id,
+                team_b_id=team_b.id,
+                scheduled_at=scheduled_at,
+            )
+            session.add(series)
+            await session.flush()
+            provider_match_id = 38400000 + index
+            session.add_all(
+                (
+                    ProviderMatchMapping(
+                        provider="raybet",
+                        provider_match_id=str(provider_match_id),
+                        canonical_series_id=series.id,
+                        resolved_by="PROVIDER_DISCOVERY",
+                        confidence=1.0,
+                    ),
+                    RayBetMatch(
+                        provider_match_id=provider_match_id,
+                        game_id=4,
+                        team_a_provider_id=index * 10,
+                        team_a_name=team_a_name,
+                        team_b_provider_id=index * 10 + 1,
+                        team_b_name=team_b_name,
+                        scheduled_at=scheduled_at,
+                        observed_at=observed_at,
+                        raw_event_id=uuid4(),
+                    ),
+                )
+            )
+    app = create_app(factory, HealthRegistry())
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        payload = (await client.get("/api/matches")).json()
+
+    assert [item["team_a"]["name"] for item in payload] == ["Level Up", "Spirit"]
+    await engine.dispose()
+
+
 def test_status_websocket_serializes_runtime_timestamps(tmp_path: Path) -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     factory = async_sessionmaker(engine, expire_on_commit=False)
