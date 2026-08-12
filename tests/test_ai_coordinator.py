@@ -18,7 +18,7 @@ def _decision() -> AiDecision:
         fair_probability_a=None,
         confidence=0.5,
         market_assessment="UNKNOWN",
-        max_acceptable_price=None,
+        minimum_acceptable_odds_a=None,
         primary_reasons=["No edge"],
         counter_arguments=["Pricing could move"],
         data_quality_concerns=["Sample is limited"],
@@ -89,4 +89,36 @@ async def test_same_snapshot_goes_to_all_models_and_failures_are_isolated() -> N
     bad = next(record for record in records if record.provider == "bad")
     assert bad.normalized_response is None
     assert bad.raw_response == {"text": "not-json"}
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_new_model_version_can_rerun_same_snapshot() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session, session.begin():
+        snapshot = await SnapshotRepository().persist(
+            session,
+            canonical_map_id=None,
+            decision_at=datetime(2026, 1, 1, tzinfo=UTC),
+            mode="PREMATCH",
+            identity={},
+            market={},
+            draft=None,
+            history={},
+            live=None,
+            quality={"eligible": True},
+        )
+        first = await AiCoordinator(
+            [FakeProvider("openai", model="fixture-v1")], timeout_seconds=1
+        ).run_all(session, snapshot)
+        second = await AiCoordinator(
+            [FakeProvider("openai", model="fixture-v2")], timeout_seconds=1
+        ).run_all(session, snapshot)
+
+    assert first[0].id != second[0].id
+    assert first[0].model == "fixture-v1"
+    assert second[0].model == "fixture-v2"
     await engine.dispose()

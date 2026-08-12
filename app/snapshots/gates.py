@@ -7,6 +7,9 @@ from app.domain.snapshot import DecisionMode, GateResult
 class GateContext:
     identity_complete: bool
     market_available: bool
+    market_pair_valid: bool
+    market_blockers: tuple[str, ...]
+    market_warnings: tuple[str, ...]
     market_age_seconds: float | None
     market_max_age_seconds: float
     draft_available: bool
@@ -15,20 +18,25 @@ class GateContext:
     historical_blockers: tuple[str, ...]
     historical_warnings: tuple[str, ...]
     live_available: bool
+    live_message_age_seconds: float | None
     live_age_seconds: float | None
     live_max_age_seconds: float
     live_sync_status: str | None
+    live_sync_confidence: str | None
     live_full_available: bool = False
 
 
 def evaluate_gate(context: GateContext) -> GateResult:
     blockers: list[str] = []
-    warnings = list(context.historical_warnings)
+    warnings = [*context.historical_warnings, *context.market_warnings]
 
     if not context.identity_complete:
         blockers.append("IDENTITY_AMBIGUOUS")
     if not context.market_available:
         blockers.append("MARKET_MISSING")
+    elif not context.market_pair_valid:
+        blockers.append("MARKET_PAIR_INVALID")
+        blockers.extend(context.market_blockers)
     elif (
         context.market_age_seconds is None
         or context.market_age_seconds < 0
@@ -46,15 +54,24 @@ def evaluate_gate(context: GateContext) -> GateResult:
         warnings.append("DRAFT_PARTIAL")
 
     if context.live_available and context.draft_complete:
-        if context.live_age_seconds is None or context.live_age_seconds < 0:
+        if (
+            context.live_message_age_seconds is None
+            or context.live_message_age_seconds < 0
+            or context.live_message_age_seconds > context.live_max_age_seconds
+        ):
+            warnings.append("LIVE_STALE")
+        elif context.live_age_seconds is None or context.live_age_seconds < 0:
             warnings.append("LIVE_STALE")
         elif context.live_age_seconds > context.live_max_age_seconds:
             warnings.append("LIVE_STALE")
-        elif context.live_sync_status == "SAFE":
+        elif context.live_sync_status == "SAFE" and context.live_sync_confidence in {
+            "MEDIUM",
+            "HIGH",
+        }:
             mode = (
                 DecisionMode.LIVE_FULL if context.live_full_available else DecisionMode.LIVE_BASIC
             )
-        elif context.live_sync_status in {None, "UNKNOWN"}:
+        elif context.live_sync_status in {None, "UNKNOWN", "CALIBRATING"}:
             warnings.append("LIVE_SYNC_UNKNOWN")
         else:
             warnings.append("LIVE_DATA_DESYNC")

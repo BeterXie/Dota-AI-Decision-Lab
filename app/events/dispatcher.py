@@ -1,5 +1,6 @@
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
+from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -7,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.domain.events import DomainEventType
 from app.domain.jobs import JobType
 from app.jobs.repository import JobRepository
-from app.models import DomainEventRecord, OutboxEventRecord
+from app.models import DecisionSnapshotRecord, DomainEventRecord, OutboxEventRecord
 
 EVENT_JOB_MAP: dict[DomainEventType, JobType] = {
     DomainEventType.MARKET_DISCOVERED: JobType.REFRESH_ODDS_REGISTRY,
@@ -59,8 +60,44 @@ class DomainEventDispatcher:
                 dedupe_key=f"event:{record.id}",
                 payload={**record.payload, "domain_event_id": str(record.id)},
             )
+            if event_type is DomainEventType.MAP_STARTED:
+                await self._enqueue_closing_captures(session, record)
             record.processed_at = utc_now()
         return len(records)
+
+    async def _enqueue_closing_captures(
+        self,
+        session: AsyncSession,
+        record: DomainEventRecord,
+    ) -> None:
+        canonical_map_id = record.payload.get("canonical_map_id")
+        if not isinstance(canonical_map_id, str):
+            return
+        try:
+            canonical_map_uuid = UUID(canonical_map_id)
+        except ValueError:
+            return
+        snapshot_ids = list(
+            (
+                await session.scalars(
+                    select(DecisionSnapshotRecord.id).where(
+                        DecisionSnapshotRecord.canonical_map_id == canonical_map_uuid
+                    )
+                )
+            ).all()
+        )
+        for snapshot_id in snapshot_ids:
+            await self._jobs.enqueue(
+                session,
+                job_type=JobType.CAPTURE_FUTURE_ODDS,
+                dedupe_key=f"closing-odds:{snapshot_id}",
+                payload={
+                    "snapshot_id": str(snapshot_id),
+                    "capture_type": "CLOSING",
+                    "triggered_at": record.occurred_at.isoformat(),
+                },
+                not_before=record.occurred_at,
+            )
 
 
 class OutboxDispatcher:

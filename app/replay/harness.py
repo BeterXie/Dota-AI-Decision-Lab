@@ -10,7 +10,8 @@ from pydantic_core import to_jsonable_python
 from app.canonical import content_digest
 from app.domain.draft import DraftValidation
 from app.domain.live import DltvFastState
-from app.providers.dltv.parser import parse_draft, parse_fast_state
+from app.providers.dltv.parser import parse_draft, parse_fast_patch
+from app.providers.dltv.reducer import reduce_fast_state
 from app.providers.raybet.parser import parse_socket_publish
 from app.snapshots.gates import GateContext, evaluate_gate
 from app.temporal.aligner import CalibrationSignal, estimate_synchronization
@@ -180,13 +181,19 @@ class ReplayHarness:
             self._market_updates += 1
 
     def _apply_live(self, payload: dict[str, Any], received_at: datetime) -> None:
-        state = parse_fast_state(
-            payload,
-            valve_match_id=self._valve_match_id,
-            received_at=received_at,
+        reduction = reduce_fast_state(
+            self._live,
+            parse_fast_patch(
+                payload,
+                valve_match_id=self._valve_match_id,
+                received_at=received_at,
+            ),
         )
+        state = reduction.state
+        if state is None:
+            return
         previous = self._live
-        if previous is not None and previous.payload_hash == state.payload_hash:
+        if not reduction.changed:
             return
         if previous is not None:
             kills_changed = (
@@ -228,7 +235,12 @@ class ReplayHarness:
         )
         market_age = _age_seconds(decision_at, latest_market_at)
         live_age = _age_seconds(
-            decision_at, self._live.received_at if self._live is not None else None
+            decision_at,
+            self._live.last_state_change_received_at if self._live is not None else None,
+        )
+        live_message_age = _age_seconds(
+            decision_at,
+            self._live.last_message_received_at if self._live is not None else None,
         )
         estimate = estimate_synchronization(
             self._canonical_map_id,
@@ -245,6 +257,9 @@ class ReplayHarness:
             GateContext(
                 identity_complete=True,
                 market_available=bool(self._market),
+                market_pair_valid=bool(self._market),
+                market_blockers=(),
+                market_warnings=("MARKET_STATUS_UNKNOWN",) if self._market else (),
                 market_age_seconds=market_age,
                 market_max_age_seconds=self._settings.market_max_age_seconds,
                 draft_available=self._draft is not None,
@@ -255,9 +270,11 @@ class ReplayHarness:
                 historical_blockers=tuple(self._history["blockers"] if self._history else ()),
                 historical_warnings=tuple(self._history["warnings"] if self._history else ()),
                 live_available=self._live is not None,
+                live_message_age_seconds=live_message_age,
                 live_age_seconds=live_age,
                 live_max_age_seconds=self._settings.live_max_age_seconds,
                 live_sync_status=estimate.status,
+                live_sync_confidence=estimate.confidence,
             )
         )
         live_payload = None
@@ -296,6 +313,8 @@ class ReplayHarness:
                     "eligible": gate.eligible,
                     "blockers": list(gate.blockers),
                     "warnings": list(gate.warnings),
+                    "live_message_age_seconds": live_message_age,
+                    "live_effective_state_age_seconds": live_age,
                     "live_sync": estimate.model_dump(mode="json"),
                 },
             }

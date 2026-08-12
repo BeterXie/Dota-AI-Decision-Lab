@@ -18,8 +18,9 @@ from app.providers.dltv.parser import (
     PARSER_VERSION,
     parse_bootstrap_identity,
     parse_draft,
-    parse_fast_state,
+    parse_fast_patch,
 )
+from app.providers.dltv.reducer import reduce_fast_state
 from app.repositories.raw import RawEventRepository
 
 
@@ -144,14 +145,24 @@ class DltvBootstrapCoordinator:
         received_at: datetime,
         raw_event_id: UUID,
     ) -> None:
-        state = parse_fast_state(payload, valve_match_id=valve_match_id, received_at=received_at)
+        reduction = reduce_fast_state(
+            None,
+            parse_fast_patch(
+                payload,
+                valve_match_id=valve_match_id,
+                received_at=received_at,
+            ),
+        )
+        if reduction.state is None:
+            return
+        state = reduction.state
         latest_hash = await session.scalar(
             select(DltvLiveObservationRecord.payload_hash)
             .where(DltvLiveObservationRecord.valve_match_id == valve_match_id)
             .order_by(DltvLiveObservationRecord.received_at.desc())
             .limit(1)
         )
-        if latest_hash == state.payload_hash:
+        if latest_hash == state.state_hash:
             return
         session.add(
             DltvLiveObservationRecord(
@@ -164,7 +175,11 @@ class DltvBootstrapCoordinator:
                 first_blood=state.first_blood,
                 source_game_time=state.source_game_time,
                 received_at=received_at,
-                payload_hash=state.payload_hash,
+                payload_hash=state.state_hash,
+                connection_id=state.connection_id,
+                reconnect_generation=state.reconnect_generation,
+                last_message_received_at=state.last_message_received_at,
+                last_state_change_received_at=state.last_state_change_received_at,
                 raw_event_id=raw_event_id,
             )
         )

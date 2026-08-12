@@ -3,7 +3,7 @@ from typing import Any
 
 from app.canonical import content_digest
 from app.domain.draft import DraftSlot, DraftValidation
-from app.domain.live import DltvFastState
+from app.domain.live import DltvFastPatch
 from app.providers.dltv.models import DltvBootstrapIdentity, DltvSeries, DltvSeriesFrame
 
 PARSER_VERSION = "dltv-v1"
@@ -147,29 +147,40 @@ def parse_draft(payload: dict[str, Any]) -> DraftValidation:
     )
 
 
-def parse_fast_state(
-    payload: dict[str, Any], *, valve_match_id: int, received_at: datetime
-) -> DltvFastState:
-    game_time = _optional_nonnegative_int(payload.get("game_time"))
-    state_values = {
-        "game_time": game_time,
-        "radiant_score": _optional_nonnegative_int(payload.get("radiant_score")),
-        "dire_score": _optional_nonnegative_int(payload.get("dire_score")),
-        "radiant_lead": _optional_int(payload.get("radiant_lead")),
-        "first_blood": payload.get("first_blood")
-        if isinstance(payload.get("first_blood"), str)
-        else None,
+def parse_fast_patch(
+    payload: dict[str, Any],
+    *,
+    valve_match_id: int,
+    received_at: datetime,
+    connection_id: str | None = None,
+    reconnect_generation: int = 0,
+) -> DltvFastPatch:
+    updates: dict[str, Any] = {}
+    field_mapping = {
+        "game_time": ("game_time_seconds", _optional_nonnegative_int),
+        "radiant_score": ("radiant_kills", _optional_nonnegative_int),
+        "dire_score": ("dire_kills", _optional_nonnegative_int),
+        "radiant_lead": ("radiant_nw_lead", _optional_int),
     }
-    return DltvFastState(
+    for provider_field, (state_field, parser) in field_mapping.items():
+        if provider_field in payload:
+            raw_value = payload[provider_field]
+            parsed_value = parser(raw_value)
+            if raw_value is None or parsed_value is not None:
+                updates[state_field] = parsed_value
+    if "first_blood" in payload:
+        value = payload["first_blood"]
+        if value is None or isinstance(value, str):
+            updates["first_blood"] = value
+    game_time = updates.get("game_time_seconds")
+    return DltvFastPatch(
         valve_match_id=valve_match_id,
-        game_time_seconds=game_time,
-        radiant_kills=state_values["radiant_score"],
-        dire_kills=state_values["dire_score"],
-        radiant_nw_lead=state_values["radiant_lead"],
-        first_blood=state_values["first_blood"],
-        source_game_time=game_time,
-        received_at=received_at,
-        payload_hash=content_digest(state_values),
+        updates=updates,
+        source_game_time=game_time if isinstance(game_time, int) else None,
+        message_received_at=received_at,
+        payload_hash=content_digest(payload),
+        connection_id=connection_id,
+        reconnect_generation=reconnect_generation,
     )
 
 

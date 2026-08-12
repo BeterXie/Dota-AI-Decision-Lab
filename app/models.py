@@ -202,6 +202,10 @@ class ProviderRawEvent(Base):
     payload: Mapped[dict] = mapped_column(JSON_DOCUMENT, nullable=False)
     payload_hash: Mapped[str] = mapped_column(String(128), nullable=False)
     parser_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    connection_id: Mapped[str | None] = mapped_column(String(64))
+    reconnect_generation: Mapped[int | None] = mapped_column(Integer)
+    normalized_state_hash: Mapped[str | None] = mapped_column(String(128))
+    is_duplicate: Mapped[bool | None] = mapped_column(Boolean)
 
 
 class RayBetMatch(Base):
@@ -262,6 +266,7 @@ class OddsObservationRecord(Base):
     overround: Mapped[float | None] = mapped_column(Float)
     raw_status: Mapped[int | None] = mapped_column(Integer)
     normalized_status: Mapped[str | None] = mapped_column(String(32))
+    metadata_version: Mapped[str | None] = mapped_column(String(64))
     provider_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     received_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), primary_key=True, nullable=False
@@ -577,6 +582,14 @@ class DltvLiveObservationRecord(Base):
     )
     stored_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     payload_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    connection_id: Mapped[str | None] = mapped_column(String(64))
+    reconnect_generation: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_message_received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
+    last_state_change_received_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
     raw_event_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
 
 
@@ -591,9 +604,39 @@ class LiveSyncEstimateRecord(Base):
     p90_seconds: Mapped[float | None] = mapped_column(Float)
     jitter_seconds: Mapped[float | None] = mapped_column(Float)
     sample_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    accepted_pair_ratio: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    ambiguous_ratio: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
+    outlier_ratio: Mapped[float] = mapped_column(Float, nullable=False, default=0.0)
     confidence: Mapped[str] = mapped_column(String(16), nullable=False)
     status: Mapped[str] = mapped_column(String(16), nullable=False)
     calculated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+
+
+class LiveCalibrationPairRecord(Base):
+    __tablename__ = "live_calibration_pairs"
+    __table_args__ = (
+        UniqueConstraint(
+            "canonical_map_id",
+            "calculated_at",
+            "raybet_signal_id",
+            name="uq_live_calibration_signal",
+        ),
+        Index("ix_live_calibration_map_time", "canonical_map_id", "calculated_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    canonical_map_id: Mapped[UUID] = mapped_column(ForeignKey("canonical_maps.id"), nullable=False)
+    calculated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    raybet_signal_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    dltv_signal_id: Mapped[str | None] = mapped_column(String(128))
+    raybet_received_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    dltv_received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    lag_seconds: Mapped[float | None] = mapped_column(Float)
+    raybet_signal_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    dltv_signal_type: Mapped[str | None] = mapped_column(String(64))
+    uniqueness_margin_seconds: Mapped[float | None] = mapped_column(Float)
+    accepted: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    reject_reason: Mapped[str | None] = mapped_column(String(64))
 
 
 class DecisionSnapshotRecord(Base):
@@ -612,7 +655,14 @@ class DecisionSnapshotRecord(Base):
 class AiDecisionRecord(Base):
     __tablename__ = "ai_decisions"
     __table_args__ = (
-        UniqueConstraint("snapshot_id", "provider", name="uq_ai_provider_snapshot"),
+        UniqueConstraint(
+            "snapshot_id",
+            "provider",
+            "model",
+            "prompt_version",
+            "decision_policy_version",
+            name="uq_ai_experiment",
+        ),
         Index("ix_ai_snapshot_provider", "snapshot_hash", "provider"),
     )
 
@@ -623,6 +673,7 @@ class AiDecisionRecord(Base):
     model: Mapped[str] = mapped_column(String(128), nullable=False)
     model_version: Mapped[str] = mapped_column(String(128), nullable=False)
     prompt_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    decision_policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
     request_started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     response_received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     latency_seconds: Mapped[float | None] = mapped_column(Float)
@@ -636,7 +687,7 @@ class DecisionFutureOdds(Base):
     __tablename__ = "decision_future_odds"
     __table_args__ = (
         UniqueConstraint(
-            "decision_snapshot_id", "horizon_seconds", "due_at", name="uq_future_odds_horizon"
+            "decision_snapshot_id", "capture_type", "due_at", name="uq_future_odds_capture"
         ),
         Index("ix_future_odds_due_brin", "due_at", postgresql_using="brin"),
         {"postgresql_partition_by": "RANGE (due_at)"},
@@ -646,11 +697,19 @@ class DecisionFutureOdds(Base):
     decision_snapshot_id: Mapped[UUID] = mapped_column(
         ForeignKey("decision_snapshots.id"), nullable=False
     )
-    horizon_seconds: Mapped[int] = mapped_column(Integer, nullable=False)
+    capture_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    horizon_seconds: Mapped[int | None] = mapped_column(Integer)
+    triggered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     due_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), primary_key=True)
     observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     odds_a: Mapped[Decimal | None] = mapped_column(Numeric(12, 5))
     odds_b: Mapped[Decimal | None] = mapped_column(Numeric(12, 5))
+    market_type: Mapped[str | None] = mapped_column(String(128))
+    match_stage: Mapped[str | None] = mapped_column(String(64))
+    market_status: Mapped[str | None] = mapped_column(String(32))
+    capture_policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    pair_quality: Mapped[dict] = mapped_column(JSON_DOCUMENT, nullable=False, default=dict)
+    pair_skew_seconds: Mapped[float | None] = mapped_column(Float)
     status: Mapped[str] = mapped_column(String(32), nullable=False)
 
 
@@ -664,6 +723,27 @@ class MapResultRecord(Base):
     advanced_first_usable_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     settled_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     provider_conflict: Mapped[bool] = mapped_column(Boolean, default=False)
+
+
+class MapResultEvidenceRecord(Base):
+    __tablename__ = "map_result_evidence"
+    __table_args__ = (
+        UniqueConstraint("canonical_map_id", "raw_event_id", name="uq_result_evidence_raw"),
+        Index("ix_result_evidence_map_usable", "canonical_map_id", "first_usable_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    canonical_map_id: Mapped[UUID] = mapped_column(ForeignKey("canonical_maps.id"), nullable=False)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    provider_match_id: Mapped[str] = mapped_column(String(128), nullable=False)
+    winner_team_id: Mapped[UUID | None] = mapped_column(ForeignKey("canonical_teams.id"))
+    result_observed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    first_usable_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    raw_event_id: Mapped[UUID] = mapped_column(Uuid, nullable=False)
+    normalizer_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    identity_confidence: Mapped[float] = mapped_column(Float, nullable=False)
+    conflict_status: Mapped[str] = mapped_column(String(32), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 
 class DecisionEvaluationRecord(Base):

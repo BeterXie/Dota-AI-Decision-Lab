@@ -1,6 +1,6 @@
 # Dota AI Decision Lab
 
-Dota AI Decision Lab is a standalone Dota 2 decision-intelligence runtime. It aligns RayBet market observations, DLTV draft/live state, STRATZ and OpenDota historical facts, local Draft Intelligence, deterministic quality gates, immutable DecisionSnapshots, and independent GPT, Claude, and Gemini decisions.
+Dota AI Decision Lab is a standalone Dota 2 decision-intelligence runtime. It aligns RayBet market observations, DLTV draft/live state, STRATZ and OpenDota historical facts, local Draft Intelligence, deterministic quality gates, immutable DecisionSnapshots, and independent GPT, Claude, and Gemini decisions. The operational dashboard supports Chinese and English and keeps data quality, provenance, closing odds, result evidence, and worker readiness next to each decision.
 
 V1 is shadow decision only. It does not place bets or manage a bankroll.
 
@@ -93,10 +93,12 @@ Run the deterministic recorded-timeline replay without provider network access:
 ```powershell
 uv run pytest tests\test_deterministic_replay.py
 if ($LASTEXITCODE -ne 0) { throw "Replay tests failed with exit code $LASTEXITCODE" }
+uv run pytest tests\test_production_lifecycle_replay.py
+if ($LASTEXITCODE -ne 0) { throw "Production replay failed with exit code $LASTEXITCODE" }
 ```
 
-The replay harness verifies ordering, duplicate delivery, restart recovery, no future leakage, degradation, and deterministic snapshot hashes. `tools/replay_timeline.py` accepts owner-recorded JSON timelines together with explicit `--canonical-map-id` and `--valve-match-id` arguments. Sanitized provider fixtures under `tests/fixtures` cover RayBet and DLTV protocol contracts.
+The deterministic replay harness verifies ordering, duplicate delivery, restart recovery, no future leakage, degradation, and deterministic snapshot hashes. The production lifecycle replay creates an isolated PostgreSQL database, applies real Alembic migrations, and drives production collectors, historical fallback, PREMATCH/POST_DRAFT/LIVE_BASIC snapshots, AI isolation, closing odds, settlement, evaluation, and durable job lease recovery. `tools/replay_timeline.py` accepts owner-recorded JSON timelines together with explicit `--canonical-map-id` and `--valve-match-id` arguments. Sanitized provider fixtures under `tests/fixtures` cover RayBet, DLTV, Historical, and pinned R.O.S.H. contracts.
 
 ## Architecture invariants
 
-The implementation contract is defined by `AGENTS.md` and `docs/ARCHITECTURE.md`. In particular, provider data is raw-first and append-oriented; unknown values remain unknown; historical facts obey `first_usable_at` and `knowledge_cutoff`; snapshots are immutable; every AI receives the same canonical `snapshot_hash`; and unsafe live synchronization degrades to a valid lower decision mode.
+The implementation contract is defined by `AGENTS.md` and `docs/ARCHITECTURE.md`. In particular, provider data is raw-first and append-oriented; unknown values remain unknown; historical facts obey `first_usable_at` and `knowledge_cutoff`; snapshots are immutable; every AI receives the same canonical `snapshot_hash`; and unsafe live synchronization degrades to a valid lower decision mode. RayBet pairs must pass strict identity/freshness/skew checks, DLTV freshness uses effective state changes as well as message receipt, and closing/result evidence remains explicit and auditable.

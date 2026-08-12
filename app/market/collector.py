@@ -6,7 +6,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.events import DomainEvent, DomainEventType
 from app.events.outbox import EventRepository
-from app.market.fair_probability import remove_vig
 from app.market.odds_registry import OddsRegistry
 from app.models import (
     CanonicalMap,
@@ -20,6 +19,7 @@ from app.providers.raybet.parser import (
     parse_socket_publish,
 )
 from app.repositories.raw import RawEventRepository
+from app.time import ensure_utc
 
 
 class RayBetOddsCollector:
@@ -107,6 +107,12 @@ class RayBetOddsCollector:
                 .order_by(OddsObservationRecord.received_at.desc())
                 .limit(1)
             )
+            if previous is not None and (
+                previous.price == delta.price
+                and previous.raw_status == delta.raw_status
+                and _same_provider_time(previous.provider_updated_at, delta.provider_updated_at)
+            ):
+                continue
             match_mapping = await session.scalar(
                 select(ProviderMatchMapping).where(
                     ProviderMatchMapping.provider == "raybet",
@@ -134,23 +140,6 @@ class RayBetOddsCollector:
                         ProviderTeamMapping.provider_team_id == str(metadata.team_id),
                     )
                 )
-            opponent = await session.scalar(
-                select(OddsObservationRecord)
-                .where(
-                    OddsObservationRecord.provider_match_id == delta.match_id,
-                    OddsObservationRecord.odds_id != delta.odds_id,
-                    OddsObservationRecord.market_type == metadata.group_short_name,
-                    OddsObservationRecord.match_stage == metadata.match_stage,
-                )
-                .order_by(OddsObservationRecord.received_at.desc())
-                .limit(1)
-            )
-            if opponent is None:
-                fair_probability = overround = None
-            else:
-                fair_probability, _, overround = remove_vig(
-                    float(delta.price), float(opponent.price)
-                )
             session.add(
                 OddsObservationRecord(
                     provider_match_id=delta.match_id,
@@ -162,10 +151,11 @@ class RayBetOddsCollector:
                     selection_team_id=selection_team_id,
                     price=delta.price,
                     implied_probability=1.0 / float(delta.price),
-                    fair_probability=fair_probability,
-                    overround=overround,
+                    fair_probability=None,
+                    overround=None,
                     raw_status=delta.raw_status,
-                    normalized_status=None,
+                    normalized_status="UNKNOWN",
+                    metadata_version=metadata.refreshed_at.isoformat(),
                     provider_updated_at=delta.provider_updated_at,
                     received_at=received,
                     raw_event_id=raw_event_id,
@@ -200,3 +190,9 @@ def _map_number(match_stage: str | None) -> int | None:
         return None
     digits = "".join(character for character in match_stage if character.isdigit())
     return int(digits) if digits else None
+
+
+def _same_provider_time(first: datetime | None, second: datetime | None) -> bool:
+    if first is None or second is None:
+        return first is second
+    return ensure_utc(first) == ensure_utc(second)

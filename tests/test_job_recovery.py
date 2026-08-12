@@ -97,7 +97,7 @@ async def test_reconciliation_enqueues_missing_settlement_idempotently() -> None
     reconciliation = ReconciliationService(
         jobs,
         lease_seconds=120,
-        ai_provider_names=(),
+        ai_experiments=(),
         future_odds_horizons=(30, 60),
     )
     for _ in range(2):

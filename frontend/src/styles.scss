@@ -230,6 +230,13 @@ textarea {
   white-space: nowrap;
 }
 
+.dependency small {
+  color: #6f6f6f;
+  font-family: "IBM Plex Mono", monospace;
+  font-size: 0.62rem;
+  white-space: nowrap;
+}
+
 .status-label {
   display: inline-flex;
   align-items: center;
@@ -299,6 +306,15 @@ textarea {
   font-size: 0.75rem;
 }
 
+.map-state code {
+  max-width: 17rem;
+  overflow: hidden;
+  color: #a8a8a8;
+  font-size: 0.67rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .quality-band {
   display: grid;
   grid-template-columns: 12rem minmax(0, 1fr);
@@ -363,11 +379,17 @@ textarea {
 
 .metric-row,
 .compact-metrics,
-.job-statuses {
+.job-statuses,
+.audit-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   border-top: 1px solid #393939;
   border-left: 1px solid #393939;
+}
+
+.audit-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  margin: 0.75rem 0;
 }
 
 .metric-row {
@@ -416,14 +438,18 @@ textarea {
   animation: readiness-pulse 1.4s ease-in-out infinite alternate;
 }
 
-.provenance {
-  overflow: hidden;
+.provenance-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
   margin: 0.65rem 0 0;
   color: #6f6f6f;
   font-family: "IBM Plex Mono", monospace;
   font-size: 0.65rem;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+}
+
+.provenance-list span {
+  overflow-wrap: anywhere;
 }
 
 .decision-list {
@@ -487,7 +513,7 @@ textarea {
 }
 
 .live-metrics {
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .history-grid,
@@ -509,6 +535,46 @@ textarea {
 .runtime-layout > div {
   min-width: 0;
   overflow-x: auto;
+}
+
+.evaluation-layout {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 2rem;
+}
+
+.evaluation-layout > div {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.evaluation-layout h3 {
+  margin: 0 0 1rem;
+}
+
+.result-summary {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.evidence-list article {
+  display: grid;
+  gap: 0.35rem;
+  padding: 0.75rem 0;
+  border-bottom: 1px solid #393939;
+  color: #a8a8a8;
+  font-size: 0.75rem;
+}
+
+.evidence-list article > div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.evidence-list small {
+  overflow-wrap: anywhere;
+  color: #6f6f6f;
+  font-family: "IBM Plex Mono", monospace;
 }
 
 .job-statuses {
@@ -578,7 +644,8 @@ textarea {
 
   .decision-layout,
   .history-grid,
-  .runtime-layout {
+  .runtime-layout,
+  .evaluation-layout {
     grid-template-columns: 1fr;
   }
 
@@ -645,7 +712,9 @@ textarea {
 
   .compact-metrics,
   .live-metrics,
-  .job-statuses {
+  .job-statuses,
+  .audit-grid,
+  .result-summary {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 

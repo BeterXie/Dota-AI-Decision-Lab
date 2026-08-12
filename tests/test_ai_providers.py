@@ -12,7 +12,7 @@ DECISION = {
     "fair_probability_a": None,
     "confidence": 0.4,
     "market_assessment": "UNKNOWN",
-    "max_acceptable_price": None,
+    "minimum_acceptable_odds_a": None,
     "primary_reasons": ["Evidence is incomplete"],
     "counter_arguments": ["The market may already price known strength"],
     "data_quality_concerns": ["Historical sample is small"],

@@ -10,6 +10,7 @@ from app.models import (
     CanonicalMap,
     CanonicalPlayer,
     CanonicalSeries,
+    CanonicalTeam,
     HistoricalMapRecord,
     HistoricalPlayerMapRecord,
     ProviderEventMapping,
@@ -308,12 +309,25 @@ class HistoricalRepository:
     ) -> UUID | None:
         if provider_team_id is None:
             return None
-        return await session.scalar(
+        existing = await session.scalar(
             select(ProviderTeamMapping.canonical_team_id).where(
                 ProviderTeamMapping.provider == provider,
                 ProviderTeamMapping.provider_team_id == provider_team_id,
             )
         )
+        if existing is not None:
+            return existing
+        team = CanonicalTeam(name=f"{provider.upper()} team {provider_team_id}")
+        session.add(team)
+        await session.flush()
+        session.add(
+            ProviderTeamMapping(
+                provider=provider,
+                provider_team_id=provider_team_id,
+                canonical_team_id=team.id,
+            )
+        )
+        return team.id
 
     async def _player_id(self, session: AsyncSession, provider: str, account_id: int) -> UUID:
         mapping = await session.scalar(

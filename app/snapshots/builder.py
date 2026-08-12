@@ -11,6 +11,7 @@ from app.config import Settings
 from app.domain.snapshot import DecisionSnapshot, GateResult
 from app.history.service import HistoricalIntelligenceService
 from app.market.fair_probability import remove_vig
+from app.market.pairing import MarketPairLeg, evaluate_market_pair
 from app.models import (
     CanonicalMap,
     CanonicalSeries,
@@ -21,6 +22,7 @@ from app.models import (
     DraftSnapshotRecord,
     LiveSyncEstimateRecord,
     OddsObservationRecord,
+    ProviderRawEvent,
 )
 from app.snapshots.gates import GateContext, evaluate_gate
 from app.snapshots.repository import SnapshotRepository
@@ -89,10 +91,17 @@ class SnapshotBuilder:
             team_a is not None and team_b is not None and series.team_a_id != series.team_b_id
         )
 
-        market, market_age = await self._load_market(
+        (
+            market,
+            market_age,
+            market_pair_valid,
+            market_blockers,
+            market_warnings,
+        ) = await self._load_market(
             session,
             canonical_map_id=canonical_map_id,
             canonical_series_id=series.id,
+            expected_team_ids=(series.team_a_id, series.team_b_id),
             decision_at=decision_at,
         )
         if canonical_map_id is None:
@@ -108,9 +117,15 @@ class SnapshotBuilder:
             decision_at=decision_at,
         )
         if canonical_map_id is None:
-            live, live_age, live_complete, sync = None, None, False, None
+            live, live_message_age, live_age, live_complete, sync = (
+                None,
+                None,
+                None,
+                False,
+                None,
+            )
         else:
-            live, live_age, live_complete = await self._load_live(
+            live, live_message_age, live_age, live_complete = await self._load_live(
                 session, canonical_map_id=canonical_map_id, decision_at=decision_at
             )
             sync = await session.scalar(
@@ -129,6 +144,9 @@ class SnapshotBuilder:
             GateContext(
                 identity_complete=identity_complete,
                 market_available=market is not None,
+                market_pair_valid=market_pair_valid,
+                market_blockers=market_blockers,
+                market_warnings=market_warnings,
                 market_age_seconds=market_age,
                 market_max_age_seconds=self._settings.live_market_max_age_seconds,
                 draft_available=draft is not None,
@@ -137,9 +155,11 @@ class SnapshotBuilder:
                 historical_blockers=tuple(history_blockers),
                 historical_warnings=tuple(history_warnings),
                 live_available=live is not None and live_complete,
+                live_message_age_seconds=live_message_age,
                 live_age_seconds=live_age,
                 live_max_age_seconds=self._settings.live_state_max_age_seconds,
                 live_sync_status=sync.status if sync is not None else None,
+                live_sync_confidence=sync.confidence if sync is not None else None,
             )
         )
         if not gate.eligible:
@@ -150,7 +170,8 @@ class SnapshotBuilder:
             "blockers": list(gate.blockers),
             "warnings": list(gate.warnings),
             "market_age_seconds": market_age,
-            "live_age_seconds": live_age,
+            "live_message_age_seconds": live_message_age,
+            "live_effective_state_age_seconds": live_age,
             "live_sync": _sync_payload(sync),
         }
         snapshot = await self._repository.persist(
@@ -173,8 +194,15 @@ class SnapshotBuilder:
         *,
         canonical_map_id: UUID | None,
         canonical_series_id: UUID,
+        expected_team_ids: tuple[UUID, UUID],
         decision_at: datetime,
-    ) -> tuple[dict[str, Any] | None, float | None]:
+    ) -> tuple[
+        dict[str, Any] | None,
+        float | None,
+        bool,
+        tuple[str, ...],
+        tuple[str, ...],
+    ]:
         records = list(
             (
                 await session.scalars(
@@ -202,25 +230,56 @@ class SnapshotBuilder:
         for record in latest_by_odds_id.values():
             key = (record.provider_match_id, record.market_type, record.match_stage)
             grouped.setdefault(key, []).append(record)
-        candidates = [items for items in grouped.values() if len(items) == 2]
+        candidates = list(grouped.values())
         if not candidates:
-            return None, None
-        selected = max(candidates, key=lambda items: max(item.received_at for item in items))
-        selected.sort(key=lambda item: (str(item.selection_team_id), item.odds_id))
-        fair_a, fair_b, overround = remove_vig(float(selected[0].price), float(selected[1].price))
+            return None, None, False, (), ()
+        evaluated = []
+        for items in candidates:
+            quality = evaluate_market_pair(
+                tuple(_market_pair_leg(item) for item in items),
+                expected_series_id=canonical_series_id,
+                expected_map_id=canonical_map_id,
+                expected_team_ids=frozenset(expected_team_ids),
+                decision_at=decision_at,
+                max_age_seconds=self._settings.live_market_max_age_seconds,
+                max_pair_skew_seconds=self._settings.market_max_pair_skew_seconds,
+            )
+            evaluated.append((items, quality))
+        eligible = [candidate for candidate in evaluated if candidate[1].eligible]
+        selected, quality = max(
+            eligible or evaluated,
+            key=lambda candidate: max(item.received_at for item in candidate[0]),
+        )
+        team_order = {team_id: index for index, team_id in enumerate(expected_team_ids)}
+        selected.sort(key=lambda item: (team_order.get(item.selection_team_id, 2), item.odds_id))
+        fair_probabilities: tuple[float | None, float | None] = (None, None)
+        overround = None
+        if quality.eligible:
+            fair_a, fair_b, implied_total = remove_vig(
+                float(selected[0].price), float(selected[1].price)
+            )
+            fair_probabilities = (fair_a, fair_b)
+            overround = implied_total - 1.0
         observations = [
-            _market_observation(selected[0], fair_a),
-            _market_observation(selected[1], fair_b),
+            _market_observation(item, fair_probability)
+            for item, fair_probability in zip(selected, fair_probabilities, strict=False)
         ]
         age = max(elapsed_seconds(decision_at, item.received_at) for item in selected)
-        return {
-            "provider": "raybet",
-            "provider_match_id": selected[0].provider_match_id,
-            "market_type": selected[0].market_type,
-            "match_stage": selected[0].match_stage,
-            "overround": overround,
-            "observations": observations,
-        }, age
+        return (
+            {
+                "provider": "raybet",
+                "provider_match_id": selected[0].provider_match_id,
+                "market_type": selected[0].market_type,
+                "match_stage": selected[0].match_stage,
+                "overround": overround,
+                "quality": quality.model_dump(mode="json"),
+                "observations": observations,
+            },
+            age,
+            quality.eligible,
+            quality.blockers,
+            quality.warnings,
+        )
 
     async def _load_draft(
         self,
@@ -350,12 +409,38 @@ class SnapshotBuilder:
             )
         team_a["current_roster_strength"] = _roster_strength(players_a)
         team_b["current_roster_strength"] = _roster_strength(players_b)
+        cutoffs = [
+            value
+            for value in (
+                team_a.get("knowledge_cutoff"),
+                team_b.get("knowledge_cutoff"),
+                *(item.get("knowledge_cutoff") for item in players_a),
+                *(item.get("knowledge_cutoff") for item in players_b),
+            )
+            if value is not None
+        ]
         return (
             {
                 "team_a": team_a,
                 "team_b": team_b,
                 "players_a": players_a,
                 "players_b": players_b,
+                "coverage": {
+                    "team_strength_ready_count": sum(
+                        item.get("base_rating") is not None for item in (team_a, team_b)
+                    ),
+                    "roster_player_count": len(players_a) + len(players_b),
+                    "player_form_ready_count": sum(
+                        item.get("base_strength") is not None or item.get("recent_form") is not None
+                        for item in (*players_a, *players_b)
+                    ),
+                    "player_hero_ready_count": sum(
+                        item.get("player_hero_strength") is not None
+                        for item in (*players_a, *players_b)
+                    ),
+                    "earliest_knowledge_cutoff": min(cutoffs) if cutoffs else None,
+                    "latest_knowledge_cutoff": max(cutoffs) if cutoffs else None,
+                },
             },
             blockers,
             warnings,
@@ -367,7 +452,7 @@ class SnapshotBuilder:
         *,
         canonical_map_id: UUID,
         decision_at: datetime,
-    ) -> tuple[dict[str, Any] | None, float | None, bool]:
+    ) -> tuple[dict[str, Any] | None, float | None, float | None, bool]:
         record = await session.scalar(
             select(DltvLiveObservationRecord)
             .where(
@@ -378,7 +463,18 @@ class SnapshotBuilder:
             .limit(1)
         )
         if record is None:
-            return None, None, False
+            return None, None, None, False
+        latest_message_at = await session.scalar(
+            select(ProviderRawEvent.received_at)
+            .where(
+                ProviderRawEvent.provider == "dltv",
+                ProviderRawEvent.provider_key == f"__nd2_match_{record.valve_match_id}",
+                ProviderRawEvent.received_at <= decision_at,
+            )
+            .order_by(ProviderRawEvent.received_at.desc())
+            .limit(1)
+        )
+        message_received_at = latest_message_at or record.last_message_received_at
         payload = {
             "source": "DLTV_FAST_SOCKET",
             "game_time_seconds": record.game_time_seconds,
@@ -388,6 +484,10 @@ class SnapshotBuilder:
             "first_blood": record.first_blood,
             "source_game_time": record.source_game_time,
             "received_at": record.received_at,
+            "last_message_received_at": message_received_at,
+            "last_state_change_received_at": record.last_state_change_received_at,
+            "connection_id": record.connection_id,
+            "reconnect_generation": record.reconnect_generation,
         }
         complete = all(
             value is not None
@@ -398,10 +498,31 @@ class SnapshotBuilder:
                 record.radiant_nw_lead,
             )
         )
-        return payload, elapsed_seconds(decision_at, record.received_at), complete
+        return (
+            payload,
+            elapsed_seconds(decision_at, message_received_at),
+            elapsed_seconds(decision_at, record.last_state_change_received_at),
+            complete,
+        )
 
 
-def _market_observation(record: OddsObservationRecord, fair_probability: float) -> dict:
+def _market_pair_leg(record: OddsObservationRecord) -> MarketPairLeg:
+    return MarketPairLeg(
+        provider_match_id=record.provider_match_id,
+        odds_id=record.odds_id,
+        canonical_series_id=record.canonical_series_id,
+        canonical_map_id=record.canonical_map_id,
+        market_type=record.market_type,
+        match_stage=record.match_stage,
+        selection_team_id=record.selection_team_id,
+        price=record.price,
+        normalized_status=record.normalized_status,
+        metadata_version=record.metadata_version,
+        received_at=record.received_at,
+    )
+
+
+def _market_observation(record: OddsObservationRecord, fair_probability: float | None) -> dict:
     return {
         "odds_id": record.odds_id,
         "selection_team_id": (
@@ -412,6 +533,7 @@ def _market_observation(record: OddsObservationRecord, fair_probability: float) 
         "fair_probability": fair_probability,
         "raw_status": record.raw_status,
         "normalized_status": record.normalized_status,
+        "metadata_version": record.metadata_version,
         "provider_updated_at": record.provider_updated_at,
         "received_at": record.received_at,
     }
@@ -442,6 +564,9 @@ def _sync_payload(record: LiveSyncEstimateRecord | None) -> dict[str, Any] | Non
         "p90_seconds": record.p90_seconds,
         "jitter_seconds": record.jitter_seconds,
         "sample_size": record.sample_size,
+        "accepted_pair_ratio": record.accepted_pair_ratio,
+        "ambiguous_ratio": record.ambiguous_ratio,
+        "outlier_ratio": record.outlier_ratio,
         "confidence": record.confidence,
         "status": record.status,
         "calculated_at": record.calculated_at,

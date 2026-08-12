@@ -143,13 +143,32 @@ class ApplicationJobHandlers:
                         limit=self._d.settings.historical_prewarm_maps,
                     )
                 )
-            await self._d.health.dependency("HISTORY", "READY")
+            coverage = {
+                field: sum(getattr(item, field) for item in sync_results)
+                for field in (
+                    "maps_requested",
+                    "maps_fetched",
+                    "maps_normalized",
+                    "maps_canonicalized",
+                    "maps_eligible_team_rating",
+                    "maps_eligible_player_form",
+                    "maps_advanced_ready",
+                    "identity_missing_count",
+                    "provider_fallback_count",
+                    "conflict_count",
+                )
+            }
+            await self._d.health.dependency("HISTORY", "READY", **coverage)
             if self._d.settings.stratz_token:
-                fallback_count = sum(item.fallback_count for item in sync_results)
+                fallback_count = coverage["provider_fallback_count"]
+                identity_missing = coverage["identity_missing_count"]
                 await self._d.health.dependency(
                     "STRATZ",
                     "DEGRADED" if fallback_count else "READY",
-                    fallback_count=fallback_count,
+                    provider_fallback_count=fallback_count,
+                    identity_missing_count=identity_missing,
+                    maps_fetched=coverage["maps_fetched"],
+                    maps_normalized=coverage["maps_normalized"],
                 )
             await self._d.historical_features.build_team_ratings(session, as_of=cutoff)
             await self._d.historical_features.build_role_baselines(session, as_of=cutoff)
@@ -292,16 +311,24 @@ class ApplicationJobHandlers:
 
     async def capture_future_odds(self, job: DurableJob) -> None:
         snapshot_id = _required_uuid(job.payload, "snapshot_id")
-        horizon = _required_int(job.payload, "horizon_seconds")
-        due_at = _required_datetime(job.payload, "due_at")
+        capture_type = _required_str(job.payload, "capture_type")
         async with self._d.session_factory() as session, session.begin():
-            await self._d.future_odds.capture(
-                session,
-                snapshot_id=snapshot_id,
-                horizon_seconds=horizon,
-                due_at=due_at,
-                observed_at=datetime.now(UTC),
-            )
+            if capture_type == "TIME_HORIZON":
+                await self._d.future_odds.capture(
+                    session,
+                    snapshot_id=snapshot_id,
+                    horizon_seconds=_required_int(job.payload, "horizon_seconds"),
+                    due_at=_required_datetime(job.payload, "due_at"),
+                    observed_at=datetime.now(UTC),
+                )
+            elif capture_type == "CLOSING":
+                await self._d.future_odds.capture_closing(
+                    session,
+                    snapshot_id=snapshot_id,
+                    triggered_at=_required_datetime(job.payload, "triggered_at"),
+                )
+            else:
+                raise ValueError(f"unsupported future odds capture type: {capture_type}")
 
     async def resolve_postmatch(self, job: DurableJob) -> None:
         canonical_map_id = _required_uuid(job.payload, "canonical_map_id")
@@ -335,7 +362,13 @@ class ApplicationJobHandlers:
                 session,
                 canonical_map_id=canonical_map_id,
                 winner_team_id=fact.winner_team_id,
+                provider="opendota",
+                provider_match_id=bundle.match.provider_match_id,
+                result_observed_at=response.received_at,
                 basic_first_usable_at=bundle.match.first_usable_at,
+                raw_event_id=raw_event_id,
+                normalizer_version=self._d.opendota.normalizer_version,
+                identity_confidence=1.0,
                 advanced_first_usable_at=(
                     bundle.match.first_usable_at if bundle.advanced_available else None
                 ),
@@ -387,7 +420,13 @@ class ApplicationJobHandlers:
                     session,
                     canonical_map_id=canonical_map_id,
                     winner_team_id=fact.winner_team_id,
+                    provider=fact.provider,
+                    provider_match_id=fact.provider_match_id,
+                    result_observed_at=fact.fetched_at or fact.first_usable_at,
                     basic_first_usable_at=fact.first_usable_at,
+                    raw_event_id=fact.raw_event_id,
+                    normalizer_version=fact.normalizer_version or "unknown",
+                    identity_confidence=1.0,
                     advanced_first_usable_at=fact.advanced_ready_at,
                     provider_conflict=fact.sync_status == "DATA_CONFLICT",
                 )
@@ -483,6 +522,13 @@ def _required_int(payload: dict, key: str) -> int:
     value = _optional_int(payload.get(key))
     if value is None:
         raise ValueError(f"job payload field {key} must be an integer")
+    return value
+
+
+def _required_str(payload: dict, key: str) -> str:
+    value = payload.get(key)
+    if not isinstance(value, str) or not value:
+        raise ValueError(f"job payload field {key} must be a non-empty string")
     return value
 
 

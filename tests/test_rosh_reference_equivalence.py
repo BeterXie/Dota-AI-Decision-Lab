@@ -1,7 +1,15 @@
+import json
+from copy import deepcopy
+from pathlib import Path
+
 import pytest
 
 from app.draft.engine import MODEL_VERSION, score_rosh_lineups
 from app.providers.stratz.draft_queries import REFERENCE_COMMIT
+
+GOLDEN = json.loads(
+    (Path(__file__).parent / "fixtures" / "rosh_reference_golden.json").read_text(encoding="utf-8")
+)
 
 
 def _reference_analysis() -> dict:
@@ -92,15 +100,16 @@ def test_rosh_matches_pinned_reference_curve_and_high_sample_adjustment() -> Non
         ],
     )
 
-    assert REFERENCE_COMMIT == "c7a54b59299fb6f46988cb85ed85ebacfe9c0f04"
+    expected = GOLDEN["scenarios"]["high_support_player_adjusted"]
+    assert REFERENCE_COMMIT == GOLDEN["reference"]["commit"]
     assert MODEL_VERSION == "rosh-c7a54b5-v1"
-    assert [row["minute"] for row in result["pure_minute_table"]] == list(range(20, 61))
-    assert {row["win_rate_graph"] for row in result["pure_minute_table"]} == {15.8}
-    assert {row["win_rate_graph"] for row in result["minute_table"]} == {17.3}
-    assert result["pure_minute_table"][0]["synergy_adjustment"] == 2.5
-    assert result["player_analysis"]["netAdjustment"] == 1.5
-    assert result["used_player_adjustment"] is True
-    assert result["fell_back_to_pure_score"] is False
+    assert [row["minute"] for row in result["pure_minute_table"]] == GOLDEN["minutes"]
+    assert [row["win_rate_graph"] for row in result["pure_minute_table"]] == expected["pure_curve"]
+    assert [row["win_rate_graph"] for row in result["minute_table"]] == expected["adjusted_curve"]
+    assert result["pure_minute_table"][0]["synergy_adjustment"] == expected["synergy_adjustment"]
+    assert result["player_analysis"]["netAdjustment"] == expected["player_adjustment"]
+    assert result["used_player_adjustment"] is expected["used_player_adjustment"]
+    assert result["fell_back_to_pure_score"] is expected["fell_back_to_pure_score"]
 
 
 def test_rosh_small_player_sample_is_bounded_and_missing_data_falls_back() -> None:
@@ -126,10 +135,34 @@ def test_rosh_small_player_sample_is_bounded_and_missing_data_falls_back() -> No
         dire_player_highlights=[None] * 5,
     )
 
-    assert low_sample["player_analysis"]["netAdjustment"] == pytest.approx(0.2)
-    assert low_sample["player_adjusted_lineup_score"] == pytest.approx(16.0)
+    small = GOLDEN["scenarios"]["small_player_sample"]
+    missing = GOLDEN["scenarios"]["missing_player_highlights"]
+    assert low_sample["player_analysis"]["netAdjustment"] == pytest.approx(
+        small["player_adjustment"]
+    )
+    assert [row["win_rate_graph"] for row in low_sample["minute_table"]] == small["adjusted_curve"]
     assert fallback["player_adjusted_lineup_score"] == fallback["pure_lineup_score"]
-    assert fallback["fell_back_to_pure_score"] is True
+    assert [row["win_rate_graph"] for row in fallback["minute_table"]] == missing["adjusted_curve"]
+    assert fallback["used_player_adjustment"] is missing["used_player_adjustment"]
+    assert fallback["fell_back_to_pure_score"] is missing["fell_back_to_pure_score"]
+
+
+def test_rosh_low_support_synergy_is_shrunk_like_pinned_reference() -> None:
+    analysis = deepcopy(_reference_analysis())
+    for row in analysis["synergy"]["matchUp_Prev_Week_1"]:
+        for key in ("with", "vs"):
+            for item in row[key]:
+                item["matchCount"] = 10
+
+    result = score_rosh_lineups(
+        [1, 2, 3, 4, 5],
+        [101, 102, 103, 104, 105],
+        analysis,
+    )
+    expected = GOLDEN["scenarios"]["low_support_synergy"]
+
+    assert [row["win_rate_graph"] for row in result["pure_minute_table"]] == expected["pure_curve"]
+    assert result["pure_minute_table"][0]["synergy_adjustment"] == expected["synergy_adjustment"]
 
 
 def test_rosh_partial_time_payload_stays_unknown() -> None:
@@ -142,7 +175,8 @@ def test_rosh_partial_time_payload_stays_unknown() -> None:
         analysis,
     )
 
-    assert result["pure_minute_table"] == []
-    assert result["minute_table"] == []
-    assert result["pure_lineup_score"] is None
-    assert result["player_adjusted_lineup_score"] is None
+    expected = GOLDEN["scenarios"]["missing_time_rows"]
+    assert result["pure_minute_table"] == expected["pure_curve"]
+    assert result["minute_table"] == expected["adjusted_curve"]
+    assert result["pure_lineup_score"] is expected["pure_lineup_score"]
+    assert result["player_adjusted_lineup_score"] is expected["player_adjusted_lineup_score"]

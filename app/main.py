@@ -18,6 +18,7 @@ from app.ai import (
     GeminiDecisionProvider,
     OpenAiDecisionProvider,
 )
+from app.ai.base import DECISION_POLICY_VERSION, PROMPT_VERSION
 from app.config import Settings, get_settings
 from app.db import create_engine, create_session_factory
 from app.db_partitions import ensure_weekly_partitions
@@ -159,7 +160,11 @@ async def run() -> None:
     )
     ai_providers = _ai_providers(settings)
     ai = AiCoordinator(ai_providers, timeout_seconds=settings.ai_timeout_seconds)
-    future_odds = FutureOddsService(jobs)
+    future_odds = FutureOddsService(
+        jobs,
+        market_max_age_seconds=settings.live_market_max_age_seconds,
+        market_max_pair_skew_seconds=settings.market_max_pair_skew_seconds,
+    )
     rosh = RoshService(stratz_client, raw_events) if stratz_client is not None else None
     await _initialize_dependency_health(
         health, settings=settings, ai_provider_names=tuple(item.name for item in ai_providers)
@@ -192,7 +197,10 @@ async def run() -> None:
     reconciliation = ReconciliationService(
         jobs,
         lease_seconds=settings.job_lease_seconds,
-        ai_provider_names=tuple(item.name for item in ai_providers),
+        ai_experiments=tuple(
+            (item.name, item.model, PROMPT_VERSION, DECISION_POLICY_VERSION)
+            for item in ai_providers
+        ),
         future_odds_horizons=settings.future_odds_horizons,
     )
     async with session_factory() as session, session.begin():
@@ -346,50 +354,78 @@ async def run() -> None:
             )
         )
 
-        async def raybet_publish(message: dict) -> None:
-            async with session_factory() as session, session.begin():
-                count = await market_collector.collect(session, message)
-            metrics.provider_messages.labels(provider="raybet", type="socket").inc()
-            await health.message("RayBetSocketWorker", observations=count)
+    async def raybet_publish(message: dict) -> None:
+        async with session_factory() as session, session.begin():
+            count = await market_collector.collect(session, message)
+        metrics.provider_messages.labels(provider="raybet", type="socket").inc()
+        await health.message("RayBetSocketWorker", observations=count)
+        await health.dependency(
+            "RAYBET_SOCKET",
+            "READY",
+            business_message=True,
+            requires_message=True,
+            max_message_age_seconds=settings.provider_business_message_max_age_seconds,
+            observations=count,
+        )
 
-        async def raybet_state(state: str, error: str | None) -> None:
-            connected = state == "CONNECTED"
-            metrics.provider_connected.labels(provider="raybet").set(int(connected))
-            await health.dependency(
-                "RAYBET_SOCKET",
-                "READY" if connected else "DEGRADED",
-                message=error,
-            )
+    async def raybet_state(state: str, error: str | None) -> None:
+        connected = state == "CONNECTED"
+        metrics.provider_connected.labels(provider="raybet").set(int(connected))
+        await health.dependency(
+            "RAYBET_SOCKET",
+            "UNKNOWN" if connected else "DEGRADED",
+            message=error,
+            requires_message=True,
+            max_message_age_seconds=settings.provider_business_message_max_age_seconds,
+            connected=connected,
+        )
 
-        async def dltv_event(event_name: str, payload: dict) -> None:
-            await dltv_collector.collect(event_name, payload)
-            metrics.provider_messages.labels(provider="dltv", type=event_name).inc()
-            await health.message("DltvSocketWorker", event_name=event_name)
+    async def dltv_event(
+        event_name: str,
+        payload: dict,
+        connection_id: str,
+        reconnect_generation: int,
+    ) -> None:
+        await dltv_collector.collect(
+            event_name,
+            payload,
+            connection_id,
+            reconnect_generation,
+        )
+        metrics.provider_messages.labels(provider="dltv", type=event_name).inc()
+        await health.message("DltvSocketWorker", event_name=event_name)
+        await health.dependency(
+            "DLTV_SOCKET",
+            "READY",
+            business_message=True,
+            requires_message=True,
+            max_message_age_seconds=settings.provider_business_message_max_age_seconds,
+            event_name=event_name,
+        )
 
-        async def dltv_state(state: str, error: str | None) -> None:
-            connected = state == "CONNECTED"
-            metrics.provider_connected.labels(provider="dltv").set(int(connected))
-            await health.dependency(
-                "DLTV_SOCKET",
-                "READY" if connected else "DEGRADED",
-                message=error,
-            )
+    async def dltv_state(state: str, error: str | None) -> None:
+        connected = state == "CONNECTED"
+        metrics.provider_connected.labels(provider="dltv").set(int(connected))
+        await health.dependency(
+            "DLTV_SOCKET",
+            "UNKNOWN" if connected else "DEGRADED",
+            message=error,
+            requires_message=True,
+            max_message_age_seconds=settings.provider_business_message_max_age_seconds,
+            connected=connected,
+        )
 
+    if settings.run_provider_workers:
         workers.extend(
-            [
-                ServiceWorker(
-                    name="RayBetSocketWorker",
-                    run=lambda: raybet_socket.run(raybet_publish, raybet_state),
-                    stop=raybet_socket.stop,
-                    health_registry=health,
-                ),
-                ServiceWorker(
-                    name="DltvSocketWorker",
-                    run=lambda: dltv_socket.run(dltv_event, dltv_state),
-                    stop=dltv_socket.stop,
-                    health_registry=health,
-                ),
-            ]
+            _provider_socket_workers(
+                raybet_socket=raybet_socket,
+                dltv_socket=dltv_socket,
+                raybet_publish=raybet_publish,
+                raybet_state=raybet_state,
+                dltv_event=dltv_event,
+                dltv_state=dltv_state,
+                health=health,
+            )
         )
 
     frontend_dist = ROOT / "frontend" / "dist"
@@ -464,6 +500,32 @@ def _job_workers(*, settings, session_factory, jobs, handlers, health) -> list[S
     return result
 
 
+def _provider_socket_workers(
+    *,
+    raybet_socket,
+    dltv_socket,
+    raybet_publish,
+    raybet_state,
+    dltv_event,
+    dltv_state,
+    health,
+) -> list[ServiceWorker]:
+    return [
+        ServiceWorker(
+            name="RayBetSocketWorker",
+            run=lambda: raybet_socket.run(raybet_publish, raybet_state),
+            stop=raybet_socket.stop,
+            health_registry=health,
+        ),
+        ServiceWorker(
+            name="DltvSocketWorker",
+            run=lambda: dltv_socket.run(dltv_event, dltv_state),
+            stop=dltv_socket.stop,
+            health_registry=health,
+        ),
+    ]
+
+
 def _ai_providers(settings: Settings):
     providers = []
     if settings.openai_api_key:
@@ -502,8 +564,15 @@ async def _initialize_dependency_health(
     settings: Settings,
     ai_provider_names: tuple[str, ...],
 ) -> None:
-    for dependency in ("RAYBET_HTTP", "RAYBET_SOCKET", "DLTV_SOCKET", "DLTV_DRAFT"):
+    for dependency in ("RAYBET_HTTP", "DLTV_DRAFT"):
         await health.dependency(dependency, "UNKNOWN")
+    for dependency in ("RAYBET_SOCKET", "DLTV_SOCKET"):
+        await health.dependency(
+            dependency,
+            "UNKNOWN",
+            requires_message=True,
+            max_message_age_seconds=settings.provider_business_message_max_age_seconds,
+        )
     await health.dependency("LIVE_SYNC", "UNKNOWN")
     await health.dependency("HISTORY", "UNKNOWN")
     await health.dependency("STRATZ", "UNKNOWN" if settings.stratz_token else "ACTION_REQUIRED")

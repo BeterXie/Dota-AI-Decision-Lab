@@ -259,6 +259,7 @@ function ReadinessStrip({
           <div className="dependency" key={name} title={dependency?.message ?? undefined}>
             <span>{translateDependency(name, locale)}</span>
             <StatusLabel status={dependency?.status ?? "UNKNOWN"} compact />
+            <small>{t("dependencyAge")} {seconds(dependency?.age_seconds, locale)}</small>
           </div>
         );
       })}
@@ -293,7 +294,10 @@ function MapWorkspace({
         </div>
         <div className="map-state">
           <StatusLabel status={detail.latest_snapshot?.mode ?? "NO SNAPSHOT"} />
-          <span>{formatTime(detail.latest_snapshot?.decision_at, locale)}</span>
+          <span>{t("decisionAt")} {formatTime(detail.latest_snapshot?.decision_at, locale)}</span>
+          <code title={detail.latest_snapshot?.snapshot_hash}>
+            {t("snapshotHash")} {shortHash(detail.latest_snapshot?.snapshot_hash)}
+          </code>
         </div>
       </header>
 
@@ -330,6 +334,7 @@ function MapWorkspace({
         <TabList aria-label={t("mapIntelligenceViews")} contained>
           <Tab>{t("live")}</Tab>
           <Tab>{t("historical")}</Tab>
+          <Tab>{t("evaluation")}</Tab>
           <Tab>{t("runtime")}</Tab>
         </TabList>
         <TabPanels>
@@ -338,6 +343,9 @@ function MapWorkspace({
           </TabPanel>
           <TabPanel>
             <HistoryPanel detail={detail} />
+          </TabPanel>
+          <TabPanel>
+            <EvaluationPanel detail={detail} />
           </TabPanel>
           <TabPanel>
             <RuntimePanel runtime={runtime} jobs={jobs} />
@@ -350,6 +358,7 @@ function MapWorkspace({
 
 function MarketPanel({ detail }: { detail: MapDetail }) {
   const { locale, t } = useI18n();
+  const quality = detail.market_quality;
   const series = useMemo(() => {
     const grouped = new Map<number, Array<[string, number]>>();
     detail.market_timeline.forEach((item) => {
@@ -368,7 +377,10 @@ function MarketPanel({ detail }: { detail: MapDetail }) {
   }, [detail.market, detail.market_timeline, t]);
   return (
     <section className="intel-panel market-panel">
-      <PanelHeading title={t("market")} status={detail.market.length ? "FRESH" : "MISSING"} />
+      <PanelHeading
+        title={t("market")}
+        status={quality?.eligible ? "FRESH" : detail.market.length ? "DEGRADED" : "MISSING"}
+      />
       <div className="metric-row">
         {detail.market.slice(0, 2).map((item, index) => (
           <div className="metric" key={item.odds_id}>
@@ -379,6 +391,21 @@ function MarketPanel({ detail }: { detail: MapDetail }) {
             </small>
           </div>
         ))}
+      </div>
+      <div className="audit-grid">
+        <Metric
+          label={t("pairQuality")}
+          value={translateStatus(quality?.eligible ? "READY" : "MISSING", locale)}
+        />
+        <Metric label={t("pairSkew")} value={seconds(quality?.pair_skew_seconds, locale)} />
+        <Metric
+          label={t("oddsAge")}
+          value={seconds(Math.max(...detail.market.map((item) => item.age_seconds), 0), locale)}
+        />
+        <Metric
+          label={t("metadataVersion")}
+          value={quality?.metadata_version ?? detail.market[0]?.metadata_version ?? t("unknown")}
+        />
       </div>
       {series.length ? (
         <Chart
@@ -441,9 +468,11 @@ function DraftPanel({ detail }: { detail: MapDetail }) {
         <PanelEmpty text={t("noRoshCurve")} />
       )}
       {detail.draft?.model_version && (
-        <p className="provenance">
-          {detail.draft.model_version} / {detail.draft.data_version}
-        </p>
+        <div className="provenance-list">
+          <span>{t("modelVersion")} {detail.draft.model_version}</span>
+          <span>{t("dataVersion")} {detail.draft.data_version ?? t("unknown")}</span>
+          <span>{t("statisticsCutoff")} {formatTime(detail.draft.statistics_cutoff, locale)}</span>
+        </div>
       )}
     </section>
   );
@@ -486,6 +515,13 @@ function AiPanel({ detail }: { detail: MapDetail }) {
                 <span>{record.model}</span>
                 <span>{formatLatency(record.latency_seconds, locale)}</span>
               </footer>
+              <div className="provenance-list">
+                <span>{t("modelVersion")} {record.model_version}</span>
+                <span>{t("promptVersion")} {record.prompt_version}</span>
+                <span>{t("policyVersion")} {record.decision_policy_version}</span>
+                <span>{t("parseStatus")} {translateStatus(record.parse_status, locale)}</span>
+                <span>{t("snapshotHash")} {shortHash(record.snapshot_hash)}</span>
+              </div>
             </article>
           ))}
         </div>
@@ -513,8 +549,17 @@ function LivePanel({ detail }: { detail: MapDetail }) {
         />
         <Metric label={t("radiantNetWorth")} value={signed(latest?.radiant_nw_lead, locale)} />
         <Metric label={t("sync")} value={translateStatus(detail.sync?.status ?? "UNKNOWN", locale)} />
+        <Metric label={t("syncConfidence")} value={translateStatus(detail.sync?.confidence ?? "UNKNOWN", locale)} />
+        <Metric label={t("p50Lag")} value={seconds(detail.sync?.p50_seconds, locale)} />
         <Metric label={t("p90Lag")} value={seconds(detail.sync?.p90_seconds, locale)} />
+        <Metric label={t("jitter")} value={seconds(detail.sync?.jitter_seconds, locale)} />
         <Metric label={t("samples")} value={metricText(detail.sync?.sample_size, locale)} />
+        <Metric label={t("acceptedPairs")} value={percentValue(detail.sync?.accepted_pair_ratio, locale)} />
+        <Metric label={t("messageAge")} value={seconds(latest?.message_age_seconds, locale)} />
+        <Metric
+          label={t("effectiveStateAge")}
+          value={seconds(latest?.effective_state_age_seconds, locale)}
+        />
       </div>
       {detail.live_timeline.length ? (
         <Chart
@@ -545,17 +590,86 @@ function LivePanel({ detail }: { detail: MapDetail }) {
 }
 
 function HistoryPanel({ detail }: { detail: MapDetail }) {
-  const { t } = useI18n();
+  const { locale, t } = useI18n();
   const history = (detail.snapshot_payload?.history ?? {}) as Record<string, unknown>;
   const teamA = objectValue(history.team_a);
   const teamB = objectValue(history.team_b);
   const playersA = arrayValue(history.players_a);
   const playersB = arrayValue(history.players_b);
+  const coverage = objectValue(history.coverage) ?? detail.latest_snapshot?.history_coverage;
   if (!teamA && !teamB) return <PanelEmpty text={t("noHistoricalSnapshot")} />;
   return (
-    <section className="history-grid tab-content">
-      <TeamHistory name={detail.team_a?.name ?? t("teamA")} team={teamA} players={playersA} />
-      <TeamHistory name={detail.team_b?.name ?? t("teamB")} team={teamB} players={playersB} />
+    <section className="tab-content">
+      <div className="audit-grid history-coverage">
+        <Metric label={t("historyCoverage")} value={`${metricText(coverage?.team_strength_ready_count, locale)}/2`} />
+        <Metric label={t("workers")} value={metricText(coverage?.roster_player_count, locale)} />
+        <Metric label={t("hero")} value={metricText(coverage?.player_hero_ready_count, locale)} />
+        <Metric
+          label={t("knowledgeCutoff")}
+          value={formatTime(stringValue(coverage?.latest_knowledge_cutoff), locale)}
+        />
+      </div>
+      <div className="history-grid">
+        <TeamHistory name={detail.team_a?.name ?? t("teamA")} team={teamA} players={playersA} />
+        <TeamHistory name={detail.team_b?.name ?? t("teamB")} team={teamB} players={playersB} />
+      </div>
+    </section>
+  );
+}
+
+function EvaluationPanel({ detail }: { detail: MapDetail }) {
+  const { locale, t } = useI18n();
+  const futureOdds = detail.future_odds ?? [];
+  const resultEvidence = detail.result_evidence ?? [];
+  if (!futureOdds.length && !detail.result && !resultEvidence.length) {
+    return <PanelEmpty text={t("noEvaluationEvidence")} />;
+  }
+  return (
+    <section className="evaluation-layout tab-content">
+      <div>
+        <h3>{t("futureOdds")}</h3>
+        <table className="cds--data-table cds--data-table--sm">
+          <thead>
+            <tr>
+              <th>{t("capture")}</th>
+              <th>{t("state")}</th>
+              <th>{t("odds")}</th>
+              <th>{t("observed")}</th>
+              <th>{t("pairSkew")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {futureOdds.map((capture) => (
+              <tr key={capture.id}>
+                <td>{capture.capture_type === "CLOSING" ? t("closingOdds") : `${capture.horizon_seconds}s`}</td>
+                <td><StatusLabel status={capture.status} compact /></td>
+                <td>{capture.odds_a == null || capture.odds_b == null ? t("unknown") : `${Number(capture.odds_a).toFixed(2)} / ${Number(capture.odds_b).toFixed(2)}`}</td>
+                <td>{formatTime(capture.observed_at, locale)}</td>
+                <td>{seconds(capture.pair_skew_seconds, locale)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <div>
+        <h3>{t("resultEvidence")}</h3>
+        <div className="audit-grid result-summary">
+          <Metric label={t("winner")} value={detail.result?.winner_team_id ?? t("unknown")} />
+          <Metric label={t("resultConflict")} value={translateStatus(detail.result?.provider_conflict ? "DATA_CONFLICT" : detail.result ? "READY" : "UNKNOWN", locale)} />
+          <Metric label={t("firstUsable")} value={formatTime(detail.result?.basic_first_usable_at, locale)} />
+        </div>
+        <div className="evidence-list">
+          {resultEvidence.map((evidence) => (
+            <article key={evidence.id}>
+              <div><strong>{providerName(evidence.provider)}</strong><StatusLabel status={evidence.conflict_status} compact /></div>
+              <span>{t("winner")} {evidence.winner_team_id ?? t("unknown")}</span>
+              <span>{t("confidence")} {percent(evidence.identity_confidence, locale)}</span>
+              <span>{t("firstUsable")} {formatTime(evidence.first_usable_at, locale)}</span>
+              <small>{evidence.normalizer_version} / {evidence.provider_match_id}</small>
+            </article>
+          ))}
+        </div>
+      </div>
     </section>
   );
 }
@@ -621,6 +735,29 @@ function RuntimePanel({
   );
   return (
     <section className="runtime-layout tab-content">
+      <div>
+        <h3>{t("businessReadiness")}</h3>
+        <table className="cds--data-table cds--data-table--sm dependency-table">
+          <thead>
+            <tr>
+              <th>{t("provider")}</th>
+              <th>{t("state")}</th>
+              <th>{t("dependencyAge")}</th>
+              <th>{t("failures")}</th>
+            </tr>
+          </thead>
+          <tbody>
+            {Object.values(runtime?.dependencies ?? {}).map((dependency) => (
+              <tr key={dependency.name}>
+                <td>{translateDependency(dependency.name, locale)}</td>
+                <td><StatusLabel status={dependency.status} compact /></td>
+                <td>{seconds(dependency.age_seconds, locale)}</td>
+                <td>{dependency.consecutive_failures}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       <div>
         <h3>{t("workers")}</h3>
         <table className="cds--data-table cds--data-table--sm worker-table">
@@ -746,6 +883,14 @@ function EmptyWorkspace({ overall }: { overall?: string }) {
 
 function errorMessage(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
+}
+
+function shortHash(value: string | null | undefined): string {
+  return value ? `${value.slice(0, 12)}...` : "-";
+}
+
+function stringValue(value: unknown): string | null {
+  return typeof value === "string" ? value : null;
 }
 
 function statusTone(status: string): string {

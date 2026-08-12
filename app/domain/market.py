@@ -45,3 +45,14 @@ class OddsObservation(BaseModel):
     provider_updated_at: datetime | None = None
     received_at: datetime
     stored_at: datetime
+
+
+class MarketPairQuality(BaseModel):
+    model_config = ConfigDict(frozen=True)
+
+    eligible: bool
+    blockers: tuple[str, ...] = ()
+    warnings: tuple[str, ...] = ()
+    metadata_version: str | None = None
+    paired_at: datetime
+    pair_skew_seconds: float | None = Field(default=None, ge=0)

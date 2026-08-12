@@ -17,9 +17,15 @@ from app.repositories.raw import RawEventRepository
 @dataclass(frozen=True)
 class HistoricalSyncResult:
     provider: str
-    requested: int
-    persisted: int
-    fallback_count: int
+    maps_requested: int
+    maps_fetched: int
+    maps_normalized: int
+    maps_canonicalized: int
+    maps_eligible_team_rating: int
+    maps_advanced_ready: int
+    identity_missing_count: int
+    provider_fallback_count: int
+    conflict_count: int
     warnings: tuple[str, ...]
 
 
@@ -49,16 +55,25 @@ class HistoricalSyncService:
         before: datetime,
         limit: int,
     ) -> HistoricalSyncResult:
-        provider_team_id = await session.scalar(
-            select(ProviderTeamMapping.provider_team_id).where(
-                ProviderTeamMapping.provider == "opendota",
-                ProviderTeamMapping.canonical_team_id == canonical_team_id,
-            )
+        list_provider: HistoricalProvider = self._primary or self._fallback
+        warnings: list[str] = []
+        primary_identity_missing = False
+        provider_team_id = await self._provider_team_id(
+            session,
+            provider=list_provider.name,
+            canonical_team_id=canonical_team_id,
         )
+        if provider_team_id is None and list_provider is not self._fallback:
+            primary_identity_missing = True
+            warnings.append("HISTORICAL_PRIMARY_TEAM_IDENTITY_MISSING")
+            list_provider = self._fallback
+            provider_team_id = await self._provider_team_id(
+                session,
+                provider=self._fallback.name,
+                canonical_team_id=canonical_team_id,
+            )
         if provider_team_id is None:
             raise ValueError("HISTORICAL_TEAM_IDENTITY_MISSING")
-
-        list_provider: HistoricalProvider = self._primary or self._fallback
         try:
             response = await list_provider.get_team_pro_maps(
                 provider_team_id, before=before, limit=limit
@@ -71,10 +86,18 @@ class HistoricalSyncService:
                 response=response,
             )
             match_ids = _match_ids(list_provider.name, response.payload, before, limit)
-        except Exception:
+        except Exception as primary_error:
             if list_provider is self._fallback:
                 raise
             list_provider = self._fallback
+            fallback_team_id = await self._provider_team_id(
+                session,
+                provider=self._fallback.name,
+                canonical_team_id=canonical_team_id,
+            )
+            if fallback_team_id is None:
+                raise ValueError("HISTORICAL_FALLBACK_TEAM_IDENTITY_MISSING") from primary_error
+            provider_team_id = fallback_team_id
             response = await self._fallback.get_team_pro_maps(
                 provider_team_id, before=before, limit=limit
             )
@@ -91,12 +114,20 @@ class HistoricalSyncService:
 
         async def fetch(match_id: int):
             async with semaphore:
-                return await self._fetch_match(match_id)
+                return await self._fetch_match(
+                    match_id,
+                    allow_primary=not primary_identity_missing,
+                )
 
         fetched = await asyncio.gather(*(fetch(match_id) for match_id in match_ids))
         persisted = 0
         fallback_count = 0
-        warnings: list[str] = []
+        normalized = 0
+        canonicalized = 0
+        eligible_team_rating = 0
+        advanced_ready = 0
+        identity_missing = 0
+        conflict_count = 0
         for match_id, (provider, response, primary_error) in zip(match_ids, fetched, strict=True):
             if primary_error is not None:
                 warnings.append(f"STRATZ_FALLBACK:{primary_error}")
@@ -111,32 +142,41 @@ class HistoricalSyncService:
                 warnings.append("HISTORICAL_MATCH_PAYLOAD_INVALID")
                 continue
             bundle = provider.normalize_match(response.payload, fetched_at=response.received_at)
-            await self._ensure_team_mapping(
-                session,
-                provider=provider,
-                provider_team_id=provider_team_id,
-                canonical_team_id=canonical_team_id,
-            )
-            await self._repository.persist_bundle(
+            normalized += 1
+            fact = await self._repository.persist_bundle(
                 session,
                 bundle,
                 raw_event_id=raw_event_id,
                 normalizer_version=provider.normalizer_version,
             )
             persisted += 1
+            canonical_teams = int(fact.radiant_team_id is not None) + int(
+                fact.dire_team_id is not None
+            )
+            canonicalized += int(canonical_teams == 2)
+            eligible_team_rating += int(canonical_teams == 2 and fact.winner_team_id is not None)
+            identity_missing += int(canonical_teams < 2)
+            advanced_ready += int(bundle.advanced_available)
+            conflict_count += int(fact.sync_status == "DATA_CONFLICT")
             fallback_count += int(provider is self._fallback and self._primary is not None)
             warnings.extend(bundle.warnings)
         return HistoricalSyncResult(
             provider=list_provider.name,
-            requested=len(match_ids),
-            persisted=persisted,
-            fallback_count=fallback_count,
+            maps_requested=len(match_ids),
+            maps_fetched=len(fetched),
+            maps_normalized=normalized,
+            maps_canonicalized=canonicalized,
+            maps_eligible_team_rating=eligible_team_rating,
+            maps_advanced_ready=advanced_ready,
+            identity_missing_count=identity_missing,
+            provider_fallback_count=fallback_count,
+            conflict_count=conflict_count,
             warnings=tuple(dict.fromkeys(warnings)),
         )
 
-    async def _fetch_match(self, match_id: int):
+    async def _fetch_match(self, match_id: int, *, allow_primary: bool = True):
         primary_error: str | None = None
-        if self._primary is not None:
+        if self._primary is not None and allow_primary:
             try:
                 response = await self._primary.get_match_advanced(match_id)
                 if not isinstance(response.payload, dict) or response.payload.get("errors"):
@@ -176,28 +216,19 @@ class HistoricalSyncService:
             parser_version=provider.normalizer_version,
         )
 
-    async def _ensure_team_mapping(
+    async def _provider_team_id(
         self,
         session: AsyncSession,
         *,
-        provider: HistoricalProvider,
-        provider_team_id: str,
+        provider: str,
         canonical_team_id: UUID,
-    ) -> None:
-        existing = await session.scalar(
-            select(ProviderTeamMapping).where(
-                ProviderTeamMapping.provider == provider.name,
-                ProviderTeamMapping.provider_team_id == provider_team_id,
+    ) -> str | None:
+        return await session.scalar(
+            select(ProviderTeamMapping.provider_team_id).where(
+                ProviderTeamMapping.provider == provider,
+                ProviderTeamMapping.canonical_team_id == canonical_team_id,
             )
         )
-        if existing is None:
-            session.add(
-                ProviderTeamMapping(
-                    provider=provider.name,
-                    provider_team_id=provider_team_id,
-                    canonical_team_id=canonical_team_id,
-                )
-            )
 
 
 def _match_ids(provider: str, payload: dict | list, before: datetime, limit: int) -> list[int]:

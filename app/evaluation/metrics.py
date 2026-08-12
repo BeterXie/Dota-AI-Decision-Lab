@@ -52,7 +52,7 @@ class EvaluationService:
                         DecisionFutureOdds.decision_snapshot_id == snapshot_id,
                         DecisionFutureOdds.status == "CAPTURED",
                     )
-                    .order_by(DecisionFutureOdds.horizon_seconds)
+                    .order_by(DecisionFutureOdds.observed_at)
                 )
             ).all()
         )
@@ -67,8 +67,22 @@ class EvaluationService:
                 continue
             decision = AiDecision.model_validate(record.normalized_response)
             initial_a, initial_b = _initial_prices(snapshot)
-            closing = next((item for item in future if item.horizon_seconds == -1), None)
-            first_future = next((item for item in future if item.horizon_seconds > 0), None)
+            closing = next(
+                (
+                    item
+                    for item in future
+                    if item.capture_type == "CLOSING" and _same_market(snapshot, item)
+                ),
+                None,
+            )
+            first_future = next(
+                (
+                    item
+                    for item in future
+                    if item.capture_type == "TIME_HORIZON" and item.horizon_seconds is not None
+                ),
+                None,
+            )
             session.add(
                 DecisionEvaluationRecord(
                     ai_decision_id=record.id,
@@ -178,4 +192,16 @@ def _initial_prices(
     return (
         prices[0] if len(prices) > 0 else None,
         prices[1] if len(prices) > 1 else None,
+    )
+
+
+def _same_market(
+    snapshot: DecisionSnapshotRecord,
+    closing: DecisionFutureOdds,
+) -> bool:
+    market = snapshot.canonical_payload.get("market", {})
+    return (
+        isinstance(market, dict)
+        and market.get("market_type") == closing.market_type
+        and market.get("match_stage") == closing.match_stage
     )

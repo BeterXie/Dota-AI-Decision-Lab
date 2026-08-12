@@ -4,12 +4,14 @@ from typing import Any, Protocol
 from app.domain.decision import AiDecision
 
 PROMPT_VERSION = "decision-analyst-v1"
+DECISION_POLICY_VERSION = "shadow-decision-v1"
 
 SYSTEM_PROMPT = """You are an independent Dota 2 decision analyst.
 Use only the supplied immutable DecisionSnapshot. Do not browse, call tools, or infer missing facts.
 UNKNOWN/null values must remain unknown. Deterministic quality blockers override model judgment.
 NO_BUY and INSUFFICIENT_DATA are normal outcomes.
 Include counter-arguments and data-quality concerns.
+When giving reasons, cite the relevant DecisionSnapshot paths.
 Assess team A versus team B exactly as identified in the snapshot."""
 
 
@@ -58,7 +60,7 @@ def decision_json_schema() -> dict[str, Any]:
                 "type": "string",
                 "enum": ["UNDERPRICED", "FAIR", "OVERPRICED", "UNKNOWN"],
             },
-            "max_acceptable_price": nullable_number,
+            "minimum_acceptable_odds_a": nullable_number,
             "primary_reasons": string_array,
             "counter_arguments": string_array,
             "data_quality_concerns": string_array,
@@ -69,7 +71,7 @@ def decision_json_schema() -> dict[str, Any]:
             "fair_probability_a",
             "confidence",
             "market_assessment",
-            "max_acceptable_price",
+            "minimum_acceptable_odds_a",
             "primary_reasons",
             "counter_arguments",
             "data_quality_concerns",

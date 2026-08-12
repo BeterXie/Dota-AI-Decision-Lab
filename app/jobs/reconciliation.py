@@ -11,6 +11,7 @@ from app.models import (
     DecisionEvaluationRecord,
     DecisionFutureOdds,
     DecisionSnapshotRecord,
+    DomainEventRecord,
     DraftMinuteCurveRecord,
     DraftSnapshotRecord,
     HistoricalMapRecord,
@@ -34,12 +35,12 @@ class ReconciliationService:
         jobs: JobRepository,
         *,
         lease_seconds: float,
-        ai_provider_names: tuple[str, ...],
+        ai_experiments: tuple[tuple[str, str, str, str], ...],
         future_odds_horizons: tuple[int, ...],
     ) -> None:
         self._jobs = jobs
         self._lease_seconds = lease_seconds
-        self._ai_provider_names = ai_provider_names
+        self._ai_experiments = ai_experiments
         self._future_odds_horizons = future_odds_horizons
 
     async def run(self, session: AsyncSession, *, now: datetime) -> ReconciliationResult:
@@ -96,13 +97,16 @@ class ReconciliationService:
             completed = set(
                 (
                     await session.scalars(
-                        select(AiDecisionRecord.provider).where(
-                            AiDecisionRecord.snapshot_id == snapshot.id
-                        )
+                        select(
+                            AiDecisionRecord.provider,
+                            AiDecisionRecord.model,
+                            AiDecisionRecord.prompt_version,
+                            AiDecisionRecord.decision_policy_version,
+                        ).where(AiDecisionRecord.snapshot_id == snapshot.id)
                     )
                 ).all()
             )
-            if set(self._ai_provider_names).issubset(completed):
+            if set(self._ai_experiments).issubset(completed):
                 continue
             await self._jobs.enqueue(
                 session,
@@ -121,7 +125,8 @@ class ReconciliationService:
                 (
                     await session.scalars(
                         select(DecisionFutureOdds.horizon_seconds).where(
-                            DecisionFutureOdds.decision_snapshot_id == snapshot.id
+                            DecisionFutureOdds.decision_snapshot_id == snapshot.id,
+                            DecisionFutureOdds.capture_type == "TIME_HORIZON",
                         )
                     )
                 ).all()
@@ -136,12 +141,46 @@ class ReconciliationService:
                     dedupe_key=f"future-odds:{snapshot.id}:{horizon}",
                     payload={
                         "snapshot_id": str(snapshot.id),
+                        "capture_type": "TIME_HORIZON",
                         "horizon_seconds": horizon,
                         "due_at": due_at.isoformat(),
                     },
                     not_before=due_at,
                 )
                 created += 1
+            if snapshot.canonical_map_id is None:
+                continue
+            map_started_at = await session.scalar(
+                select(DomainEventRecord.occurred_at)
+                .where(
+                    DomainEventRecord.event_type == "MAP_STARTED",
+                    DomainEventRecord.aggregate_id == str(snapshot.canonical_map_id),
+                )
+                .order_by(DomainEventRecord.occurred_at)
+                .limit(1)
+            )
+            if map_started_at is None:
+                continue
+            closing_exists = await session.scalar(
+                select(DecisionFutureOdds.id).where(
+                    DecisionFutureOdds.decision_snapshot_id == snapshot.id,
+                    DecisionFutureOdds.capture_type == "CLOSING",
+                )
+            )
+            if closing_exists is not None:
+                continue
+            await self._jobs.enqueue(
+                session,
+                job_type=JobType.CAPTURE_FUTURE_ODDS,
+                dedupe_key=f"closing-odds:{snapshot.id}",
+                payload={
+                    "snapshot_id": str(snapshot.id),
+                    "capture_type": "CLOSING",
+                    "triggered_at": map_started_at.isoformat(),
+                },
+                not_before=map_started_at,
+            )
+            created += 1
         return created
 
     async def _reconcile_settlements(self, session: AsyncSession) -> int:

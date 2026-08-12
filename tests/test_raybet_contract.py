@@ -1,6 +1,7 @@
 import json
 from datetime import UTC, datetime
 from pathlib import Path
+from uuid import UUID
 
 import pytest
 from sqlalchemy import func, select
@@ -10,7 +11,12 @@ from app.db import Base
 from app.events.outbox import EventRepository
 from app.market.collector import RayBetOddsCollector
 from app.market.odds_registry import OddsRegistry
-from app.models import DomainEventRecord, OddsObservationRecord, ProviderRawEvent
+from app.models import (
+    DomainEventRecord,
+    OddsObservationRecord,
+    ProviderRawEvent,
+    RayBetOddsRegistry,
+)
 from app.providers.raybet.parser import (
     parse_matches,
     parse_odds_bootstrap,
@@ -80,6 +86,44 @@ async def test_unknown_socket_odds_is_archived_and_requests_registry_refresh() -
         assert event is not None
         assert event.event_type == "ODDS_REGISTRY_REFRESH_REQUIRED"
         assert event.payload["odds_id"] == 75240285
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_duplicate_socket_delta_keeps_raw_but_not_business_duplicate() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    collector = RayBetOddsCollector(
+        raw_events=RawEventRepository(),
+        registry=OddsRegistry(),
+        events=EventRepository(),
+        significant_move=0.05,
+    )
+    received_at = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
+    async with factory() as session, session.begin():
+        session.add(
+            RayBetOddsRegistry(
+                odds_id=75240285,
+                provider_match_id=38423651,
+                raw_event_id=UUID("11111111-1111-1111-1111-111111111111"),
+            )
+        )
+    for offset in (0, 1):
+        async with factory() as session, session.begin():
+            await collector.collect(
+                session,
+                _fixture("raybet_socket_odds.json"),
+                received_at=received_at.replace(second=offset),
+            )
+
+    async with factory() as session:
+        raw_count = await session.scalar(select(func.count()).select_from(ProviderRawEvent))
+        odds_count = await session.scalar(select(func.count()).select_from(OddsObservationRecord))
+
+    assert raw_count == 2
+    assert odds_count == 1
     await engine.dispose()
 
 

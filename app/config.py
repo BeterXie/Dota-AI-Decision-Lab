@@ -44,7 +44,10 @@ class Settings(BaseSettings):
     live_sync_calibration_window_seconds: float = 30.0
     live_sync_min_samples: int = 3
     live_sync_nw_signal_threshold: int = 500
+    live_sync_ambiguity_margin_seconds: float = 0.5
+    live_sync_min_accepted_pair_ratio: float = 0.6
     live_market_max_age_seconds: float = 30.0
+    market_max_pair_skew_seconds: float = 5.0
     live_state_max_age_seconds: float = 45.0
     historical_max_age_seconds: float = 7_200.0
     delayed_detail_max_delay_seconds: float = 30.0
@@ -58,6 +61,7 @@ class Settings(BaseSettings):
 
     run_provider_workers: bool = True
     auto_migrate: bool = True
+    provider_business_message_max_age_seconds: float = 120.0
     worker_heartbeat_seconds: float = 10.0
     worker_max_backoff_seconds: float = 60.0
     job_poll_seconds: float = 1.0

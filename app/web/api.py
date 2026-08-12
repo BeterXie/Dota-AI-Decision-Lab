@@ -1,4 +1,5 @@
 import asyncio
+from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
@@ -15,15 +16,19 @@ from app.models import (
     CanonicalMap,
     CanonicalSeries,
     CanonicalTeam,
+    DecisionFutureOdds,
     DecisionSnapshotRecord,
     DltvLiveObservationRecord,
     DraftMinuteCurveRecord,
     DraftSnapshotRecord,
     DurableJobRecord,
     LiveSyncEstimateRecord,
+    MapResultEvidenceRecord,
+    MapResultRecord,
     OddsObservationRecord,
 )
 from app.runtime.health import HealthRegistry
+from app.time import elapsed_seconds
 
 
 def create_app(
@@ -214,6 +219,16 @@ async def _map_payload(
     latest_odds: dict[int, OddsObservationRecord] = {}
     for observation in odds:
         latest_odds.setdefault(observation.odds_id, observation)
+    team_order = {
+        team_id: index
+        for index, team_id in enumerate(
+            (series.team_a_id, series.team_b_id) if series is not None else ()
+        )
+    }
+    current_market = sorted(
+        latest_odds.values(),
+        key=lambda item: (team_order.get(item.selection_team_id, 2), item.odds_id),
+    )
     draft = await session.scalar(
         select(DraftSnapshotRecord)
         .where(DraftSnapshotRecord.canonical_map_id == canonical_map.id)
@@ -264,6 +279,35 @@ async def _map_payload(
         if snapshot is not None
         else []
     )
+    future_odds = []
+    result = None
+    result_evidence = []
+    if detailed:
+        if snapshot is not None:
+            future_odds = list(
+                (
+                    await session.scalars(
+                        select(DecisionFutureOdds)
+                        .where(DecisionFutureOdds.decision_snapshot_id == snapshot.id)
+                        .order_by(DecisionFutureOdds.triggered_at)
+                    )
+                ).all()
+            )
+        result = await session.scalar(
+            select(MapResultRecord).where(MapResultRecord.canonical_map_id == canonical_map.id)
+        )
+        result_evidence = list(
+            (
+                await session.scalars(
+                    select(MapResultEvidenceRecord)
+                    .where(MapResultEvidenceRecord.canonical_map_id == canonical_map.id)
+                    .order_by(MapResultEvidenceRecord.first_usable_at)
+                )
+            ).all()
+        )
+    observed_at = datetime.now(UTC)
+    snapshot_market = snapshot.canonical_payload.get("market", {}) if snapshot is not None else {}
+    snapshot_quality = snapshot.canonical_payload.get("quality", {}) if snapshot is not None else {}
     payload = {
         "id": canonical_map.id,
         "series_id": canonical_map.series_id,
@@ -280,16 +324,28 @@ async def _map_payload(
                 "fair_probability": item.fair_probability,
                 "raw_status": item.raw_status,
                 "received_at": item.received_at,
+                "normalized_status": item.normalized_status,
+                "metadata_version": item.metadata_version,
+                "provider_updated_at": item.provider_updated_at,
+                "age_seconds": elapsed_seconds(observed_at, item.received_at),
+                "market_type": item.market_type,
+                "match_stage": item.match_stage,
             }
-            for item in latest_odds.values()
+            for item in current_market
         ],
+        "market_quality": (
+            snapshot_market.get("quality") if isinstance(snapshot_market, dict) else None
+        ),
         "draft": (
             {
                 "complete": draft.complete,
                 "blockers": draft.blockers,
                 "warnings": draft.warnings,
                 "observed_at": draft.observed_at,
+                "statistics_cutoff": draft.statistics_cutoff,
                 "features": curve.derived_features if curve else None,
+                "model_version": curve.model_version if curve else None,
+                "data_version": curve.data_version if curve else None,
             }
             if draft
             else None
@@ -301,6 +357,14 @@ async def _map_payload(
                 "dire_kills": live.dire_kills,
                 "radiant_nw_lead": live.radiant_nw_lead,
                 "received_at": live.received_at,
+                "last_message_received_at": live.last_message_received_at,
+                "last_state_change_received_at": live.last_state_change_received_at,
+                "message_age_seconds": elapsed_seconds(observed_at, live.last_message_received_at),
+                "effective_state_age_seconds": elapsed_seconds(
+                    observed_at, live.last_state_change_received_at
+                ),
+                "connection_id": live.connection_id,
+                "reconnect_generation": live.reconnect_generation,
             }
             if live
             else None
@@ -312,6 +376,11 @@ async def _map_payload(
                 "p90_seconds": sync.p90_seconds,
                 "jitter_seconds": sync.jitter_seconds,
                 "sample_size": sync.sample_size,
+                "accepted_pair_ratio": sync.accepted_pair_ratio,
+                "ambiguous_ratio": sync.ambiguous_ratio,
+                "outlier_ratio": sync.outlier_ratio,
+                "confidence": sync.confidence,
+                "calculated_at": sync.calculated_at,
             }
             if sync
             else None
@@ -320,9 +389,14 @@ async def _map_payload(
             {
                 "id": snapshot.id,
                 "decision_at": snapshot.decision_at,
+                "created_at": snapshot.created_at,
                 "mode": snapshot.mode,
                 "snapshot_hash": snapshot.snapshot_hash,
-                "quality": snapshot.canonical_payload.get("quality"),
+                "quality": snapshot_quality,
+                "market_quality": (
+                    snapshot_market.get("quality") if isinstance(snapshot_market, dict) else None
+                ),
+                "history_coverage": snapshot.canonical_payload.get("history", {}).get("coverage"),
             }
             if snapshot
             else None
@@ -331,6 +405,9 @@ async def _map_payload(
     }
     if detailed and snapshot is not None:
         payload["snapshot_payload"] = snapshot.canonical_payload
+        payload["future_odds"] = [_future_odds_payload(item) for item in future_odds]
+    elif detailed:
+        payload["future_odds"] = []
     if detailed:
         payload["market_timeline"] = [
             {
@@ -339,8 +416,13 @@ async def _map_payload(
                 "price": item.price,
                 "fair_probability": item.fair_probability,
                 "raw_status": item.raw_status,
+                "normalized_status": item.normalized_status,
+                "metadata_version": item.metadata_version,
+                "market_type": item.market_type,
+                "match_stage": item.match_stage,
                 "provider_updated_at": item.provider_updated_at,
                 "received_at": item.received_at,
+                "age_seconds": elapsed_seconds(observed_at, item.received_at),
             }
             for item in reversed(odds)
         ]
@@ -351,13 +433,41 @@ async def _map_payload(
                 "dire_kills": item.dire_kills,
                 "radiant_nw_lead": item.radiant_nw_lead,
                 "received_at": item.received_at,
+                "last_message_received_at": item.last_message_received_at,
+                "last_state_change_received_at": item.last_state_change_received_at,
+                "connection_id": item.connection_id,
+                "reconnect_generation": item.reconnect_generation,
             }
             for item in reversed(live_rows)
         ]
         if curve is not None and payload["draft"] is not None:
             payload["draft"]["curve"] = curve.points
-            payload["draft"]["model_version"] = curve.model_version
-            payload["draft"]["data_version"] = curve.data_version
+        payload["result"] = (
+            {
+                "winner_team_id": result.winner_team_id,
+                "basic_first_usable_at": result.basic_first_usable_at,
+                "advanced_first_usable_at": result.advanced_first_usable_at,
+                "settled_at": result.settled_at,
+                "provider_conflict": result.provider_conflict,
+            }
+            if result is not None
+            else None
+        )
+        payload["result_evidence"] = [
+            {
+                "id": item.id,
+                "provider": item.provider,
+                "provider_match_id": item.provider_match_id,
+                "winner_team_id": item.winner_team_id,
+                "result_observed_at": item.result_observed_at,
+                "first_usable_at": item.first_usable_at,
+                "raw_event_id": item.raw_event_id,
+                "normalizer_version": item.normalizer_version,
+                "identity_confidence": item.identity_confidence,
+                "conflict_status": item.conflict_status,
+            }
+            for item in result_evidence
+        ]
     return payload
 
 
@@ -367,8 +477,33 @@ def _decision_payload(record: AiDecisionRecord) -> dict:
         "provider": record.provider,
         "model": record.model,
         "model_version": record.model_version,
+        "prompt_version": record.prompt_version,
+        "decision_policy_version": record.decision_policy_version,
+        "snapshot_hash": record.snapshot_hash,
+        "request_started_at": record.request_started_at,
+        "response_received_at": record.response_received_at,
         "parse_status": record.parse_status,
         "latency_seconds": record.latency_seconds,
         "decision": record.normalized_response,
         "error": record.error,
+    }
+
+
+def _future_odds_payload(record: DecisionFutureOdds) -> dict:
+    return {
+        "id": record.id,
+        "capture_type": record.capture_type,
+        "horizon_seconds": record.horizon_seconds,
+        "triggered_at": record.triggered_at,
+        "due_at": record.due_at,
+        "observed_at": record.observed_at,
+        "odds_a": record.odds_a,
+        "odds_b": record.odds_b,
+        "market_type": record.market_type,
+        "match_stage": record.match_stage,
+        "market_status": record.market_status,
+        "capture_policy_version": record.capture_policy_version,
+        "pair_quality": record.pair_quality,
+        "pair_skew_seconds": record.pair_skew_seconds,
+        "status": record.status,
     }

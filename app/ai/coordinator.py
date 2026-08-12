@@ -6,7 +6,12 @@ from pydantic_core import to_jsonable_python
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.ai.base import PROMPT_VERSION, AiProvider, AiProviderFailure
+from app.ai.base import (
+    DECISION_POLICY_VERSION,
+    PROMPT_VERSION,
+    AiProvider,
+    AiProviderFailure,
+)
 from app.canonical import canonical_bytes
 from app.domain.snapshot import DecisionSnapshot
 from app.models import AiDecisionRecord
@@ -30,11 +35,25 @@ class AiCoordinator:
                 )
             ).all()
         )
-        existing_by_provider = {record.provider: record for record in existing}
+        existing_by_experiment = {
+            (
+                record.provider,
+                record.model,
+                record.prompt_version,
+                record.decision_policy_version,
+            ): record
+            for record in existing
+        }
 
         async def run(provider: AiProvider):
-            if provider.name in existing_by_provider:
-                return existing_by_provider[provider.name]
+            experiment = (
+                provider.name,
+                provider.model,
+                PROMPT_VERSION,
+                DECISION_POLICY_VERSION,
+            )
+            if experiment in existing_by_experiment:
+                return existing_by_experiment[experiment]
             started_at = datetime.now(UTC)
             started_clock = perf_counter()
             raw_response = None
@@ -71,6 +90,7 @@ class AiCoordinator:
                 model=provider.model,
                 model_version=model_version,
                 prompt_version=PROMPT_VERSION,
+                decision_policy_version=DECISION_POLICY_VERSION,
                 request_started_at=started_at,
                 response_received_at=received_at,
                 latency_seconds=perf_counter() - started_clock,

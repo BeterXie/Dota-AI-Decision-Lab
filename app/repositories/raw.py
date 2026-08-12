@@ -21,6 +21,8 @@ class RawEventRepository:
         parser_version: str,
         request_started_at: datetime | None = None,
         provider_event_at: datetime | None = None,
+        connection_id: str | None = None,
+        reconnect_generation: int | None = None,
     ) -> UUID:
         record = ProviderRawEvent(
             provider=provider,
@@ -32,6 +34,8 @@ class RawEventRepository:
             payload=payload,
             payload_hash=content_digest(payload),
             parser_version=parser_version,
+            connection_id=connection_id,
+            reconnect_generation=reconnect_generation,
         )
         session.add(record)
         await session.flush()

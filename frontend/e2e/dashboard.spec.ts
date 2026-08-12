@@ -116,12 +116,51 @@ const detail = {
       players_a: [{ canonical_player_id: "p1", position: 1, base_strength: 0.22, recent_form: 0.16, player_hero_strength: 0.19, player_hero_confidence: 0.74 }],
       players_b: [{ canonical_player_id: "p2", position: 1, base_strength: 0.18, recent_form: 0.09, player_hero_strength: 0.11, player_hero_confidence: 0.63 }]
     }
-  }
+  },
+  future_odds: [{
+    id: "44444444-4444-4444-4444-444444444444",
+    capture_type: "CLOSING",
+    horizon_seconds: null,
+    triggered_at: observedAt,
+    due_at: observedAt,
+    observed_at: observedAt,
+    odds_a: "1.80",
+    odds_b: "2.20",
+    market_type: "Winner",
+    match_stage: "Map 2",
+    market_status: "UNKNOWN",
+    capture_policy_version: "closing-policy-v1",
+    pair_quality: { eligible: true },
+    pair_skew_seconds: 0,
+    status: "CAPTURED"
+  }],
+  result: {
+    winner_team_id: "team-a",
+    basic_first_usable_at: observedAt,
+    advanced_first_usable_at: null,
+    settled_at: observedAt,
+    provider_conflict: false
+  },
+  result_evidence: [{
+    id: "55555555-5555-5555-5555-555555555555",
+    provider: "opendota",
+    provider_match_id: "8940730389",
+    winner_team_id: "team-a",
+    result_observed_at: observedAt,
+    first_usable_at: observedAt,
+    raw_event_id: "66666666-6666-6666-6666-666666666666",
+    normalizer_version: "opendota-v1",
+    identity_confidence: 1,
+    conflict_status: "CONSISTENT"
+  }]
 };
 
 async function mockApi(page: Page): Promise<void> {
   await page.addInitScript(() => {
     Object.defineProperty(window, "WebSocket", { value: undefined, configurable: true });
+    if (window.localStorage.getItem("dota-ai-decision-lab-locale") === null) {
+      window.localStorage.setItem("dota-ai-decision-lab-locale", "en");
+    }
   });
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
@@ -163,13 +202,19 @@ test("renders the operational decision lifecycle without page overflow", async (
   await expect(page.getByRole("tab", { name: "Runtime" })).toBeVisible();
   await expect(page.getByText("SnapshotCoordinator", { exact: true })).toBeAttached();
   await expect(page.getByText("Durable jobs", { exact: true })).toBeAttached();
+  await expect(page.getByRole("tab", { name: "Evaluation" })).toBeVisible();
+  await expect(page.getByText("Closing odds", { exact: true })).toBeAttached();
+  await expect(page.getByText("Result evidence", { exact: true })).toBeAttached();
 
   const chineseButton = page.getByRole("button", { name: "中文" });
   await chineseButton.click({ force: true });
   await expect(page.getByRole("heading", { name: "Team Spirit 对阵 Tundra", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "选人情报", exact: true })).toBeVisible();
   await expect(page.getByRole("tab", { name: "历史", exact: true })).toBeVisible();
-  await expect(page.getByText("DLTV 实时", { exact: true })).toBeAttached();
+  await expect(
+    page.getByRole("region", { name: "业务就绪状态" }).getByText("DLTV 实时", { exact: true })
+  ).toBeAttached();
+  await expect(page.getByText("赛果证据", { exact: true })).toBeAttached();
   await expect(chineseButton).toHaveAttribute("aria-pressed", "true");
 
   await page.reload();

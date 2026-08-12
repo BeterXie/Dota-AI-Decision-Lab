@@ -1,13 +1,13 @@
 # Dota AI Decision Lab — Full Implementation Architecture
 
-**版本：V4.1 — Full Implementation Architecture**  
+**版本：V4.2 — Full Implementation Architecture**
 **目标：实现完整、可持续运行、可回放、可审计的 Dota 2 多 AI 决策情报平台**  
 **近期实战目标：TI 2026 Shadow Decision**  
 **运行模式：Shadow Decision（只记录建议，不自动执行交易）**  
 **项目边界：Standalone，新项目运行时不依赖旧 `dota2-predictor`**  
 **范围原则：时间压力可以改变实现顺序，但不得缩减本文件定义的 Required Scope**
 
-**本次修订：补充 R.O.S.H. Reference Implementation、迁移边界与回归等价性要求**
+**本次修订：补充 R.O.S.H. Reference Implementation、迁移边界、回归等价性与 V3 质量收口后的生产数据合同**
 
 ---
 
@@ -879,6 +879,12 @@ fair probability
 overround
 ```
 
+## 7.7 Strict Market Pair Gate
+
+在计算 no-vig 或进入 Snapshot 前，两条赔率必须证明属于同一 Canonical Series/Map、同一 provider match、同一 market type/stage、两个不同 `odds_id`，并且 selection 恰好覆盖 Canonical Team A/B。两腿都必须满足 `received_at <= decision_at`、价格大于 1、metadata version 一致、freshness 合格且 pair skew 不超过配置阈值。
+
+未验证的 RayBet raw status 保持 `normalized_status=UNKNOWN` 并产生显式 warning；`SUSPENDED/CLOSED` 必须阻断当前可买市场。任何 identity、freshness、skew 或 metadata 失败都输出 `MARKET_PAIR_INVALID` 及具体 blocker，禁止计算伪造的 fair probability。
+
 ---
 
 # 8. DLTV Provider
@@ -1076,34 +1082,24 @@ radiant_lead
 
 在样本中表现为 Radiant 经济领先/落后值。
 
-## 8.7 State Reducer
+## 8.7 Sparse Patch / Effective State Reducer
 
-Socket 会重复广播相同状态，所以 Normalized 表不要每条都写一行。
+Socket frame 是 sparse patch：字段缺失表示本帧没有更新该字段，不得用 `None` 覆盖上一有效值；只有显式 nullable 字段的 `null` 才表示 Provider 清空。Reducer 仅覆盖 patch 中实际出现的字段，并用项目统一的 RFC 8785 canonical bytes + BLAKE2b content digest 判断 effective state 是否变化。
 
-Raw 全保存；Normalized 只在状态变化时 append。
+Raw frame 全保存；Normalized observation 只在 effective state 变化时 append。每条 raw/effective 证据记录：
 
-```python
-class DltvStateReducer:
-    def __init__(self):
-        self._last_hash: dict[int, str] = {}
-
-    def changed(self, match_id: int, payload: dict) -> bool:
-        key = {
-            "game_time": payload.get("game_time"),
-            "radiant_score": payload.get("radiant_score"),
-            "dire_score": payload.get("dire_score"),
-            "radiant_lead": payload.get("radiant_lead"),
-        }
-        digest = hashlib.sha256(
-            json.dumps(key, sort_keys=True).encode()
-        ).hexdigest()
-
-        if self._last_hash.get(match_id) == digest:
-            return False
-
-        self._last_hash[match_id] = digest
-        return True
+```text
+connection_id
+reconnect_generation
+payload_hash
+normalized_state_hash
+is_duplicate
+last_message_received_at
+last_state_change_received_at
+source_game_time
 ```
+
+重复 frame 可以推进 `last_message_received_at`，但不能推进 `last_state_change_received_at`。LIVE gate 同时检查 message age、effective state age、source game time monotonicity 和 sync confidence；重连保留上一 effective state，除非通过明确的 map reset 规则。
 
 ## 8.8 Charts
 
@@ -1235,6 +1231,8 @@ UNSAFE    > 8s
 ```
 
 但这里只是默认配置，不能当永久事实。真正阈值应由 TI 实测数据调整。
+
+Calibration pairing 必须一对一，并保存 candidate evidence。最近候选与次近候选距离过近时标记 ambiguous；同一个 live signal 不得支持多个 market signal。`SAFE` 需要足够 support、accepted pair ratio、低 ambiguity/outlier ratio、稳定的 signed lag/P50/P90/jitter 和满足配置的 confidence，不能由少量偶然 nearest-neighbor 样本得出。
 
 ## 9.6 Timeline Recorder
 
@@ -3672,22 +3670,17 @@ class DecisionSnapshot(BaseModel):
     snapshot_hash: str
 ```
 
-Canonical JSON：
+Canonical payload：
 
 ```python
-import hashlib
-import json
+from app.canonical import content_digest
 
 
 def snapshot_hash(payload: dict) -> str:
-    body = json.dumps(
-        payload,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    ).encode("utf-8")
-    return hashlib.sha256(body).hexdigest()
+    return content_digest(payload)
 ```
+
+`content_digest` 使用 RFC 8785 canonical bytes 与固定长度 BLAKE2b。Hash 输入只包含业务 payload、`decision_at` 和 schema/version；`created_at`、数据库 ID、运行机器信息不进入 hash。
 
 过去 Snapshot 永不修改。
 
@@ -3770,7 +3763,7 @@ class AiDecision(BaseModel):
         "UNKNOWN",
     ]
 
-    max_acceptable_price: float | None
+    minimum_acceptable_odds_a: float | None
 
     primary_reasons: list[str]
     counter_arguments: list[str]
@@ -3785,6 +3778,18 @@ counter_arguments
 ```
 
 避免只生成单向解释。
+
+`minimum_acceptable_odds_a` 是 decimal odds 下限：只有 Team A 市场赔率大于等于该值才可认为值得买，禁止与 implied-probability 上限混用。AI 决策实验唯一身份为：
+
+```text
+snapshot_id
+provider
+model_version
+prompt_version
+decision_policy_version
+```
+
+同一实验幂等；新 model/prompt/policy 可以在同一 immutable Snapshot 上重跑，并保留旧实验结果。
 
 ---
 
@@ -3862,9 +3867,18 @@ MARKET_REOPEN
 +1m odds
 +3m odds
 +5m odds
-closing odds
+explicit closing odds
 map result
 ```
+
+Future odds 使用显式 capture type：
+
+```text
+TIME_HORIZON -> horizon_seconds > 0
+CLOSING      -> horizon_seconds = null, closing_policy_version = closing-policy-v1
+```
+
+Closing 取 map start/market close 时点之前最后一组仍满足 strict market pair identity、freshness 与 skew gate 的赔率；该证据可以早于原 Snapshot，但绝不能晚于 closing trigger。缺失 evidence 保持 `MISSING/UNKNOWN`，不得使用负 horizon 或用 entry odds 代替 closing。
 
 评价：
 
@@ -3971,6 +3985,8 @@ map_results
 decision_evaluations
 ```
 
+`map_results` 是 append-oriented result evidence，至少保存 provider、provider match identity、winner、result observed/first usable time、raw event、normalizer version、identity confidence 和 conflict status。多 Provider 结果冲突时标记 `DATA_CONFLICT`，不自动计入模型胜负评价，也不得用最后写入覆盖历史证据。
+
 ---
 
 # 20. Raw Store 示例
@@ -3986,13 +4002,6 @@ async def save_raw_event(
     provider_event_at: datetime | None,
     received_at: datetime,
 ):
-    canonical = json.dumps(
-        payload,
-        ensure_ascii=False,
-        sort_keys=True,
-        separators=(",", ":"),
-    )
-
     session.add(ProviderRawEvent(
         provider=provider,
         event_type=event_type,
@@ -4000,9 +4009,7 @@ async def save_raw_event(
         provider_event_at=provider_event_at,
         received_at=received_at,
         payload=payload,
-        payload_hash=hashlib.sha256(
-            canonical.encode("utf-8")
-        ).hexdigest(),
+        payload_hash=content_digest(payload),
         parser_version="v1",
     ))
 ```
@@ -4237,6 +4244,8 @@ ACTION_REQUIRED
 ```
 
 DLTV Live 不安全时仍可 POST_DRAFT。
+
+每项 dependency readiness 必须包含适用的 `last_attempt_at`、`last_success_at`、`last_message_at`、`age_seconds`、`consecutive_failures`、`last_error` 和 metadata。Socket 进程已连接但尚未收到业务消息时保持 `UNKNOWN`；业务消息超过 freshness 阈值时动态降级，不能仅因 worker 进程仍在运行就显示 READY。
 
 ---
 
