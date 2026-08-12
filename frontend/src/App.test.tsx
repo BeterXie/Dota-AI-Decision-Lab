@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 
 import { App } from "./App";
@@ -20,6 +20,7 @@ const runtime = {
 };
 
 beforeEach(() => {
+  window.localStorage.clear();
   Object.defineProperty(window, "WebSocket", { value: undefined, configurable: true });
   vi.stubGlobal(
     "fetch",
@@ -39,6 +40,7 @@ beforeEach(() => {
 });
 
 afterEach(() => {
+  cleanup();
   vi.unstubAllGlobals();
 });
 
@@ -53,4 +55,30 @@ test("renders operational empty and readiness states", async () => {
   expect((await screen.findAllByText("ACTION REQUIRED")).length).toBeGreaterThan(0);
   expect(await screen.findByText("No canonical maps")).toBeInTheDocument();
   expect(screen.getByText("Waiting for canonical map discovery")).toBeInTheDocument();
+});
+
+test("switches to Chinese and restores the choice after remount", async () => {
+  const firstClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  const firstView = render(
+    <QueryClientProvider client={firstClient}>
+      <App />
+    </QueryClientProvider>
+  );
+
+  fireEvent.click(await screen.findByRole("button", { name: "中文" }));
+  expect(await screen.findByText("暂无规范化地图")).toBeInTheDocument();
+  expect(screen.getByText("等待规范化地图发现")).toBeInTheDocument();
+  expect(window.localStorage.getItem("dota-ai-decision-lab-locale")).toBe("zh-CN");
+  expect(document.documentElement.lang).toBe("zh-CN");
+
+  firstView.unmount();
+  const secondClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  render(
+    <QueryClientProvider client={secondClient}>
+      <App />
+    </QueryClientProvider>
+  );
+
+  expect(await screen.findByText("暂无规范化地图")).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "中文" })).toHaveAttribute("aria-pressed", "true");
 });

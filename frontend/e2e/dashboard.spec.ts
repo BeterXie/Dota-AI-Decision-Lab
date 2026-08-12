@@ -144,7 +144,7 @@ async function mockApi(page: Page): Promise<void> {
 
 test("renders the operational decision lifecycle without page overflow", async ({ page }) => {
   await mockApi(page);
-  await page.goto("/");
+  await page.goto("/?e2e=bilingual");
 
   await expect(page.getByRole("heading", { name: "Team Spirit vs Tundra" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Draft Intelligence" })).toBeVisible();
@@ -158,13 +158,21 @@ test("renders the operational decision lifecycle without page overflow", async (
   );
   expect(noPageOverflow).toBe(true);
 
-  const historicalTab = page.getByRole("tab", { name: "Historical" });
-  await historicalTab.click();
-  await expect(historicalTab).toHaveAttribute("aria-selected", "true");
-  await expect(page.getByRole("heading", { name: "Team Spirit", exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Tundra", exact: true })).toBeVisible();
-
+  await expect(page.getByRole("tab", { name: "Historical" })).toBeVisible();
+  await expect(page.getByText("Base Elo", { exact: true })).toHaveCount(2);
   await expect(page.getByRole("tab", { name: "Runtime" })).toBeVisible();
   await expect(page.getByText("SnapshotCoordinator", { exact: true })).toBeAttached();
   await expect(page.getByText("Durable jobs", { exact: true })).toBeAttached();
+
+  const chineseButton = page.getByRole("button", { name: "中文" });
+  await chineseButton.click({ force: true });
+  await expect(page.getByRole("heading", { name: "Team Spirit 对阵 Tundra", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "选人情报", exact: true })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "历史", exact: true })).toBeVisible();
+  await expect(page.getByText("DLTV 实时", { exact: true })).toBeAttached();
+  await expect(chineseButton).toHaveAttribute("aria-pressed", "true");
+
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "选人情报", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "中文" })).toHaveAttribute("aria-pressed", "true");
 });

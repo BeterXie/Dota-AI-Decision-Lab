@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Button,
   Header,
@@ -29,6 +29,15 @@ import {
   type RuntimeSnapshot,
   useRuntimeSocket
 } from "./api";
+import {
+  I18nProvider,
+  translate,
+  translateDependency,
+  translateStatus,
+  useI18n,
+  type Locale
+} from "./i18n";
+import IntelligenceChart from "./Chart";
 
 const DEPENDENCY_ORDER = [
   "RAYBET_HTTP",
@@ -44,10 +53,17 @@ const DEPENDENCY_ORDER = [
   "GEMINI"
 ];
 
-const IntelligenceChart = lazy(() => import("./Chart"));
-
 export function App() {
+  return (
+    <I18nProvider>
+      <Dashboard />
+    </I18nProvider>
+  );
+}
+
+function Dashboard() {
   useRuntimeSocket();
+  const { locale, setLocale, t } = useI18n();
   const queryClient = useQueryClient();
   const [selectedMapId, setSelectedMapId] = useState<string | null>(null);
   const runtime = useQuery({
@@ -89,22 +105,23 @@ export function App() {
         </HeaderName>
         <HeaderGlobalBar>
           <div className="header-status">
+            <LanguageSwitcher locale={locale} setLocale={setLocale} label={t("language")} />
             <StatusLabel status={runtime.data?.overall ?? "UNKNOWN"} />
             <Button
               kind="ghost"
               size="sm"
               hasIconOnly
               renderIcon={Renew}
-              iconDescription="Refresh data"
+              iconDescription={t("refreshData")}
               onClick={refresh}
             />
           </div>
         </HeaderGlobalBar>
       </Header>
       <div className="app-shell">
-        <aside className="match-rail" aria-label="Tracked maps">
+        <aside className="match-rail" aria-label={t("trackedMaps")}>
           <div className="rail-heading">
-            <span>Tracked maps</span>
+            <span>{t("trackedMaps")}</span>
             <strong>{maps.data?.length ?? 0}</strong>
           </div>
           {maps.isLoading ? (
@@ -116,8 +133,8 @@ export function App() {
               kind="error"
               lowContrast
               hideCloseButton
-              title="Map feed unavailable"
-              subtitle={errorMessage(maps.error)}
+              title={t("mapFeedUnavailable")}
+              subtitle={errorMessage(maps.error, t("unknownError"))}
             />
           ) : maps.data?.length ? (
             <nav className="match-list">
@@ -132,8 +149,8 @@ export function App() {
             </nav>
           ) : (
             <div className="empty-rail">
-              <strong>No canonical maps</strong>
-              <span>Waiting for provider discovery.</span>
+              <strong>{t("noCanonicalMaps")}</strong>
+              <span>{t("waitingForProviderDiscovery")}</span>
             </div>
           )}
         </aside>
@@ -147,8 +164,8 @@ export function App() {
               kind="error"
               lowContrast
               hideCloseButton
-              title="Map detail unavailable"
-              subtitle={errorMessage(detail.error)}
+              title={t("mapDetailUnavailable")}
+              subtitle={errorMessage(detail.error, t("unknownError"))}
             />
           ) : detail.data ? (
             <MapWorkspace detail={detail.data} runtime={runtime.data} jobs={jobs.data} />
@@ -161,6 +178,37 @@ export function App() {
   );
 }
 
+function LanguageSwitcher({
+  locale,
+  setLocale,
+  label
+}: {
+  locale: Locale;
+  setLocale: (locale: Locale) => void;
+  label: string;
+}) {
+  return (
+    <div className="language-switcher" role="group" aria-label={label}>
+      <button
+        type="button"
+        className={locale === "zh-CN" ? "selected" : undefined}
+        aria-pressed={locale === "zh-CN"}
+        onClick={() => setLocale("zh-CN")}
+      >
+        中文
+      </button>
+      <button
+        type="button"
+        className={locale === "en" ? "selected" : undefined}
+        aria-pressed={locale === "en"}
+        onClick={() => setLocale("en")}
+      >
+        EN
+      </button>
+    </div>
+  );
+}
+
 function MatchButton({
   map,
   selected,
@@ -170,7 +218,8 @@ function MatchButton({
   selected: boolean;
   onSelect: () => void;
 }) {
-  const title = `${map.team_a?.name ?? "Unknown"} vs ${map.team_b?.name ?? "Unknown"}`;
+  const { locale, t } = useI18n();
+  const title = `${map.team_a?.name ?? t("unknownTeam")} ${t("versus")} ${map.team_b?.name ?? t("unknownTeam")}`;
   return (
     <button
       type="button"
@@ -179,13 +228,13 @@ function MatchButton({
     >
       <span className="match-button-title">{title}</span>
       <span className="match-button-meta">
-        Map {map.map_number ?? "?"}
-        <span>{map.latest_snapshot?.mode ?? "NO SNAPSHOT"}</span>
+        {t("map")} {map.map_number ?? "?"}
+        <span>{translateStatus(map.latest_snapshot?.mode ?? "NO_SNAPSHOT", locale)}</span>
       </span>
       <span className="match-button-market">
         {map.market.length
           ? map.market.map((item) => Number(item.price).toFixed(2)).join(" / ")
-          : "Market unavailable"}
+          : t("marketUnavailable")}
       </span>
     </button>
   );
@@ -198,14 +247,17 @@ function ReadinessStrip({
   runtime: RuntimeSnapshot | undefined;
   loading: boolean;
 }) {
-  if (loading) return <div className="readiness-strip loading" aria-label="Loading readiness" />;
+  const { locale, t } = useI18n();
+  if (loading) {
+    return <div className="readiness-strip loading" aria-label={t("loadingReadiness")} />;
+  }
   return (
-    <section className="readiness-strip" aria-label="Business readiness">
+    <section className="readiness-strip" aria-label={t("businessReadiness")}>
       {DEPENDENCY_ORDER.map((name) => {
         const dependency = runtime?.dependencies[name];
         return (
           <div className="dependency" key={name} title={dependency?.message ?? undefined}>
-            <span>{name.replaceAll("_", " ")}</span>
+            <span>{translateDependency(name, locale)}</span>
             <StatusLabel status={dependency?.status ?? "UNKNOWN"} compact />
           </div>
         );
@@ -223,6 +275,7 @@ function MapWorkspace({
   runtime: RuntimeSnapshot | undefined;
   jobs: JobSummary | undefined;
 }) {
+  const { locale, t } = useI18n();
   const quality = detail.latest_snapshot?.quality;
   const blockers = quality?.blockers ?? [];
   const warnings = quality?.warnings ?? [];
@@ -231,34 +284,34 @@ function MapWorkspace({
       <header className="map-header">
         <div>
           <p className="map-context">
-            Map {detail.map_number ?? "?"} / Valve {detail.valve_match_id ?? "unresolved"}
+            {t("map")} {detail.map_number ?? "?"} / {t("valve")} {detail.valve_match_id ?? t("unresolved")}
           </p>
           <h1>
-            {detail.team_a?.name ?? "Unknown"} <span>vs</span>{" "}
-            {detail.team_b?.name ?? "Unknown"}
+            {detail.team_a?.name ?? t("unknownTeam")} <span>{t("versus")}</span>{" "}
+            {detail.team_b?.name ?? t("unknownTeam")}
           </h1>
         </div>
         <div className="map-state">
           <StatusLabel status={detail.latest_snapshot?.mode ?? "NO SNAPSHOT"} />
-          <span>{formatTime(detail.latest_snapshot?.decision_at)}</span>
+          <span>{formatTime(detail.latest_snapshot?.decision_at, locale)}</span>
         </div>
       </header>
 
       {(blockers.length > 0 || warnings.length > 0) && (
-        <section className="quality-band" aria-label="Data quality">
+        <section className="quality-band" aria-label={t("dataQuality")}>
           <div>
-            <strong>Data quality</strong>
-            <span>{blockers.length ? "Decision blocked" : "Decision degraded"}</span>
+            <strong>{t("dataQuality")}</strong>
+            <span>{blockers.length ? t("decisionBlocked") : t("decisionDegraded")}</span>
           </div>
           <div className="quality-tags">
             {blockers.map((item) => (
-              <Tag key={item} type="red" size="sm">
-                {item}
+              <Tag key={item} type="red" size="sm" title={item}>
+                {translateStatus(item, locale)}
               </Tag>
             ))}
             {warnings.map((item) => (
-              <Tag key={item} type="warm-gray" size="sm">
-                {item}
+              <Tag key={item} type="warm-gray" size="sm" title={item}>
+                {translateStatus(item, locale)}
               </Tag>
             ))}
           </div>
@@ -274,10 +327,10 @@ function MapWorkspace({
       </section>
 
       <Tabs>
-        <TabList aria-label="Map intelligence views" contained>
-          <Tab>Live</Tab>
-          <Tab>Historical</Tab>
-          <Tab>Runtime</Tab>
+        <TabList aria-label={t("mapIntelligenceViews")} contained>
+          <Tab>{t("live")}</Tab>
+          <Tab>{t("historical")}</Tab>
+          <Tab>{t("runtime")}</Tab>
         </TabList>
         <TabPanels>
           <TabPanel>
@@ -296,6 +349,7 @@ function MapWorkspace({
 }
 
 function MarketPanel({ detail }: { detail: MapDetail }) {
+  const { locale, t } = useI18n();
   const series = useMemo(() => {
     const grouped = new Map<number, Array<[string, number]>>();
     detail.market_timeline.forEach((item) => {
@@ -305,23 +359,23 @@ function MarketPanel({ detail }: { detail: MapDetail }) {
     });
     return [...grouped.entries()].map(([oddsId, data], index) => ({
       name: detail.market.find((item) => item.odds_id === oddsId)?.selection_team_id
-        ? `Selection ${index + 1}`
-        : `Odds ${oddsId}`,
+        ? `${t("selection")} ${index + 1}`
+        : `${t("odds")} ${oddsId}`,
       type: "line",
       showSymbol: false,
       data
     }));
-  }, [detail.market, detail.market_timeline]);
+  }, [detail.market, detail.market_timeline, t]);
   return (
     <section className="intel-panel market-panel">
-      <PanelHeading title="Market" status={detail.market.length ? "FRESH" : "MISSING"} />
+      <PanelHeading title={t("market")} status={detail.market.length ? "FRESH" : "MISSING"} />
       <div className="metric-row">
         {detail.market.slice(0, 2).map((item, index) => (
           <div className="metric" key={item.odds_id}>
             <span>{index === 0 ? detail.team_a?.name : detail.team_b?.name}</span>
             <strong>{Number(item.price).toFixed(2)}</strong>
             <small>
-              Fair {item.fair_probability == null ? "unknown" : percent(item.fair_probability)}
+              {t("fair")} {item.fair_probability == null ? t("unknown") : percent(item.fair_probability, locale)}
             </small>
           </div>
         ))}
@@ -336,16 +390,17 @@ function MarketPanel({ detail }: { detail: MapDetail }) {
             yAxis: { type: "value", scale: true, axisLabel: { color: "#8d8d8d" } },
             series
           }}
-          label="Market odds timeline"
+          label={t("marketOddsTimeline")}
         />
       ) : (
-        <PanelEmpty text="No RayBet odds observations for this map." />
+        <PanelEmpty text={t("noRayBetOdds")} />
       )}
     </section>
   );
 }
 
 function DraftPanel({ detail }: { detail: MapDetail }) {
+  const { locale, t } = useI18n();
   const curve = detail.draft?.curve ?? [];
   const features = detail.draft?.features ?? {};
   const data = (key: keyof (typeof curve)[number]) =>
@@ -353,14 +408,14 @@ function DraftPanel({ detail }: { detail: MapDetail }) {
   return (
     <section className="intel-panel draft-panel">
       <PanelHeading
-        title="Draft Intelligence"
+        title={t("draftIntelligence")}
         status={detail.draft?.complete ? "READY" : detail.draft ? "PARTIAL" : "MISSING"}
       />
       <div className="compact-metrics">
-        <Metric label="Current edge" value={signed(features.current_edge)} />
-        <Metric label="Next 5m" value={signed(features.next_5m_edge)} />
-        <Metric label="Peak minute" value={metricText(features.peak_minute)} />
-        <Metric label="Peak edge" value={signed(features.peak_edge)} />
+        <Metric label={t("currentEdge")} value={signed(features.current_edge, locale)} />
+        <Metric label={t("next5m")} value={signed(features.next_5m_edge, locale)} />
+        <Metric label={t("peakMinute")} value={metricText(features.peak_minute, locale)} />
+        <Metric label={t("peakEdge")} value={signed(features.peak_edge, locale)} />
       </div>
       {curve.length ? (
         <Chart
@@ -371,19 +426,19 @@ function DraftPanel({ detail }: { detail: MapDetail }) {
             xAxis: { type: "value", min: 20, max: 60, axisLabel: { color: "#8d8d8d" } },
             yAxis: { type: "value", axisLabel: { color: "#8d8d8d", formatter: "{value}%" } },
             series: [
-              { name: "Pure", type: "line", showSymbol: false, data: data("pure_radiant_edge") },
+              { name: t("pure"), type: "line", showSymbol: false, data: data("pure_radiant_edge") },
               {
-                name: "Player adjusted",
+                name: t("playerAdjusted"),
                 type: "line",
                 showSymbol: false,
                 data: data("adjusted_radiant_edge")
               }
             ]
           }}
-          label="Draft minute curve"
+          label={t("draftMinuteCurve")}
         />
       ) : (
-        <PanelEmpty text="No validated R.O.S.H. curve is available." />
+        <PanelEmpty text={t("noRoshCurve")} />
       )}
       {detail.draft?.model_version && (
         <p className="provenance">
@@ -395,9 +450,10 @@ function DraftPanel({ detail }: { detail: MapDetail }) {
 }
 
 function AiPanel({ detail }: { detail: MapDetail }) {
+  const { locale, t } = useI18n();
   return (
     <section className="ai-panel">
-      <PanelHeading title="Independent AI decisions" status={`${detail.decisions.length}/3`} />
+      <PanelHeading title={t("independentAiDecisions")} status={`${detail.decisions.length}/3`} />
       {detail.decisions.length ? (
         <div className="decision-list">
           {detail.decisions.map((record) => (
@@ -407,57 +463,58 @@ function AiPanel({ detail }: { detail: MapDetail }) {
                 <StatusLabel status={record.decision?.action ?? record.parse_status} compact />
               </div>
               <div className="decision-confidence">
-                <span>Confidence</span>
+                <span>{t("confidence")}</span>
                 <strong>
                   {record.decision?.confidence == null
-                    ? "unknown"
-                    : percent(record.decision.confidence)}
+                    ? t("unknown")
+                    : percent(record.decision.confidence, locale)}
                 </strong>
               </div>
               {record.error ? (
                 <p className="decision-error">{record.error}</p>
               ) : (
                 <>
-                  <ReasonList title="Reasons" values={record.decision?.primary_reasons} />
-                  <ReasonList title="Counter arguments" values={record.decision?.counter_arguments} />
+                  <ReasonList title={t("reasons")} values={record.decision?.primary_reasons} />
+                  <ReasonList title={t("counterArguments")} values={record.decision?.counter_arguments} />
                   <ReasonList
-                    title="Quality concerns"
+                    title={t("qualityConcerns")}
                     values={record.decision?.data_quality_concerns}
                   />
                 </>
               )}
               <footer>
                 <span>{record.model}</span>
-                <span>{formatLatency(record.latency_seconds)}</span>
+                <span>{formatLatency(record.latency_seconds, locale)}</span>
               </footer>
             </article>
           ))}
         </div>
       ) : (
-        <PanelEmpty text="No AI decisions exist for the latest snapshot." />
+        <PanelEmpty text={t("noAiDecisions")} />
       )}
     </section>
   );
 }
 
 function LivePanel({ detail }: { detail: MapDetail }) {
+  const { locale, t } = useI18n();
   const latest = detail.live;
   return (
     <section className="tab-content">
       <div className="compact-metrics live-metrics">
-        <Metric label="Game time" value={formatGameTime(latest?.game_time_seconds)} />
+        <Metric label={t("gameTime")} value={formatGameTime(latest?.game_time_seconds, locale)} />
         <Metric
-          label="Kills"
+          label={t("kills")}
           value={
             latest?.radiant_kills == null || latest.dire_kills == null
-              ? "unknown"
+              ? t("unknown")
               : `${latest.radiant_kills} - ${latest.dire_kills}`
           }
         />
-        <Metric label="Radiant NW" value={signed(latest?.radiant_nw_lead)} />
-        <Metric label="Sync" value={detail.sync?.status ?? "UNKNOWN"} />
-        <Metric label="P90 lag" value={seconds(detail.sync?.p90_seconds)} />
-        <Metric label="Samples" value={metricText(detail.sync?.sample_size)} />
+        <Metric label={t("radiantNetWorth")} value={signed(latest?.radiant_nw_lead, locale)} />
+        <Metric label={t("sync")} value={translateStatus(detail.sync?.status ?? "UNKNOWN", locale)} />
+        <Metric label={t("p90Lag")} value={seconds(detail.sync?.p90_seconds, locale)} />
+        <Metric label={t("samples")} value={metricText(detail.sync?.sample_size, locale)} />
       </div>
       {detail.live_timeline.length ? (
         <Chart
@@ -468,7 +525,7 @@ function LivePanel({ detail }: { detail: MapDetail }) {
             yAxis: { type: "value", axisLabel: { color: "#8d8d8d" } },
             series: [
               {
-                name: "Radiant net worth lead",
+                name: t("radiantNetWorthLead"),
                 type: "line",
                 showSymbol: false,
                 data: detail.live_timeline.map((item) => [
@@ -478,26 +535,27 @@ function LivePanel({ detail }: { detail: MapDetail }) {
               }
             ]
           }}
-          label="DLTV live state timeline"
+          label={t("dltvLiveTimeline")}
         />
       ) : (
-        <PanelEmpty text="No normalized DLTV fast states are available." />
+        <PanelEmpty text={t("noDltvStates")} />
       )}
     </section>
   );
 }
 
 function HistoryPanel({ detail }: { detail: MapDetail }) {
+  const { t } = useI18n();
   const history = (detail.snapshot_payload?.history ?? {}) as Record<string, unknown>;
   const teamA = objectValue(history.team_a);
   const teamB = objectValue(history.team_b);
   const playersA = arrayValue(history.players_a);
   const playersB = arrayValue(history.players_b);
-  if (!teamA && !teamB) return <PanelEmpty text="No Historical snapshot is attached." />;
+  if (!teamA && !teamB) return <PanelEmpty text={t("noHistoricalSnapshot")} />;
   return (
     <section className="history-grid tab-content">
-      <TeamHistory name={detail.team_a?.name ?? "Team A"} team={teamA} players={playersA} />
-      <TeamHistory name={detail.team_b?.name ?? "Team B"} team={teamB} players={playersB} />
+      <TeamHistory name={detail.team_a?.name ?? t("teamA")} team={teamA} players={playersA} />
+      <TeamHistory name={detail.team_b?.name ?? t("teamB")} team={teamB} players={playersB} />
     </section>
   );
 }
@@ -511,23 +569,24 @@ function TeamHistory({
   team: Record<string, unknown> | null;
   players: unknown[];
 }) {
+  const { locale, t } = useI18n();
   return (
     <article className="team-history">
       <h3>{name}</h3>
       <div className="compact-metrics">
-        <Metric label="Base Elo" value={metricText(team?.base_rating)} />
-        <Metric label="Recent form" value={signed(team?.recent_form)} />
-        <Metric label="Roster strength" value={signed(team?.current_roster_strength)} />
-        <Metric label="Roster stability" value={percentValue(team?.roster_stability)} />
+        <Metric label={t("baseElo")} value={metricText(team?.base_rating, locale)} />
+        <Metric label={t("recentForm")} value={signed(team?.recent_form, locale)} />
+        <Metric label={t("rosterStrength")} value={signed(team?.current_roster_strength, locale)} />
+        <Metric label={t("rosterStability")} value={percentValue(team?.roster_stability, locale)} />
       </div>
       <table className="cds--data-table cds--data-table--sm">
         <thead>
           <tr>
-            <th>Pos</th>
-            <th>Base</th>
-            <th>Recent</th>
-            <th>Hero</th>
-            <th>Confidence</th>
+            <th>{t("position")}</th>
+            <th>{t("base")}</th>
+            <th>{t("recent")}</th>
+            <th>{t("hero")}</th>
+            <th>{t("confidence")}</th>
           </tr>
         </thead>
         <tbody>
@@ -535,11 +594,11 @@ function TeamHistory({
             const player = objectValue(raw) ?? {};
             return (
               <tr key={String(player.canonical_player_id ?? index)}>
-                <td>{metricText(player.position)}</td>
-                <td>{signed(player.base_strength)}</td>
-                <td>{signed(player.recent_form)}</td>
-                <td>{signed(player.player_hero_strength)}</td>
-                <td>{percentValue(player.player_hero_confidence)}</td>
+                <td>{metricText(player.position, locale)}</td>
+                <td>{signed(player.base_strength, locale)}</td>
+                <td>{signed(player.recent_form, locale)}</td>
+                <td>{signed(player.player_hero_strength, locale)}</td>
+                <td>{percentValue(player.player_hero_confidence, locale)}</td>
               </tr>
             );
           })}
@@ -556,21 +615,22 @@ function RuntimePanel({
   runtime: RuntimeSnapshot | undefined;
   jobs: JobSummary | undefined;
 }) {
+  const { locale, t } = useI18n();
   const workers = Object.values(runtime?.workers ?? {}).sort((a, b) =>
     a.name.localeCompare(b.name)
   );
   return (
     <section className="runtime-layout tab-content">
       <div>
-        <h3>Workers</h3>
+        <h3>{t("workers")}</h3>
         <table className="cds--data-table cds--data-table--sm worker-table">
           <thead>
             <tr>
-              <th>Worker</th>
-              <th>State</th>
-              <th>Messages</th>
-              <th>Restarts</th>
-              <th>Last success</th>
+              <th>{t("worker")}</th>
+              <th>{t("state")}</th>
+              <th>{t("messages")}</th>
+              <th>{t("restarts")}</th>
+              <th>{t("lastSuccess")}</th>
             </tr>
           </thead>
           <tbody>
@@ -580,17 +640,17 @@ function RuntimePanel({
                 <td><StatusLabel status={worker.state} compact /></td>
                 <td>{worker.messages_received}</td>
                 <td>{worker.restart_count}</td>
-                <td>{formatTime(worker.last_success_at)}</td>
+                <td>{formatTime(worker.last_success_at, locale)}</td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
       <div>
-        <h3>Durable jobs</h3>
+        <h3>{t("durableJobs")}</h3>
         <div className="job-statuses">
           {Object.entries(jobs?.by_status ?? {}).map(([status, count]) => (
-            <Metric key={status} label={status} value={String(count)} />
+            <Metric key={status} label={translateStatus(status, locale)} value={String(count)} />
           ))}
         </div>
         {jobs?.recent_failures.length ? (
@@ -598,13 +658,13 @@ function RuntimePanel({
             {jobs.recent_failures.map((failure) => (
               <article key={failure.id}>
                 <strong>{failure.job_type}</strong>
-                <span>{failure.last_error ?? "Unknown error"}</span>
-                <small>{failure.attempt_count} attempts</small>
+                <span>{failure.last_error ?? t("unknownError")}</span>
+                <small>{failure.attempt_count} {t("attempts")}</small>
               </article>
             ))}
           </div>
         ) : (
-          <PanelEmpty text="No terminal job failures." />
+          <PanelEmpty text={t("noTerminalFailures")} />
         )}
       </div>
     </section>
@@ -627,11 +687,10 @@ function StatusLabel({
   status: string;
   compact?: boolean;
 }) {
-  return (
-    <span className={`status-label ${statusTone(status)}${compact ? " compact" : ""}`}>
-      {status.replaceAll("_", " ")}
-    </span>
-  );
+  const { locale } = useI18n();
+  return <span className={`status-label ${statusTone(status)}${compact ? " compact" : ""}`}>
+    {translateStatus(status, locale)}
+  </span>;
 }
 
 function Metric({ label, value }: { label: string; value: string }) {
@@ -656,9 +715,7 @@ function ReasonList({ title, values }: { title: string; values?: string[] }) {
 function Chart({ option, label }: { option: object; label: string }) {
   return (
     <div className="chart" role="img" aria-label={label}>
-      <Suspense fallback={<div className="chart-loading" />}>
-        <IntelligenceChart option={option} />
-      </Suspense>
+      <IntelligenceChart option={option} />
     </div>
   );
 }
@@ -677,17 +734,18 @@ function WorkspaceSkeleton() {
 }
 
 function EmptyWorkspace({ overall }: { overall?: string }) {
+  const { t } = useI18n();
   return (
     <section className="empty-workspace">
       <StatusLabel status={overall ?? "STARTING"} />
-      <h1>Waiting for canonical map discovery</h1>
-      <p>Runtime health and provider state remain visible above.</p>
+      <h1>{t("waitingCanonicalMap")}</h1>
+      <p>{t("runtimeStatusVisible")}</p>
     </section>
   );
 }
 
-function errorMessage(error: unknown): string {
-  return error instanceof Error ? error.message : "Unknown request failure";
+function errorMessage(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
 }
 
 function statusTone(status: string): string {
@@ -707,39 +765,51 @@ function providerName(provider: string): string {
   return { openai: "GPT", anthropic: "Claude", gemini: "Gemini" }[provider] ?? provider;
 }
 
-function percent(value: number): string {
-  return `${(value * 100).toFixed(1)}%`;
+function percent(value: number, locale: Locale): string {
+  return new Intl.NumberFormat(locale, {
+    style: "percent",
+    minimumFractionDigits: 1,
+    maximumFractionDigits: 1
+  }).format(value);
 }
 
-function percentValue(value: unknown): string {
-  return typeof value === "number" ? percent(value) : "unknown";
+function percentValue(value: unknown, locale: Locale): string {
+  return typeof value === "number" ? percent(value, locale) : translate("unknown", locale);
 }
 
-function signed(value: unknown): string {
-  return typeof value === "number" ? `${value > 0 ? "+" : ""}${value.toFixed(1)}` : "unknown";
+function signed(value: unknown, locale: Locale): string {
+  return typeof value === "number"
+    ? new Intl.NumberFormat(locale, {
+        signDisplay: "exceptZero",
+        minimumFractionDigits: 1,
+        maximumFractionDigits: 1
+      }).format(value)
+    : translate("unknown", locale);
 }
 
-function metricText(value: unknown): string {
-  return typeof value === "number" || typeof value === "string" ? String(value) : "unknown";
+function metricText(value: unknown, locale: Locale): string {
+  return typeof value === "number" || typeof value === "string"
+    ? String(value)
+    : translate("unknown", locale);
 }
 
-function seconds(value: number | null | undefined): string {
-  return value == null ? "unknown" : `${value.toFixed(1)}s`;
+function seconds(value: number | null | undefined, locale: Locale): string {
+  return value == null ? translate("unknown", locale) : `${value.toFixed(1)}s`;
 }
 
-function formatLatency(value: number | null): string {
-  return value == null ? "unknown latency" : `${(value * 1000).toFixed(0)}ms`;
+function formatLatency(value: number | null, locale: Locale): string {
+  return value == null ? translate("unknownLatency", locale) : `${(value * 1000).toFixed(0)}ms`;
 }
 
-function formatGameTime(value: number | null | undefined): string {
-  if (value == null) return "unknown";
+function formatGameTime(value: number | null | undefined, locale: Locale): string {
+  if (value == null) return translate("unknown", locale);
   return `${Math.floor(value / 60)}:${String(value % 60).padStart(2, "0")}`;
 }
 
-function formatTime(value: string | null | undefined): string {
-  if (!value) return "not observed";
+function formatTime(value: string | null | undefined, locale: Locale): string {
+  if (!value) return translate("notObserved", locale);
   const date = new Date(value);
-  return Number.isNaN(date.valueOf()) ? "invalid time" : date.toLocaleTimeString();
+  return Number.isNaN(date.valueOf()) ? translate("invalidTime", locale) : date.toLocaleTimeString(locale);
 }
 
 function objectValue(value: unknown): Record<string, unknown> | null {
