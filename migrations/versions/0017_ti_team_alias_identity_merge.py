@@ -23,9 +23,9 @@ def upgrade() -> None:
     # The tournament audit found three provider-name splits. Provider IDs are
     # the evidence anchor; names alone are not used to merge canonical teams.
     for raybet_team_id, dltv_team_id in (
-        ("16129", "7"),       # Liquid / Team Liquid
-        ("16236", "3"),       # VG / Vici Gaming
-        ("16259", "4837"),    # Spirit / Team Spirit
+        ("16129", "7"),  # Liquid / Team Liquid
+        ("16236", "3"),  # VG / Vici Gaming
+        ("16259", "4837"),  # Spirit / Team Spirit
     ):
         _merge_provider_team_identity(
             connection,
@@ -100,8 +100,7 @@ def _merge_provider_team_identity(
     )
     connection.execute(
         sa.text(
-            "UPDATE team_aliases SET canonical_team_id = :target "
-            "WHERE canonical_team_id = :source"
+            "UPDATE team_aliases SET canonical_team_id = :target WHERE canonical_team_id = :source"
         ),
         {"source": source_team_id, "target": target_team_id},
     )
@@ -146,11 +145,7 @@ def _merge_provider_series(connection, *, raybet_match_id: str, dltv_series_id: 
         ),
         {"provider_match_id": dltv_series_id},
     )
-    if (
-        source_series_id is None
-        or target_series_id is None
-        or source_series_id == target_series_id
-    ):
+    if source_series_id is None or target_series_id is None or source_series_id == target_series_id:
         return
 
     connection.execute(

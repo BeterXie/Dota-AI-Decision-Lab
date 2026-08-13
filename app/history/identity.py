@@ -266,9 +266,7 @@ class HistoricalTeamResolver:
 
 
 def _names_match(canonical_name: str, provider_name: str) -> bool:
-    return bool(
-        equivalent_team_aliases(canonical_name) & equivalent_team_aliases(provider_name)
-    )
+    return bool(equivalent_team_aliases(canonical_name) & equivalent_team_aliases(provider_name))
 
 
 async def _merge_placeholder_team(

@@ -92,9 +92,9 @@ class RoshService:
             )
         )
         if not synergy_response.payload.get("errors"):
-            analysis["synergy"] = normalize_rosh_analysis(
-                {"synergy": synergy_response.payload}
-            )["synergy"]
+            analysis["synergy"] = normalize_rosh_analysis({"synergy": synergy_response.payload})[
+                "synergy"
+            ]
 
         players = [
             {"steamAccountId": slot.account_id, "heroId": hero_id}
@@ -121,9 +121,7 @@ class RoshService:
             # anonymous accounts. Preserve the usable entries and expose the
             # unresolved slots through player_analysis instead of discarding all
             # ten results.
-            highlights = normalize_player_highlights_response(
-                highlight_request, response.payload
-            )
+            highlights = normalize_player_highlights_response(highlight_request, response.payload)
         radiant_highlights = [highlights.get(index) for index in range(5)]
         dire_highlights = [highlights.get(index) for index in range(5, 10)]
         slot_statuses = [

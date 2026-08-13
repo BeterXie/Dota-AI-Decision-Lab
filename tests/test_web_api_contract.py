@@ -44,35 +44,47 @@ def test_match_phase_uses_result_and_fresh_live_facts() -> None:
         settled_at=now,
     )
 
-    assert _match_phase(
-        scheduled_at=now + timedelta(hours=1),
-        live=None,
-        result=None,
-        observed_at=now,
-        live_state_max_age_seconds=45,
-    ) == "PREMATCH"
-    assert _match_phase(
-        scheduled_at=now - timedelta(hours=1),
-        live=live,
-        result=None,
-        observed_at=now,
-        live_state_max_age_seconds=45,
-    ) == "LIVE"
+    assert (
+        _match_phase(
+            scheduled_at=now + timedelta(hours=1),
+            live=None,
+            result=None,
+            observed_at=now,
+            live_state_max_age_seconds=45,
+        )
+        == "PREMATCH"
+    )
+    assert (
+        _match_phase(
+            scheduled_at=now - timedelta(hours=1),
+            live=live,
+            result=None,
+            observed_at=now,
+            live_state_max_age_seconds=45,
+        )
+        == "LIVE"
+    )
     live.last_message_received_at = now - timedelta(seconds=46)
-    assert _match_phase(
-        scheduled_at=now - timedelta(hours=1),
-        live=live,
-        result=None,
-        observed_at=now,
-        live_state_max_age_seconds=45,
-    ) == "AWAITING_RESULT"
-    assert _match_phase(
-        scheduled_at=now - timedelta(hours=1),
-        live=live,
-        result=result,
-        observed_at=now,
-        live_state_max_age_seconds=45,
-    ) == "POSTMATCH"
+    assert (
+        _match_phase(
+            scheduled_at=now - timedelta(hours=1),
+            live=live,
+            result=None,
+            observed_at=now,
+            live_state_max_age_seconds=45,
+        )
+        == "AWAITING_RESULT"
+    )
+    assert (
+        _match_phase(
+            scheduled_at=now - timedelta(hours=1),
+            live=live,
+            result=result,
+            observed_at=now,
+            live_state_max_age_seconds=45,
+        )
+        == "POSTMATCH"
+    )
 
 
 @pytest.mark.asyncio

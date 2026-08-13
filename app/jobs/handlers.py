@@ -565,9 +565,9 @@ class ApplicationJobHandlers:
             except Exception as exc:
                 failures.append(f"{provider.name}={type(exc).__name__}: {exc}")
         raise RuntimeError(
-            f"postmatch result unavailable for Valve match {valve_match_id}: "
-            + "; ".join(failures)
+            f"postmatch result unavailable for Valve match {valve_match_id}: " + "; ".join(failures)
         )
+
     async def settle_map(self, job: DurableJob) -> None:
         canonical_map_id = _required_uuid(job.payload, "canonical_map_id")
         async with self._d.session_factory() as session, session.begin():

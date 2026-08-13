@@ -707,9 +707,7 @@ class DecisionEmailNotificationRecord(Base):
     template_version: Mapped[str] = mapped_column(String(64), nullable=False)
     idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
     provider_message_id: Mapped[str | None] = mapped_column(String(255))
-    translation_status: Mapped[str] = mapped_column(
-        String(32), nullable=False, default="DISABLED"
-    )
+    translation_status: Mapped[str] = mapped_column(String(32), nullable=False, default="DISABLED")
     translation_model: Mapped[str | None] = mapped_column(String(128))
     translation_raw_response: Mapped[dict | None] = mapped_column(JSON_DOCUMENT)
     translation_error: Mapped[str | None] = mapped_column(Text)

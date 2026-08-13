@@ -236,13 +236,11 @@ class SnapshotBuilder:
         records = list(
             (
                 await session.scalars(
-                    select(OddsObservationRecord)
-                    .join(
+                    select(OddsObservationRecord).join(
                         latest_times,
                         and_(
                             OddsObservationRecord.odds_id == latest_times.c.odds_id,
-                            OddsObservationRecord.received_at
-                            == latest_times.c.latest_received_at,
+                            OddsObservationRecord.received_at == latest_times.c.latest_received_at,
                         ),
                     )
                 )
@@ -305,6 +303,7 @@ class SnapshotBuilder:
             quality.blockers,
             quality.warnings,
         )
+
     async def _load_draft(
         self,
         session: AsyncSession,

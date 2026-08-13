@@ -83,7 +83,7 @@ def _retry_after_seconds(value: str | None) -> float:
     except ValueError:
         try:
             return max(0.0, (parsedate_to_datetime(value) - datetime.now(UTC)).total_seconds())
-        except (TypeError, ValueError, OverflowError):
+        except TypeError, ValueError, OverflowError:
             return 0.25
 
 

@@ -116,9 +116,7 @@ async def project_map_sides(
     if as_of is not None:
         mapping_criteria.append(ProviderTeamMapping.first_seen_at <= as_of)
     mappings = list(
-        (
-            await session.scalars(select(ProviderTeamMapping).where(*mapping_criteria))
-        ).all()
+        (await session.scalars(select(ProviderTeamMapping).where(*mapping_criteria))).all()
     )
     canonical_by_provider = {
         mapping.provider_team_id: mapping.canonical_team_id for mapping in mappings
@@ -166,11 +164,15 @@ def side_assignment_payload(assignment: MapSideAssignment) -> dict[str, object]:
         "radiant_team_id": (
             str(assignment.radiant_team_id) if assignment.radiant_team_id is not None else None
         ),
-        "dire_team_id": str(assignment.dire_team_id) if assignment.dire_team_id is not None else None,
+        "dire_team_id": str(assignment.dire_team_id)
+        if assignment.dire_team_id is not None
+        else None,
         "source": assignment.source,
         "confidence": assignment.confidence,
         "observed_at": assignment.observed_at,
-        "raw_event_id": str(assignment.raw_event_id) if assignment.raw_event_id is not None else None,
+        "raw_event_id": str(assignment.raw_event_id)
+        if assignment.raw_event_id is not None
+        else None,
         "blocker": assignment.blocker,
     }
 

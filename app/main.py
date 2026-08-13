@@ -100,10 +100,7 @@ async def run() -> None:
     identities = IdentityResolver()
     odds_registry = OddsRegistry()
     raybet_http = RayBetHttpPool(
-        tuple(
-            RayBetHttpClient(host, settings.raybet_origin)
-            for host in settings.raybet_http_hosts
-        )
+        tuple(RayBetHttpClient(host, settings.raybet_origin) for host in settings.raybet_http_hosts)
     )
     raybet_curl = CurlRayBetHttpPool(
         tuple(

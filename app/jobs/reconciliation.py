@@ -141,9 +141,7 @@ class ReconciliationService:
                         .exists(),
                         latest_live.c.latest_received_at < now - timedelta(minutes=3),
                         ~select(MapResultRecord.id)
-                        .where(
-                            MapResultRecord.canonical_map_id == CanonicalMap.id
-                        )
+                        .where(MapResultRecord.canonical_map_id == CanonicalMap.id)
                         .exists(),
                     )
                 )
@@ -239,7 +237,9 @@ class ReconciliationService:
                 except ValueError:
                     continue
                 market_team_count = await session.scalar(
-                    select(func.count(func.distinct(OddsObservationRecord.selection_team_id))).where(
+                    select(
+                        func.count(func.distinct(OddsObservationRecord.selection_team_id))
+                    ).where(
                         OddsObservationRecord.canonical_map_id == map_id_value,
                         OddsObservationRecord.market_type == "Winner",
                         OddsObservationRecord.selection_team_id.is_not(None),

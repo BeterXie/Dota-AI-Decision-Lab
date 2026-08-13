@@ -463,9 +463,7 @@ def _decision_batch_key(decisions: list[AiDecisionRecord]) -> str:
     return ",".join(sorted(str(item.id) for item in decisions))
 
 
-def _email_conclusions(
-    decisions: list[AiDecisionRecord], *, team_a: str, team_b: str
-) -> str:
+def _email_conclusions(decisions: list[AiDecisionRecord], *, team_a: str, team_b: str) -> str:
     labels = []
     for decision in sorted(decisions, key=lambda item: (item.provider, item.model)):
         normalized = decision.normalized_response if decision.parse_status == "SUCCESS" else None
@@ -512,11 +510,7 @@ def _market_line(value: object) -> str:
 def _score(live: object) -> str:
     radiant = _value(live, "radiant_kills")
     dire = _value(live, "dire_kills")
-    return (
-        f"{radiant}-{dire}"
-        if radiant is not None and dire is not None
-        else "暂无可靠数据"
-    )
+    return f"{radiant}-{dire}" if radiant is not None and dire is not None else "暂无可靠数据"
 
 
 def _draft_lineup(draft: object) -> str:
@@ -549,9 +543,7 @@ def _draft_curve_summary(draft: object) -> str:
         "peak_edge": "最大优势",
         "cross_over_minute": "阵容强弱转换时间",
     }
-    return "；".join(
-        f"{labels.get(key, key)}：{_display(value)}" for key, value in derived.items()
-    )
+    return "；".join(f"{labels.get(key, key)}：{_display(value)}" for key, value in derived.items())
 
 
 def _team_history_summary(team: object) -> str:

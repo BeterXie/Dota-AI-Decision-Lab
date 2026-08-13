@@ -5,14 +5,13 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.domain.snapshot import GateResult
 from app.models import CanonicalMap, CanonicalSeries, CanonicalTeam, LiveSyncEstimateRecord
 from app.providers.dltv.side_identity import (
     MapSideAssignment,
     project_map_sides,
     side_assignment_payload,
 )
-from app.snapshots.builder import SnapshotBuildOutcome, SnapshotBuilder, _sync_payload
+from app.snapshots.builder import SnapshotBuilder, SnapshotBuildOutcome, _sync_payload
 from app.snapshots.gates import GateContext, evaluate_gate
 
 

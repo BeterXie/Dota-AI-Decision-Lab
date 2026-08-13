@@ -319,10 +319,7 @@ async def test_reconciliation_only_enqueues_ai_after_ten_minutes() -> None:
         assert len(records) == 1
         assert records[0].payload["snapshot_id"] == str(eligible.snapshot_id)
         assert records[0].payload["snapshot_id"] != str(early.snapshot_id)
-        assert (
-            await session.scalar(select(func.count()).select_from(DecisionSnapshotRecord))
-            == 2
-        )
+        assert await session.scalar(select(func.count()).select_from(DecisionSnapshotRecord)) == 2
 
     await engine.dispose()
 

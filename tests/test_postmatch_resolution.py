@@ -160,9 +160,7 @@ async def test_observed_postmatch_team_ids_resolve_only_by_expected_aliases() ->
             )
         )
     async with factory() as session, session.begin():
-        resolved = await HistoricalTeamResolver(
-            RawEventRepository()
-        ).resolve_observed_match_teams(
+        resolved = await HistoricalTeamResolver(RawEventRepository()).resolve_observed_match_teams(
             session,
             provider="opendota",
             observed_teams=(("9247354", "Team Falcons"), ("10150538", "LGD Gaming")),
@@ -173,9 +171,7 @@ async def test_observed_postmatch_team_ids_resolve_only_by_expected_aliases() ->
         mappings = list(
             (
                 await session.scalars(
-                    select(ProviderTeamMapping).where(
-                        ProviderTeamMapping.provider == "opendota"
-                    )
+                    select(ProviderTeamMapping).where(ProviderTeamMapping.provider == "opendota")
                 )
             ).all()
         )

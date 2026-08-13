@@ -264,9 +264,7 @@ async def test_email_subject_lists_deduplicated_ai_conclusions() -> None:
         subject_prefix="[Decision]",
     )
 
-    assert subject == (
-        "[Decision] NO BUY / BUY Spirit | Spirit vs Tundra | 比赛中实时分析"
-    )
+    assert subject == ("[Decision] NO BUY / BUY Spirit | Spirit vs Tundra | 比赛中实时分析")
     await engine.dispose()
 
 
@@ -501,9 +499,7 @@ async def test_deepseek_email_translation_keeps_decision_identity() -> None:
     result = await translator.translate(decisions)
 
     assert set(result.translations) == {str(decision.id) for decision in decisions}
-    assert result.translations[str(decisions[0].id)]["primary_reasons"] == [
-        "市场价格支持该判断"
-    ]
+    assert result.translations[str(decisions[0].id)]["primary_reasons"] == ["市场价格支持该判断"]
     await client.aclose()
     await engine.dispose()
 

@@ -267,18 +267,12 @@ async def _map_summary_payloads(
     series_ids = list({item.series_id for item in maps if item.series_id is not None})
     series_rows = list(
         (
-            await session.scalars(
-                select(CanonicalSeries).where(CanonicalSeries.id.in_(series_ids))
-            )
+            await session.scalars(select(CanonicalSeries).where(CanonicalSeries.id.in_(series_ids)))
         ).all()
     )
     series_by_id = {item.id: item for item in series_rows}
     team_ids = list(
-        {
-            team_id
-            for series in series_rows
-            for team_id in (series.team_a_id, series.team_b_id)
-        }
+        {team_id for series in series_rows for team_id in (series.team_a_id, series.team_b_id)}
     )
     teams = list(
         (await session.scalars(select(CanonicalTeam).where(CanonicalTeam.id.in_(team_ids)))).all()
@@ -316,8 +310,7 @@ async def _map_summary_payloads(
                 select(RayBetMatch).join(
                     latest_raybet_times,
                     and_(
-                        RayBetMatch.provider_match_id
-                        == latest_raybet_times.c.provider_match_id,
+                        RayBetMatch.provider_match_id == latest_raybet_times.c.provider_match_id,
                         RayBetMatch.observed_at == latest_raybet_times.c.latest_observed_at,
                     ),
                 )
@@ -478,9 +471,7 @@ async def _map_summary_payloads(
                     _market_payload(item, observed_at=observed_at) for item in current_market
                 ],
                 "market_quality": (
-                    snapshot_market.get("quality")
-                    if isinstance(snapshot_market, dict)
-                    else None
+                    snapshot_market.get("quality") if isinstance(snapshot_market, dict) else None
                 ),
                 "draft": None,
                 "live": _live_payload(live, observed_at=observed_at),
@@ -590,8 +581,7 @@ async def _map_payload(
     odds = list(
         (
             await session.scalars(
-                select(OddsObservationRecord)
-                .join(
+                select(OddsObservationRecord).join(
                     latest_market_times,
                     and_(
                         OddsObservationRecord.odds_id == latest_market_times.c.odds_id,
@@ -615,13 +605,11 @@ async def _map_payload(
         latest_odds.values(),
         key=lambda item: (team_order.get(item.selection_team_id, 2), item.odds_id),
     )
-    draft = (
-        await session.scalar(
-            select(DraftSnapshotRecord)
-            .where(DraftSnapshotRecord.canonical_map_id == canonical_map.id)
-            .order_by(DraftSnapshotRecord.observed_at.desc())
-            .limit(1)
-        )
+    draft = await session.scalar(
+        select(DraftSnapshotRecord)
+        .where(DraftSnapshotRecord.canonical_map_id == canonical_map.id)
+        .order_by(DraftSnapshotRecord.observed_at.desc())
+        .limit(1)
     )
     draft_slots = (
         list(
@@ -703,13 +691,11 @@ async def _map_payload(
         ).all()
     )
     live = live_rows[0] if live_rows else None
-    sync = (
-        await session.scalar(
-            select(LiveSyncEstimateRecord)
-            .where(LiveSyncEstimateRecord.canonical_map_id == canonical_map.id)
-            .order_by(LiveSyncEstimateRecord.calculated_at.desc())
-            .limit(1)
-        )
+    sync = await session.scalar(
+        select(LiveSyncEstimateRecord)
+        .where(LiveSyncEstimateRecord.canonical_map_id == canonical_map.id)
+        .order_by(LiveSyncEstimateRecord.calculated_at.desc())
+        .limit(1)
     )
     snapshot = await session.scalar(
         select(DecisionSnapshotRecord)
@@ -1060,8 +1046,7 @@ async def _pending_series_payload(session: AsyncSession, series: CanonicalSeries
         "scheduled_at": scheduled_at,
         "phase": (
             "PREMATCH"
-            if scheduled_at is not None
-            and ensure_utc(scheduled_at) >= ensure_utc(observed_at)
+            if scheduled_at is not None and ensure_utc(scheduled_at) >= ensure_utc(observed_at)
             else "UNKNOWN"
         ),
         "provider_match_id": raybet_match.provider_match_id,

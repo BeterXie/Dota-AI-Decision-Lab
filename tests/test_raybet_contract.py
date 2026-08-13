@@ -128,9 +128,7 @@ def test_recorded_match_and_odds_payloads_preserve_provider_contract() -> None:
     ("stage", "expected"),
     (("r1", 1), ("Map r2", 2), ("map3", 3), ("Map 4", 4), ("q1", None), ("1st", None)),
 )
-def test_only_explicit_map_stages_resolve_map_number(
-    stage: str, expected: int | None
-) -> None:
+def test_only_explicit_map_stages_resolve_map_number(stage: str, expected: int | None) -> None:
     assert _map_number(stage) == expected
 
 

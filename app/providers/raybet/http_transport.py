@@ -39,7 +39,7 @@ class CurlRayBetHttpClient:
         for attempt in range(self._max_attempts):
             try:
                 response = await self._request(path, params)
-            except (OSError, TimeoutError):
+            except OSError, TimeoutError:
                 if attempt + 1 >= self._max_attempts:
                     raise
                 await asyncio.sleep(0.25 * (attempt + 1) + uniform(0.0, 0.15))
