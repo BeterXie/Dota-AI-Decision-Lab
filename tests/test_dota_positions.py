@@ -18,12 +18,14 @@ class _DotaPositionClient:
         players = []
         for radiant, account_start, hero_start in ((True, 1000, 10), (False, 2000, 20)):
             for provider_slot in range(1, 6):
-                players.append({
-                    "steamAccountId": account_start + provider_slot,
-                    "heroId": hero_start + provider_slot,
-                    "position": f"POSITION_{6 - provider_slot}",
-                    "isRadiant": radiant,
-                })
+                players.append(
+                    {
+                        "steamAccountId": account_start + provider_slot,
+                        "heroId": hero_start + provider_slot,
+                        "position": f"POSITION_{6 - provider_slot}",
+                        "isRadiant": radiant,
+                    }
+                )
         return TimedPayload(
             payload={"data": {"match": {"id": variables["matchId"], "players": players}}},
             request_started_at=self.received_at - timedelta(milliseconds=100),
@@ -35,12 +37,14 @@ def _picks() -> tuple[DltvProviderPick, ...]:
     rows = []
     for side, account_start, hero_start in (("radiant", 1000, 10), ("dire", 2000, 20)):
         for provider_slot in range(1, 6):
-            rows.append(DltvProviderPick(
-                side=side,
-                provider_slot=provider_slot,
-                account_id=account_start + provider_slot,
-                hero_id=hero_start + provider_slot,
-            ))
+            rows.append(
+                DltvProviderPick(
+                    side=side,
+                    provider_slot=provider_slot,
+                    account_id=account_start + provider_slot,
+                    hero_id=hero_start + provider_slot,
+                )
+            )
     return tuple(rows)
 
 
@@ -56,7 +60,9 @@ async def test_explicit_dota_positions_override_provider_ordering() -> None:
         raw_events=RawEventRepository(),
     )
     async with factory() as session, session.begin():
-        result = await service.resolve(session, valve_match_id=42, picks=_picks(), observed_at=observed_at)
+        result = await service.resolve(
+            session, valve_match_id=42, picks=_picks(), observed_at=observed_at
+        )
     by_account = {slot.account_id: slot for slot in result.draft.slots}
     assert result.draft.complete is True
     assert by_account[1001].position == 5
