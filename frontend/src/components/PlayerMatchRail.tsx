@@ -9,6 +9,9 @@ interface PlayerMatchRailProps {
   onSelectMatch: (id: string) => void;
 }
 
+const teamADotStyle: React.CSSProperties = { background: "#7C9CFF", boxShadow: "0 0 8px rgba(124,156,255,.35)" };
+const teamBDotStyle: React.CSSProperties = { background: "#9C82FF", boxShadow: "0 0 8px rgba(156,130,255,.35)" };
+
 export const PlayerMatchRail: React.FC<PlayerMatchRailProps> = ({ matches, selectedId, onSelectMatch }) => {
   const { locale, t } = useI18n();
   const groups = React.useMemo(() => {
@@ -50,8 +53,8 @@ export const PlayerMatchRail: React.FC<PlayerMatchRailProps> = ({ matches, selec
                       <span className="league-info">{match.tournament_name || t("unknownTournament")}{match.map_number ? ` · ${t("map")} ${match.map_number}` : ""}</span>
                     </div>
                     <div className="rail-card-teams">
-                      <div className="team-row"><span className="team-dot team-a-order" /><span className="team-name">{match.team_a?.name ?? t("unknownTeam")}</span><span className="team-odds">{formatOdds(pair?.teamA.price)}</span></div>
-                      <div className="team-row"><span className="team-dot team-b-order" /><span className="team-name">{match.team_b?.name ?? t("unknownTeam")}</span><span className="team-odds">{formatOdds(pair?.teamB.price)}</span></div>
+                      <div className="team-row"><span className="team-dot team-a-order" style={teamADotStyle} /><span className="team-name">{match.team_a?.name ?? t("unknownTeam")}</span><span className="team-odds">{formatOdds(pair?.teamA.price)}</span></div>
+                      <div className="team-row"><span className="team-dot team-b-order" style={teamBDotStyle} /><span className="team-name">{match.team_b?.name ?? t("unknownTeam")}</span><span className="team-odds">{formatOdds(pair?.teamB.price)}</span></div>
                     </div>
                     <div className="rail-card-footer"><span className="quality-pill">{match.latest_snapshot?.mode || match.identity_status}</span><span>{phaseFooter(phase, locale)}</span></div>
                   </button>
