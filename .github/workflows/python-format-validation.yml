@@ -46,52 +46,25 @@ jobs:
 
           path = Path("app/snapshots/side_aware.py")
           text = path.read_text(encoding="utf-8")
-          old = '''        if slots:
-              if side_assignment is not None and side_assignment.resolved:
-                  _align_history_to_series(history, side_assignment, series)
-              else:
-                  _remove_unassigned_roster_history(history)
-                  history_blockers = [
-                      blocker
-                      for blocker in history_blockers
-                      if blocker != "ROSTER_IDENTITY_AMBIGUOUS"
-                  ]
-                  history_warnings.append("ROSTER_SIDE_IDENTITY_UNRESOLVED")
-          if draft_complete and (side_assignment is None or not side_assignment.resolved):
-              history_blockers.append(
-                  side_assignment.blocker
-                  if side_assignment is not None and side_assignment.blocker is not None
-                  else "SIDE_IDENTITY_UNRESOLVED"
-              )
-          '''
-          new = '''        side_resolved = side_assignment is not None and side_assignment.resolved
-          if slots:
-              if side_resolved:
-                  _align_history_to_series(history, side_assignment, series)
-              else:
-                  _remove_unassigned_roster_history(history)
-                  history_blockers = [
-                      blocker
-                      for blocker in history_blockers
-                      if blocker != "ROSTER_IDENTITY_AMBIGUOUS"
-                  ]
-                  history_warnings.append("ROSTER_SIDE_IDENTITY_UNRESOLVED")
-          effective_draft_complete = draft_complete and side_resolved
-          if draft_complete and not side_resolved:
-              history_warnings.append(
-                  side_assignment.blocker
-                  if side_assignment is not None and side_assignment.blocker is not None
-                  else "SIDE_IDENTITY_UNRESOLVED"
-              )
-          '''
+
+          old = "        if slots:\n            if side_assignment is not None and side_assignment.resolved:\n"
+          new = "        side_resolved = side_assignment is not None and side_assignment.resolved\n        if slots:\n            if side_resolved:\n"
           if old not in text:
-              raise SystemExit("expected side fallback block not found")
+              raise SystemExit("expected side resolved block not found")
           text = text.replace(old, new, 1)
-          old_gate = "                draft_complete=draft_complete,"
-          new_gate = "                draft_complete=effective_draft_complete,"
-          if old_gate not in text:
+
+          old = "        if draft_complete and (side_assignment is None or not side_assignment.resolved):\n            history_blockers.append(\n"
+          new = "        effective_draft_complete = draft_complete and side_resolved\n        if draft_complete and not side_resolved:\n            history_warnings.append(\n"
+          if old not in text:
+              raise SystemExit("expected draft side blocker block not found")
+          text = text.replace(old, new, 1)
+
+          old = "                draft_complete=draft_complete,"
+          new = "                draft_complete=effective_draft_complete,"
+          if old not in text:
               raise SystemExit("expected draft gate line not found")
-          text = text.replace(old_gate, new_gate, 1)
+          text = text.replace(old, new, 1)
+
           path.write_text(text, encoding="utf-8")
           PY
       - run: uv run ruff format app migrations tests tools
