@@ -4,6 +4,9 @@ import IntelligenceChart from "../Chart";
 import { useI18n } from "../i18n";
 import { formatOdds, primaryMarketPair } from "../utils/presentation";
 
+const teamAColor = "#7C9CFF";
+const teamBColor = "#9C82FF";
+
 export function CanonicalMarketCard({ match }: { match: MapSummary | MapDetail }) {
   const { locale, t } = useI18n();
   const pair = primaryMarketPair(match.market, match.team_a?.id, match.team_b?.id);
@@ -21,8 +24,8 @@ export function CanonicalMarketCard({ match }: { match: MapSummary | MapDetail }
     xAxis: { type: "time", axisLabel: { color: "#687386", fontSize: 10, hideOverlap: true } },
     yAxis: { type: "value", scale: true, axisLabel: { color: "#687386", fontSize: 10 }, splitLine: { lineStyle: { color: "rgba(255,255,255,.05)" } } },
     series: [
-      { name: teamA, type: "line", smooth: true, showSymbol: false, lineStyle: { width: 2, color: "#41C98E" }, data: dataA },
-      { name: teamB, type: "line", smooth: true, showSymbol: false, lineStyle: { width: 2, color: "#F06A72" }, data: dataB }
+      { name: teamA, type: "line", smooth: true, showSymbol: false, lineStyle: { width: 2, color: teamAColor }, data: dataA },
+      { name: teamB, type: "line", smooth: true, showSymbol: false, lineStyle: { width: 2, color: teamBColor }, data: dataB }
     ]
   };
 
@@ -31,9 +34,9 @@ export function CanonicalMarketCard({ match }: { match: MapSummary | MapDetail }
       <div className="player-section-heading compact"><div><span className="section-kicker">MARKET</span><h3>{t("primaryWinnerMarket")}</h3></div><span className={`player-status-pill ${eligible ? "ready" : "limited"}`}>{eligible ? "READY" : "LIMITED"}</span></div>
       {pair ? <>
         <div className="player-market-odds">
-          <div className="radiant"><span>{teamA}</span><strong>{formatOdds(pair.teamA.price)}</strong><small>{t("fair")} {eligible && pair.teamA.fair_probability != null ? pct(pair.teamA.fair_probability, locale) : "—"}</small></div>
+          <div><span>{teamA}</span><strong style={{ color: teamAColor }}>{formatOdds(pair.teamA.price)}</strong><small>{t("fair")} {eligible && pair.teamA.fair_probability != null ? pct(pair.teamA.fair_probability, locale) : "—"}</small></div>
           <div className="market-vs">VS</div>
-          <div className="dire"><span>{teamB}</span><strong>{formatOdds(pair.teamB.price)}</strong><small>{t("fair")} {eligible && pair.teamB.fair_probability != null ? pct(pair.teamB.fair_probability, locale) : "—"}</small></div>
+          <div><span>{teamB}</span><strong style={{ color: teamBColor }}>{formatOdds(pair.teamB.price)}</strong><small>{t("fair")} {eligible && pair.teamB.fair_probability != null ? pct(pair.teamB.fair_probability, locale) : "—"}</small></div>
         </div>
         <div className="player-market-meta"><span>{t("freshness")} <b>{age == null ? "—" : `${age.toFixed(1)}s`}</b></span><span>{t("pairSkew")} <b>{match.market_quality?.pair_skew_seconds == null ? "—" : `${match.market_quality.pair_skew_seconds.toFixed(1)}s`}</b></span></div>
         <div className="player-market-chart">{dataA.length > 1 || dataB.length > 1 ? <IntelligenceChart option={option} /> : <span className="chart-empty">{t("waitingForOddsTrend")}</span>}</div>
