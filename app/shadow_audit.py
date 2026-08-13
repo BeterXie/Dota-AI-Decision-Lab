@@ -16,6 +16,7 @@ from app.models import (
     ProviderMatchMapping,
     ProviderRawEvent,
 )
+from app.shadow_audit_lifecycle import ai_report
 from app.shadow_audit_snapshot import live_freshness, snapshot_quality, temporal_alignment
 
 
@@ -58,6 +59,7 @@ async def build_shadow_run_audit(
         "live_freshness": live_freshness(snapshots),
         "temporal_alignment": await temporal_alignment(session, canonical_map.id),
         "snapshots": snapshot_quality(snapshots),
+        "ai": await ai_report(session, snapshots),
     }
 
 
