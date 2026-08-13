@@ -32,11 +32,7 @@ export const PlayerMatchHeader: React.FC<PlayerMatchHeaderProps> = ({ match }) =
           {match.map_number ? ` · ${t("map")} ${match.map_number}` : ""}
         </span>
         <span className={`meta-live-badge ${phase === "LIVE" ? "live" : ""}`}>
-          {phase === "LIVE" && gameTime != null
-            ? `● LIVE ${formatGameTime(gameTime)}`
-            : phase === "UPCOMING"
-              ? (locale === "zh-CN" ? "即将开始" : "UPCOMING")
-              : (locale === "zh-CN" ? "追踪中" : "TRACKED")}
+          {phase === "LIVE" && gameTime != null ? `● LIVE ${formatGameTime(gameTime)}` : phaseLabel(phase, locale)}
         </span>
         <span className="meta-quality-tag">
           {t("dataQuality")}: <strong className="quality-val">{match.latest_snapshot?.mode || t("noSnapshot")}</strong>
@@ -47,24 +43,24 @@ export const PlayerMatchHeader: React.FC<PlayerMatchHeaderProps> = ({ match }) =
         <div className="team-cell team-radiant">
           <div className="team-logo-avatar radiant">{getTeamAbbreviation(teamA)}</div>
           <div className="team-info">
-            <span className="team-side-label">RADIANT</span>
+            <span className="team-side-label">TEAM A</span>
             <h2 className="team-name">{teamA}</h2>
             <div className="team-odds-pill">{formatOdds(pair?.teamA.price)}</div>
           </div>
         </div>
 
         <div className="score-cell">
-          <div className="score-number">
+          <div className="score-number" aria-label={locale === "zh-CN" ? "天辉与夜魇击杀比分" : "Radiant versus Dire kill score"}>
             <span className="score-radiant">{match.live?.radiant_kills ?? "—"}</span>
             <span className="score-divider">:</span>
             <span className="score-dire">{match.live?.dire_kills ?? "—"}</span>
           </div>
-          {gameTime != null && <span className="score-time">{formatGameTime(gameTime)}</span>}
+          <span className="score-time">{locale === "zh-CN" ? "天辉" : "RADIANT"}{gameTime != null ? ` · ${formatGameTime(gameTime)} · ` : " · "}{locale === "zh-CN" ? "夜魇" : "DIRE"}</span>
         </div>
 
         <div className="team-cell team-dire">
           <div className="team-info align-right">
-            <span className="team-side-label">DIRE</span>
+            <span className="team-side-label">TEAM B</span>
             <h2 className="team-name">{teamB}</h2>
             <div className="team-odds-pill">{formatOdds(pair?.teamB.price)}</div>
           </div>
@@ -93,6 +89,15 @@ export const PlayerMatchHeader: React.FC<PlayerMatchHeaderProps> = ({ match }) =
     </section>
   );
 };
+
+function phaseLabel(phase: ReturnType<typeof getMatchDisplayPhase>, locale: string): string {
+  const zh = locale === "zh-CN";
+  if (phase === "UPCOMING") return zh ? "即将开始" : "UPCOMING";
+  if (phase === "AWAITING_RESULT") return zh ? "等待赛果" : "AWAITING RESULT";
+  if (phase === "POSTMATCH") return zh ? "已结束" : "POSTMATCH";
+  if (phase === "LIVE") return "LIVE";
+  return zh ? "追踪中" : "TRACKED";
+}
 
 function formatGameTime(seconds: number): string {
   const safe = Math.max(0, Math.floor(seconds));
