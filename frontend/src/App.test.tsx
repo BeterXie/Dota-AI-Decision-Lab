@@ -45,16 +45,16 @@ test("renders player-first empty state and persists locale", async () => {
   }));
 
   const first = renderApp();
-  expect(await screen.findByText("No discovered matches")).toBeInTheDocument();
-  expect(screen.getByText("Waiting for RayBet match discovery.")).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "No discovered matches" })).toBeInTheDocument();
+  expect(screen.getAllByText("Waiting for RayBet match discovery.").length).toBeGreaterThan(0);
 
   fireEvent.click(screen.getByRole("button", { name: "中文" }));
-  expect(await screen.findByText("暂无已发现比赛")).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "暂无已发现比赛" })).toBeInTheDocument();
   expect(window.localStorage.getItem("dota-ai-decision-lab-locale")).toBe("zh-CN");
 
   first.unmount();
   renderApp();
-  expect(await screen.findByText("暂无已发现比赛")).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "暂无已发现比赛" })).toBeInTheDocument();
   expect(screen.getByRole("button", { name: "中文" })).toHaveAttribute("aria-pressed", "true");
 });
 
@@ -266,7 +266,7 @@ test("renders player-first match, AI strip, overview and diagnostics", async () 
   expect(screen.getByText("Yatoro")).toBeInTheDocument();
   expect(screen.getByText("23savage")).toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole("button", { name: /System/i }));
+  fireEvent.click(screen.getAllByRole("button", { name: /System/i })[0]);
   expect(await screen.findByRole("heading", { name: "Diagnostics" })).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("button", { name: "Close diagnostics" }));
