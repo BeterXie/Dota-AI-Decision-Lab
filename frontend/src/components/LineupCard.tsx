@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import type { MapDetail, MapSummary } from "../api";
 import { getHeroPortraitUrl, getPositionLabel, getPositionRole } from "../utils/dotaAssets";
+import { resolveVerifiedMapSides } from "../utils/mapSides";
 import { useI18n } from "../i18n";
 
 interface LineupCardProps {
@@ -18,6 +19,7 @@ export const LineupCard: React.FC<LineupCardProps> = ({ match }) => {
   const { locale, t } = useI18n();
   const [selectedSlot, setSelectedSlot] = useState<HeroSlotData | null>(null);
   const apiSlots = match.draft?.slots;
+  const sides = resolveVerifiedMapSides(match);
 
   const radiantSlots: HeroSlotData[] = React.useMemo(() => {
     if (!apiSlots || apiSlots.length === 0) return [];
@@ -50,9 +52,9 @@ export const LineupCard: React.FC<LineupCardProps> = ({ match }) => {
 
       <div className="lineup-teams-container">
         {radiantSlots.length === 0 && direSlots.length === 0 && <div className="empty-rail-msg">{t("noValidatedLineup")}</div>}
-        <HeroSide side="radiant" slots={radiantSlots} onSelect={setSelectedSlot} />
+        <HeroSide side="radiant" teamName={sides?.radiant.name} slots={radiantSlots} onSelect={setSelectedSlot} />
         <div className="vs-divider-box"><span className="vs-txt">VS</span></div>
-        <HeroSide side="dire" slots={direSlots} onSelect={setSelectedSlot} />
+        <HeroSide side="dire" teamName={sides?.dire.name} slots={direSlots} onSelect={setSelectedSlot} />
       </div>
 
       {selectedSlot && (
@@ -63,7 +65,7 @@ export const LineupCard: React.FC<LineupCardProps> = ({ match }) => {
               <button className="close-btn" onClick={() => setSelectedSlot(null)}>✕</button>
             </div>
             <div className="modal-body">
-              <div className="slot-stat-row"><span>{locale === "zh-CN" ? "阵营" : "Side"}:</span><strong>{selectedSlot.side === "radiant" ? (locale === "zh-CN" ? "天辉" : "Radiant") : (locale === "zh-CN" ? "夜魇" : "Dire")}</strong></div>
+              <div className="slot-stat-row"><span>{locale === "zh-CN" ? "阵营" : "Side"}:</span><strong>{sideLabel(selectedSlot.side, locale, selectedSlot.side === "radiant" ? sides?.radiant.name : sides?.dire.name)}</strong></div>
               <div className="slot-stat-row"><span>{locale === "zh-CN" ? "位置" : "Role"}:</span><strong>{getPositionRole(selectedSlot.position)}</strong></div>
               <div className="slot-stat-row"><span>{locale === "zh-CN" ? "位置编号" : "Position"}:</span><strong>{getPositionLabel(selectedSlot.position)}</strong></div>
             </div>
@@ -74,10 +76,10 @@ export const LineupCard: React.FC<LineupCardProps> = ({ match }) => {
   );
 };
 
-function HeroSide({ side, slots, onSelect }: { side: "radiant" | "dire"; slots: HeroSlotData[]; onSelect: (slot: HeroSlotData) => void }) {
+function HeroSide({ side, teamName, slots, onSelect }: { side: "radiant" | "dire"; teamName?: string; slots: HeroSlotData[]; onSelect: (slot: HeroSlotData) => void }) {
   return (
     <div className={`lineup-side ${side}-side`}>
-      <div className={`side-label ${side === "radiant" ? "radiant-txt" : "dire-txt"}`}><span>{side.toUpperCase()}</span></div>
+      <div className={`side-label ${side === "radiant" ? "radiant-txt" : "dire-txt"}`}><span>{teamName ? `${teamName} · ` : ""}{side.toUpperCase()}</span></div>
       <div className="hero-slots-row">
         {slots.map((slot, index) => {
           const imgUrl = getHeroPortraitUrl(slot.heroName);
@@ -95,4 +97,11 @@ function HeroSide({ side, slots, onSelect }: { side: "radiant" | "dire"; slots: 
       </div>
     </div>
   );
+}
+
+function sideLabel(side: "radiant" | "dire", locale: string, teamName?: string): string {
+  const sideName = side === "radiant"
+    ? (locale === "zh-CN" ? "天辉" : "Radiant")
+    : (locale === "zh-CN" ? "夜魇" : "Dire");
+  return teamName ? `${teamName} · ${sideName}` : sideName;
 }
