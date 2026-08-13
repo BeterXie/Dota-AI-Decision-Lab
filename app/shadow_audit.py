@@ -230,11 +230,18 @@ def _integrity_checks(
 ) -> list[dict[str, str]]:
     live_count = int(snapshots["live_snapshot_count"])
     freshness_count = int(freshness["snapshot_count_with_field_evidence"])
+    side_status = (
+        "NOT_APPLICABLE"
+        if not side["status_counts"]
+        else "PASS" if side["stable"] else "FAIL"
+    )
+    ai_status = (
+        "NOT_APPLICABLE"
+        if int(ai["decision_count"]) == 0
+        else "PASS" if ai["snapshot_hash_mismatch_count"] == 0 else "FAIL"
+    )
     return [
-        {
-            "name": "side_identity_stable",
-            "status": "PASS" if side["stable"] else "FAIL",
-        },
+        {"name": "side_identity_stable", "status": side_status},
         {
             "name": "dltv_reconnect_recovery",
             "status": (
@@ -251,12 +258,7 @@ def _integrity_checks(
                 else "PASS" if freshness_count >= live_count else "WARN"
             ),
         },
-        {
-            "name": "ai_snapshot_hash_alignment",
-            "status": (
-                "PASS" if ai["snapshot_hash_mismatch_count"] == 0 else "FAIL"
-            ),
-        },
+        {"name": "ai_snapshot_hash_alignment", "status": ai_status},
     ]
 
 
