@@ -1,6 +1,11 @@
 import React from "react";
 import type { JobSummary, MapDetail, MapSummary, RuntimeSnapshot } from "../api";
 import { translateDependency, useI18n } from "../i18n";
+import {
+  LIVE_BASIC_FIELDS,
+  type LiveBasicField,
+  resolveDecisionLiveFreshness
+} from "../utils/liveFreshness";
 
 interface DiagnosticsDrawerProps {
   isOpen: boolean;
@@ -8,22 +13,6 @@ interface DiagnosticsDrawerProps {
   runtime: RuntimeSnapshot | undefined;
   jobs: JobSummary | undefined;
   match?: MapSummary | MapDetail | null;
-}
-
-const LIVE_BASIC_FIELDS = [
-  "game_time_seconds",
-  "radiant_kills",
-  "dire_kills",
-  "radiant_nw_lead"
-] as const;
-
-type LiveBasicField = (typeof LIVE_BASIC_FIELDS)[number];
-
-interface LiveFieldFreshnessView {
-  complete: boolean | null;
-  effectiveAgeSeconds: number | null;
-  agesSeconds: Partial<Record<LiveBasicField, number>>;
-  observedAt: Partial<Record<LiveBasicField, string>>;
 }
 
 export const DiagnosticsDrawer: React.FC<DiagnosticsDrawerProps> = ({
@@ -41,7 +30,8 @@ export const DiagnosticsDrawer: React.FC<DiagnosticsDrawerProps> = ({
   const dependencies = Object.values(runtime?.dependencies || {});
   const detail = isMapDetail(match) ? match : undefined;
   const sideIdentity = detail?.snapshot_payload?.identity?.side_identity;
-  const liveFieldFreshness = readLiveFieldFreshness(detail);
+  const liveFieldFreshness = detail ? resolveDecisionLiveFreshness(detail) : null;
+  const hasFieldEvidence = liveFieldFreshness?.source === "SNAPSHOT_FIELD_EVIDENCE";
 
   return (
     <div className="drawer-backdrop" onClick={onClose}>
@@ -135,6 +125,10 @@ export const DiagnosticsDrawer: React.FC<DiagnosticsDrawerProps> = ({
                     {formatAge(liveFieldFreshness?.effectiveAgeSeconds)}
                   </span>
                 </div>
+                <div className="kv-item">
+                  <span className="k">Freshness Source:</span>
+                  <span className="v mono">{liveFieldFreshness?.source || "—"}</span>
+                </div>
               </div>
 
               <div className="diag-table-container">
@@ -147,7 +141,7 @@ export const DiagnosticsDrawer: React.FC<DiagnosticsDrawerProps> = ({
                     </tr>
                   </thead>
                   <tbody>
-                    {liveFieldFreshness ? (
+                    {hasFieldEvidence && liveFieldFreshness ? (
                       LIVE_BASIC_FIELDS.map((field) => (
                         <tr key={field}>
                           <td className="mono">{liveFieldLabel(field, locale)}</td>
@@ -173,7 +167,7 @@ export const DiagnosticsDrawer: React.FC<DiagnosticsDrawerProps> = ({
               </div>
               {liveFieldFreshness && (
                 <div className="mono">
-                  {locale === "zh-CN" ? "Required fields complete" : "Required fields complete"}: {liveFieldFreshness.complete === null ? "—" : liveFieldFreshness.complete ? "YES" : "NO"}
+                  {locale === "zh-CN" ? "必需字段完整" : "Required fields complete"}: {liveFieldFreshness.complete === null ? "—" : liveFieldFreshness.complete ? "YES" : "NO"}
                 </div>
               )}
             </div>
@@ -276,37 +270,6 @@ export const DiagnosticsDrawer: React.FC<DiagnosticsDrawerProps> = ({
 
 function isMapDetail(match: MapSummary | MapDetail | null | undefined): match is MapDetail {
   return Boolean(match && "snapshot_payload" in match);
-}
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === "object" && value !== null && !Array.isArray(value);
-}
-
-function readLiveFieldFreshness(detail: MapDetail | undefined): LiveFieldFreshnessView | null {
-  const raw = detail?.snapshot_payload?.quality?.live_field_freshness;
-  if (!isRecord(raw)) return null;
-
-  const rawAges = isRecord(raw.ages_seconds) ? raw.ages_seconds : {};
-  const rawObservedAt = isRecord(raw.observed_at) ? raw.observed_at : {};
-  const agesSeconds: Partial<Record<LiveBasicField, number>> = {};
-  const observedAt: Partial<Record<LiveBasicField, string>> = {};
-
-  for (const field of LIVE_BASIC_FIELDS) {
-    const age = rawAges[field];
-    if (typeof age === "number" && Number.isFinite(age)) agesSeconds[field] = age;
-    const observed = rawObservedAt[field];
-    if (typeof observed === "string") observedAt[field] = observed;
-  }
-
-  return {
-    complete: typeof raw.complete === "boolean" ? raw.complete : null,
-    effectiveAgeSeconds:
-      typeof raw.effective_age_seconds === "number" && Number.isFinite(raw.effective_age_seconds)
-        ? raw.effective_age_seconds
-        : null,
-    agesSeconds,
-    observedAt
-  };
 }
 
 function teamLabel(match: MapDetail, teamId: string | null | undefined): string {
