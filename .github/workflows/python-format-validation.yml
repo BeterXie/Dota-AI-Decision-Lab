@@ -40,6 +40,7 @@ jobs:
       - run: uv sync --frozen --extra dev
       - run: uv run alembic upgrade head
       - run: uv run ruff format app migrations tests tools
+      - run: uv run ruff check --fix app migrations tests tools
       - run: uv run ruff check app migrations tests tools
       - run: uv run pytest
       - name: Commit formatting
