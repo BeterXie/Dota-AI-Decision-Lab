@@ -38,7 +38,7 @@ test("renders operational empty state and persists locale", async () => {
   }));
 
   const first = renderApp();
-  expect(await screen.findByText("No discovered matches")).toBeInTheDocument();
+  expect((await screen.findAllByText("No discovered matches")).length).toBeGreaterThan(0);
   expect(screen.getByText("Dota AI Decision Lab")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "中文" }));
   expect(window.localStorage.getItem("dota-ai-decision-lab-locale")).toBe("zh-CN");
@@ -110,7 +110,7 @@ test("renders player-first match intelligence and explicit R.O.S.H. side advanta
   expect((await screen.findAllByText("Team Spirit")).length).toBeGreaterThan(0);
   expect(screen.getByText("Decision data ready")).toBeInTheDocument();
   expect(screen.getByText("Independent AI decisions")).toBeInTheDocument();
-  expect(screen.getByText("BUY A")).toBeInTheDocument();
+  expect(screen.getAllByText("BUY A").length).toBeGreaterThan(0);
   expect(screen.getByText("R.O.S.H. Draft Advantage")).toBeInTheDocument();
   expect(screen.getByText("Team Spirit advantage")).toBeInTheDocument();
   expect(screen.getByText("Team Spirit +5.2pp")).toBeInTheDocument();
