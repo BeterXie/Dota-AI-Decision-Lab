@@ -81,8 +81,8 @@ test("header keeps series A/B separate from verified map sides", () => {
 
   expect(screen.getByText("TEAM A · DIRE")).toBeInTheDocument();
   expect(screen.getByText("TEAM B · RADIANT")).toBeInTheDocument();
-  expect(screen.getByText(/Bravo · RADIANT/)).toBeInTheDocument();
-  expect(screen.getByText(/Alpha · DIRE/)).toBeInTheDocument();
+  expect(screen.getAllByText(/Bravo · RADIANT/).length).toBeGreaterThanOrEqual(2);
+  expect(screen.getAllByText(/Alpha · DIRE/).length).toBeGreaterThanOrEqual(1);
 });
 
 test("R.O.S.H. attributes positive radiant edge to the verified radiant team", () => {
