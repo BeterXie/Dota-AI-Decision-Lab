@@ -54,7 +54,9 @@ async def build_shadow_run_audit(
         "generated_at": generated_at.isoformat(),
         "map": {
             "canonical_map_id": str(canonical_map.id),
-            "canonical_series_id": str(canonical_map.series_id) if canonical_map.series_id else None,
+            "canonical_series_id": str(canonical_map.series_id)
+            if canonical_map.series_id
+            else None,
             "map_number": canonical_map.map_number,
             "valve_match_id": canonical_map.valve_match_id,
         },
@@ -75,9 +77,7 @@ async def _provider_evidence(
 ) -> tuple[dict[str, Any], list[ProviderRawEvent]]:
     match_conditions = [ProviderMatchMapping.canonical_map_id == canonical_map.id]
     if canonical_map.series_id is not None:
-        match_conditions.append(
-            ProviderMatchMapping.canonical_series_id == canonical_map.series_id
-        )
+        match_conditions.append(ProviderMatchMapping.canonical_series_id == canonical_map.series_id)
     mapping = await session.scalar(
         select(ProviderMatchMapping)
         .where(
@@ -168,11 +168,7 @@ async def _recovery_events(
             )
         ).all()
     )
-    return [
-        item
-        for item in events
-        if item.payload.get("reason") == "SOCKET_RECONNECT_RECOVERY"
-    ]
+    return [item for item in events if item.payload.get("reason") == "SOCKET_RECONNECT_RECOVERY"]
 
 
 def _reconnect_report(
@@ -233,31 +229,29 @@ def _integrity_checks(
     live_count = int(snapshots["live_snapshot_count"])
     freshness_count = int(freshness["snapshot_count_with_field_evidence"])
     side_status = (
-        "NOT_APPLICABLE"
-        if not side["status_counts"]
-        else "PASS" if side["stable"] else "FAIL"
+        "NOT_APPLICABLE" if not side["status_counts"] else "PASS" if side["stable"] else "FAIL"
     )
     ai_status = (
         "NOT_APPLICABLE"
         if int(ai["decision_count"]) == 0
-        else "PASS" if ai["snapshot_hash_mismatch_count"] == 0 else "FAIL"
+        else "PASS"
+        if ai["snapshot_hash_mismatch_count"] == 0
+        else "FAIL"
     )
     return [
         {"name": "side_identity_stable", "status": side_status},
         {
             "name": "dltv_reconnect_recovery",
-            "status": (
-                "PASS"
-                if reconnect["uncovered_connection_transitions"] == 0
-                else "WARN"
-            ),
+            "status": ("PASS" if reconnect["uncovered_connection_transitions"] == 0 else "WARN"),
         },
         {
             "name": "live_field_freshness_evidence",
             "status": (
                 "NOT_APPLICABLE"
                 if live_count == 0
-                else "PASS" if freshness_count >= live_count else "WARN"
+                else "PASS"
+                if freshness_count >= live_count
+                else "WARN"
             ),
         },
         {"name": "ai_snapshot_hash_alignment", "status": ai_status},
