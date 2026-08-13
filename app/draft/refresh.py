@@ -6,7 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.jobs import JobType
 from app.jobs.repository import JobRepository
-from app.models import CanonicalMap, DltvLiveObservationRecord, DraftSnapshotRecord
+from app.models import CanonicalMap, DltvLiveObservationRecord, DraftSlotRecord, DraftSnapshotRecord
 
 
 @dataclass(frozen=True)
@@ -45,7 +45,22 @@ async def schedule_incomplete_draft_refreshes(
             )
         ).all()
     )
-    candidate_map_ids = active_map_ids | incomplete_map_ids
+    legacy_slot_map_ids = set(
+        (
+            await session.scalars(
+                select(DraftSnapshotRecord.canonical_map_id)
+                .join(
+                    DraftSlotRecord,
+                    DraftSlotRecord.draft_snapshot_id == DraftSnapshotRecord.id,
+                )
+                .where(
+                    DraftSlotRecord.source == "DLTV_SLOT",
+                    DraftSnapshotRecord.observed_at >= current - recovery_window,
+                )
+            )
+        ).all()
+    )
+    candidate_map_ids = active_map_ids | incomplete_map_ids | legacy_slot_map_ids
     maps = list(
         (
             await session.scalars(
@@ -59,13 +74,25 @@ async def schedule_incomplete_draft_refreshes(
     bucket = int(current.timestamp() // interval_seconds)
     enqueued = 0
     for canonical_map in maps:
-        latest_complete = await session.scalar(
-            select(DraftSnapshotRecord.complete)
+        latest = await session.scalar(
+            select(DraftSnapshotRecord)
             .where(DraftSnapshotRecord.canonical_map_id == canonical_map.id)
             .order_by(DraftSnapshotRecord.observed_at.desc())
             .limit(1)
         )
-        if latest_complete is True:
+        latest_has_legacy_slots = False
+        if latest is not None:
+            latest_has_legacy_slots = bool(
+                await session.scalar(
+                    select(DraftSlotRecord.id)
+                    .where(
+                        DraftSlotRecord.draft_snapshot_id == latest.id,
+                        DraftSlotRecord.source == "DLTV_SLOT",
+                    )
+                    .limit(1)
+                )
+            )
+        if latest is not None and latest.complete and not latest_has_legacy_slots:
             continue
         await jobs.enqueue(
             session,
