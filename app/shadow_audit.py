@@ -16,7 +16,7 @@ from app.models import (
     ProviderMatchMapping,
     ProviderRawEvent,
 )
-from app.shadow_audit_snapshot import live_freshness, snapshot_quality
+from app.shadow_audit_snapshot import live_freshness, snapshot_quality, temporal_alignment
 
 
 async def build_shadow_run_audit(
@@ -56,6 +56,7 @@ async def build_shadow_run_audit(
         "side_identity": _side_identity(snapshots),
         "dltv_reconnect": reconnect,
         "live_freshness": live_freshness(snapshots),
+        "temporal_alignment": await temporal_alignment(session, canonical_map.id),
         "snapshots": snapshot_quality(snapshots),
     }
 
