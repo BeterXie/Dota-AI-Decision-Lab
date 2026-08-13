@@ -1,5 +1,4 @@
 import React from "react";
-import { Renew } from "@carbon/icons-react";
 import { translateStatus, useI18n } from "../i18n";
 import type { RuntimeSnapshot } from "../api";
 
@@ -60,7 +59,10 @@ export const TopBar: React.FC<TopBarProps> = ({ runtime, onOpenDiagnostics, onRe
         </div>
 
         <button className="icon-btn" onClick={onRefresh} title={t("refreshData")}>
-          <Renew size={18} />
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+            <path d="M20 6v5h-5M4 18v-5h5" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+            <path d="M18.3 9A7 7 0 0 0 6.5 6.2L4 8M5.7 15A7 7 0 0 0 17.5 17.8L20 16" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" />
+          </svg>
         </button>
       </div>
     </header>
