@@ -85,15 +85,15 @@ export const PlayerMatchHeader: React.FC<PlayerMatchHeaderProps> = ({ match }) =
 
       <div className="player-intelligence-strip">
         <div>
-          <span>{locale === "zh-CN" ? "AI 中位 A 概率" : "AI median A"}</span>
+          <span>{locale === "zh-CN" ? "AI 中位 A（决策时）" : "AI median A · decision"}</span>
           <strong>{formatProbability(aiMedian, locale)}</strong>
         </div>
         <div>
-          <span>{locale === "zh-CN" ? "市场 A 概率" : "Market A"}</span>
+          <span>{locale === "zh-CN" ? "当前市场 A" : "Market A · now"}</span>
           <strong>{formatProbability(marketA, locale)}</strong>
         </div>
         <div className={modelMarketGap == null ? "" : modelMarketGap >= 0 ? "positive-gap" : "negative-gap"}>
-          <span>{locale === "zh-CN" ? "模型 - 市场" : "Model - market"}</span>
+          <span>{locale === "zh-CN" ? "决策模型 - 当前市场" : "Decision model - market now"}</span>
           <strong>{modelMarketGap == null ? "—" : `${modelMarketGap >= 0 ? "+" : ""}${modelMarketGap.toFixed(1)}pp`}</strong>
         </div>
         <div>
