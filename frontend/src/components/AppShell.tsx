@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import type { JobSummary, MapDetail, MapSummary, RuntimeSnapshot } from "../api";
 import { TopBar } from "./TopBar";
-import { MatchRail, type MatchCategory } from "./MatchRail";
+import { MatchRail } from "./MatchRail";
 import { MatchHeader } from "./MatchHeader";
 import { DecisionTrustBanner } from "./DecisionTrustBanner";
 import { AiDecisionStrip } from "./AiDecisionStrip";
@@ -14,7 +14,7 @@ import { EvaluationCard } from "./EvaluationCard";
 import { DiagnosticsDrawer } from "./DiagnosticsDrawer";
 import { useI18n } from "../i18n";
 
-export type NavTab = "OVERVIEW" | "DRAFT" | "LIVE" | "HISTORICAL" | "EVALUATION" | "DIAGNOSTICS";
+export type NavTab = "OVERVIEW" | "DRAFT" | "HISTORICAL" | "EVALUATION";
 
 interface AppShellProps {
   runtime: RuntimeSnapshot | undefined;
@@ -38,10 +38,8 @@ export const AppShell: React.FC<AppShellProps> = ({
   onRefresh
 }) => {
   const { t } = useI18n();
-  const [category, setCategory] = useState<MatchCategory>("ALL");
   const [activeTab, setActiveTab] = useState<NavTab>("OVERVIEW");
   const [isDiagnosticsOpen, setIsDiagnosticsOpen] = useState(false);
-
   const activeMatch = detail || selectedMatch;
 
   return (
@@ -53,130 +51,90 @@ export const AppShell: React.FC<AppShellProps> = ({
       />
 
       <div className="shell-body">
-        {/* Left Match Rail */}
         <MatchRail
           matches={matches}
           selectedId={selectedMapId}
-          category={category}
-          onSelectCategory={setCategory}
-          onSelectMatch={onSelectMatch}
+          onSelectMatch={(id) => {
+            onSelectMatch(id);
+            setActiveTab("OVERVIEW");
+          }}
         />
 
-        {/* Main Workspace */}
         <main className="main-workspace">
           {activeMatch ? (
             <div className="match-workspace-content">
-              {/* Match Hero Header */}
               <MatchHeader match={activeMatch} />
-
-              {/* Decision Trust Banner */}
               <DecisionTrustBanner match={activeMatch} />
-
-              {/* Primary AI Decision Strip */}
               <AiDecisionStrip decisions={activeMatch.decisions || []} />
 
-              {/* Secondary Navigation Tabs */}
-              <div className="secondary-nav-bar">
+              <div className="secondary-nav-bar" aria-label={t("mapIntelligenceViews")}>
                 <button
                   className={`nav-tab-btn ${activeTab === "OVERVIEW" ? "active" : ""}`}
                   onClick={() => setActiveTab("OVERVIEW")}
                 >
-                  <span className="tab-icon">❖</span> {t("matchOverview")}
+                  {t("matchOverview")}
                 </button>
                 <button
                   className={`nav-tab-btn ${activeTab === "DRAFT" ? "active" : ""}`}
                   onClick={() => setActiveTab("DRAFT")}
                 >
-                  <span className="tab-icon">⚔</span> {t("draftIntelligence")}
-                </button>
-                <button
-                  className={`nav-tab-btn ${activeTab === "LIVE" ? "active" : ""}`}
-                  onClick={() => setActiveTab("LIVE")}
-                >
-                  <span className="tab-icon">📡</span> {t("liveState")}
+                  {t("draftIntelligence")}
                 </button>
                 <button
                   className={`nav-tab-btn ${activeTab === "HISTORICAL" ? "active" : ""}`}
                   onClick={() => setActiveTab("HISTORICAL")}
                 >
-                  <span className="tab-icon">📜</span> {t("historical")}
+                  {t("historical")}
                 </button>
                 <button
                   className={`nav-tab-btn ${activeTab === "EVALUATION" ? "active" : ""}`}
                   onClick={() => setActiveTab("EVALUATION")}
                 >
-                  <span className="tab-icon">📊</span> {t("evaluation")}
+                  {t("evaluation")}
                 </button>
                 <button
-                  className={`nav-tab-btn ${activeTab === "DIAGNOSTICS" ? "active" : ""}`}
-                  onClick={() => setActiveTab("DIAGNOSTICS")}
+                  className="nav-tab-btn diagnostics-entry"
+                  onClick={() => setIsDiagnosticsOpen(true)}
                 >
-                  <span className="tab-icon">⚙</span> DIAGNOSTICS
+                  Diagnostics
                 </button>
               </div>
 
-              {/* Tab Views Content */}
               {activeTab === "OVERVIEW" && (
-                <div className="tab-pane overview-pane">
-                  {/* Market + Draft Advantage + Live State Row */}
-                  <div className="three-col-cards-row">
+                <div className="tab-pane overview-pane player-overview">
+                  <div className="primary-analysis-row">
                     <MarketCard match={activeMatch} />
                     <DraftAdvantageCard
                       match={activeMatch}
                       onViewDetails={() => setActiveTab("DRAFT")}
                     />
-                    <LiveStateCard match={activeMatch} />
                   </div>
 
-                  {/* 5v5 Lineup Card */}
                   <LineupCard match={activeMatch} />
 
-                  {/* Historical & Evaluation 2-Col Row */}
-                  <div className="two-col-cards-row">
+                  <div className="secondary-analysis-row">
+                    <LiveStateCard match={activeMatch} />
                     <HistoricalSummaryCard match={activeMatch} />
-                    <EvaluationCard match={activeMatch} />
                   </div>
                 </div>
               )}
 
               {activeTab === "DRAFT" && (
-                <div className="tab-pane draft-pane">
+                <div className="tab-pane draft-pane player-detail-pane">
                   <DraftAdvantageCard match={activeMatch} />
                   <LineupCard match={activeMatch} />
                 </div>
               )}
 
-              {activeTab === "LIVE" && (
-                <div className="tab-pane live-pane">
-                  <LiveStateCard match={activeMatch} />
-                </div>
-              )}
-
               {activeTab === "HISTORICAL" && (
-                <div className="tab-pane historical-pane">
+                <div className="tab-pane historical-pane player-detail-pane">
                   <HistoricalSummaryCard match={activeMatch} />
                 </div>
               )}
 
               {activeTab === "EVALUATION" && (
-                <div className="tab-pane evaluation-pane">
+                <div className="tab-pane evaluation-pane player-detail-pane">
                   <EvaluationCard match={activeMatch} />
-                </div>
-              )}
-
-              {activeTab === "DIAGNOSTICS" && (
-                <div className="tab-pane diagnostics-pane">
-                  <div className="card-header">
-                    <span className="card-title">ENGINEERING SYSTEM DIAGNOSTICS</span>
-                  </div>
-                  <div className="pane-content-box">
-                    <button
-                      className="primary-action-btn"
-                      onClick={() => setIsDiagnosticsOpen(true)}
-                    >
-                      Open Sliding Diagnostics Drawer ↗
-                    </button>
-                  </div>
                 </div>
               )}
             </div>
@@ -184,13 +142,12 @@ export const AppShell: React.FC<AppShellProps> = ({
             <div className="empty-workspace-state">
               <div className="empty-icon">❖</div>
               <h2>{t("noCanonicalMaps")}</h2>
-              <p>{t("selectMatchPrompt")}</p>
+              <p>{t("waitingForProviderDiscovery")}</p>
             </div>
           )}
         </main>
       </div>
 
-      {/* Diagnostics Drawer */}
       <DiagnosticsDrawer
         isOpen={isDiagnosticsOpen}
         onClose={() => setIsDiagnosticsOpen(false)}
