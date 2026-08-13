@@ -44,6 +44,11 @@ async def build_shadow_run_audit(
         dltv_raw,
         await _recovery_events(session, canonical_map),
     )
+    side = _side_identity(snapshots)
+    freshness = live_freshness(snapshots)
+    snapshot_summary = snapshot_quality(snapshots)
+    ai = await ai_report(session, snapshots)
+    checks = _integrity_checks(side, reconnect, freshness, snapshot_summary, ai)
     return {
         "schema_version": "shadow-run-audit-v1",
         "generated_at": generated_at.isoformat(),
@@ -54,12 +59,14 @@ async def build_shadow_run_audit(
             "valve_match_id": canonical_map.valve_match_id,
         },
         "provider_evidence": provider_evidence,
-        "side_identity": _side_identity(snapshots),
+        "side_identity": side,
         "dltv_reconnect": reconnect,
-        "live_freshness": live_freshness(snapshots),
+        "live_freshness": freshness,
         "temporal_alignment": await temporal_alignment(session, canonical_map.id),
-        "snapshots": snapshot_quality(snapshots),
-        "ai": await ai_report(session, snapshots),
+        "snapshots": snapshot_summary,
+        "ai": ai,
+        "checks": checks,
+        "check_status_counts": dict(Counter(item["status"] for item in checks)),
     }
 
 
@@ -212,6 +219,45 @@ def _side_identity(snapshots: list[DecisionSnapshotRecord]) -> dict[str, Any]:
         "stable": len(pairs) <= 1 and statuses.get("CONFLICT", 0) == 0,
         "latest": latest,
     }
+
+
+def _integrity_checks(
+    side: dict[str, Any],
+    reconnect: dict[str, Any],
+    freshness: dict[str, Any],
+    snapshots: dict[str, Any],
+    ai: dict[str, Any],
+) -> list[dict[str, str]]:
+    live_count = int(snapshots["live_snapshot_count"])
+    freshness_count = int(freshness["snapshot_count_with_field_evidence"])
+    return [
+        {
+            "name": "side_identity_stable",
+            "status": "PASS" if side["stable"] else "FAIL",
+        },
+        {
+            "name": "dltv_reconnect_recovery",
+            "status": (
+                "PASS"
+                if reconnect["uncovered_connection_transitions"] == 0
+                else "WARN"
+            ),
+        },
+        {
+            "name": "live_field_freshness_evidence",
+            "status": (
+                "NOT_APPLICABLE"
+                if live_count == 0
+                else "PASS" if freshness_count >= live_count else "WARN"
+            ),
+        },
+        {
+            "name": "ai_snapshot_hash_alignment",
+            "status": (
+                "PASS" if ai["snapshot_hash_mismatch_count"] == 0 else "FAIL"
+            ),
+        },
+    ]
 
 
 def _dltv_keys(valve_match_id: int | None) -> tuple[str, ...]:
