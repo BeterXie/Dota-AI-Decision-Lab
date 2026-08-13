@@ -29,7 +29,7 @@ export function PlayerAiDecisionStrip({ decisions }: { decisions: AiDecision[] }
           {cards.map(({ item, action, fair, confidence }) => (
             <button key={item.id} type="button" className={`player-ai-card ${actionTone(action)}`} onClick={() => setSelected(item)}>
               <div className="player-ai-model"><strong>{providerLabel(item.provider)}</strong><span>{item.model}</span></div>
-              <div className={`player-ai-action ${actionTone(action)}`}>{displayAction(action, locale)}</div>
+              <div className={`player-ai-action ${actionTone(action)}`} style={actionStyle(action)}>{displayAction(action, locale)}</div>
               <div className="player-ai-metrics">
                 <div><span>{locale === "zh-CN" ? "A 公平概率" : "Fair A"}</span><strong>{formatPercent(fair, locale)}</strong></div>
                 <div><span>{t("confidence")}</span><strong>{formatPercent(confidence, locale)}</strong></div>
@@ -87,6 +87,12 @@ function actionTone(value: string): string {
   if (value === "BUY_B") return "buy-b";
   if (value === "NO_BUY") return "no-buy";
   return "insufficient";
+}
+
+function actionStyle(value: string): React.CSSProperties | undefined {
+  if (value === "BUY_A") return { color: "#7C9CFF", background: "rgba(124,156,255,.10)" };
+  if (value === "BUY_B") return { color: "#9C82FF", background: "rgba(156,130,255,.10)" };
+  return undefined;
 }
 
 function providerLabel(value: string): string {
