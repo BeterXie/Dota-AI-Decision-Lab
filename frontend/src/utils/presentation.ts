@@ -1,8 +1,14 @@
 import type { MapSummary, MarketObservation } from "../api";
 
-export type MatchDisplayPhase = "LIVE" | "UPCOMING" | "TRACKED";
+export type MatchDisplayPhase = "LIVE" | "UPCOMING" | "AWAITING_RESULT" | "POSTMATCH" | "TRACKED";
 
 export function getMatchDisplayPhase(match: MapSummary): MatchDisplayPhase {
+  if (match.phase === "LIVE") return "LIVE";
+  if (match.phase === "PREMATCH") return "UPCOMING";
+  if (match.phase === "AWAITING_RESULT") return "AWAITING_RESULT";
+  if (match.phase === "POSTMATCH") return "POSTMATCH";
+
+  // Backward-compatible fallback for cached fixtures / transitional API payloads.
   if (match.live?.game_time_seconds != null || match.latest_snapshot?.mode?.startsWith("LIVE")) {
     return "LIVE";
   }
