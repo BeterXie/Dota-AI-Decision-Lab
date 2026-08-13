@@ -6,6 +6,7 @@ import { App } from "./App";
 import "./styles.scss";
 import "./design/player-first-v2.css";
 import "./design/rosh-direction.css";
+import "./design/player-layout-v3.css";
 
 const queryClient = new QueryClient({
   defaultOptions: {
