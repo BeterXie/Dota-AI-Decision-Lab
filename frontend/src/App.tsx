@@ -6,7 +6,9 @@ import {
   fetchMaps,
   fetchRuntime,
   queryKeys,
-  useRuntimeSocket
+  useRuntimeSocket,
+  type MapDetail,
+  type MapSummary
 } from "./api";
 import { I18nProvider } from "./i18n";
 import { AppShell } from "./components/AppShell";
@@ -24,49 +26,29 @@ function DashboardApp() {
   const queryClient = useQueryClient();
   const [selectedMapId, setSelectedMapId] = useState<string | null>(null);
 
-  const runtime = useQuery({
-    queryKey: queryKeys.runtime,
-    queryFn: fetchRuntime,
-    refetchInterval: 5000
-  });
+  const runtime = useQuery({ queryKey: queryKeys.runtime, queryFn: fetchRuntime, refetchInterval: 5000 });
+  const maps = useQuery({ queryKey: queryKeys.maps, queryFn: fetchMaps, refetchInterval: 5000 });
+  const jobs = useQuery({ queryKey: queryKeys.jobs, queryFn: fetchJobs, refetchInterval: 5000 });
 
-  const maps = useQuery({
-    queryKey: queryKeys.maps,
-    queryFn: fetchMaps,
-    refetchInterval: 5000
-  });
-
-  const jobs = useQuery({
-    queryKey: queryKeys.jobs,
-    queryFn: fetchJobs,
-    refetchInterval: 5000
-  });
-
-  // Auto-select first map if none selected
   const activeMapId = useMemo(() => {
     if (selectedMapId) return selectedMapId;
-    if (maps.data && maps.data.length > 0) {
-      return maps.data[0].id;
-    }
-    return null;
+    return maps.data?.[0]?.id ?? null;
   }, [selectedMapId, maps.data]);
 
   const selectedMatch = useMemo(() => {
-    return maps.data?.find((m) => m.id === activeMapId) || maps.data?.[0];
+    return maps.data?.find((match) => match.id === activeMapId) || maps.data?.[0];
   }, [maps.data, activeMapId]);
 
   const selectedCanonicalMapId = selectedMatch?.canonical_map_id ?? null;
-
   const detail = useQuery({
     queryKey: selectedCanonicalMapId ? queryKeys.map(selectedCanonicalMapId) : ["map", "none"],
     queryFn: () => fetchMap(selectedCanonicalMapId!),
     enabled: Boolean(selectedCanonicalMapId),
+    placeholderData: isEmbeddedDetail(selectedMatch) ? selectedMatch : undefined,
     refetchInterval: 4000
   });
 
-  const handleRefresh = () => {
-    void queryClient.invalidateQueries();
-  };
+  const handleRefresh = () => { void queryClient.invalidateQueries(); };
 
   return (
     <AppShell
@@ -80,4 +62,8 @@ function DashboardApp() {
       onRefresh={handleRefresh}
     />
   );
+}
+
+function isEmbeddedDetail(match: MapSummary | undefined): match is MapDetail {
+  return Boolean(match && "market_timeline" in match && "future_odds" in match && "result_evidence" in match);
 }
