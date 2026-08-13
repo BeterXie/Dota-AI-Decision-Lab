@@ -2,6 +2,7 @@ import React from "react";
 import type { MapDetail, MapSummary } from "../api";
 import { useI18n } from "../i18n";
 import { getTeamAbbreviation } from "../utils/dotaAssets";
+import { resolveVerifiedMapSides } from "../utils/mapSides";
 import { formatOdds, getMatchDisplayPhase, median, primaryMarketPair } from "../utils/presentation";
 
 interface PlayerMatchHeaderProps {
@@ -19,6 +20,9 @@ export const PlayerMatchHeader: React.FC<PlayerMatchHeaderProps> = ({ match }) =
   const phase = getMatchDisplayPhase(match);
   const gameTime = match.live?.game_time_seconds;
   const hasLiveScore = match.live?.radiant_kills != null && match.live?.dire_kills != null;
+  const sides = resolveVerifiedMapSides(match);
+  const teamASide = sides?.radiant.seriesSide === "A" ? "radiant" : sides?.dire.seriesSide === "A" ? "dire" : null;
+  const teamBSide = sides?.radiant.seriesSide === "B" ? "radiant" : sides?.dire.seriesSide === "B" ? "dire" : null;
   const aiMedian = median(
     match.decisions
       .map((decision) => decision.decision?.fair_probability_a)
@@ -47,7 +51,7 @@ export const PlayerMatchHeader: React.FC<PlayerMatchHeaderProps> = ({ match }) =
         <div className="team-cell team-radiant">
           <div className="team-logo-avatar team-a-order" style={teamAStyle}>{getTeamAbbreviation(teamA)}</div>
           <div className="team-info">
-            <span className="team-side-label">TEAM A</span>
+            <span className="team-side-label">TEAM A{teamASide ? ` · ${mapSideName(teamASide, locale)}` : ""}</span>
             <h2 className="team-name">{teamA}</h2>
             <div className="team-odds-pill">{formatOdds(pair?.teamA.price)}</div>
           </div>
@@ -62,7 +66,9 @@ export const PlayerMatchHeader: React.FC<PlayerMatchHeaderProps> = ({ match }) =
                 <span className="score-dire">{match.live?.dire_kills}</span>
               </div>
               <span className="score-time">
-                {locale === "zh-CN" ? "天辉" : "RADIANT"}{gameTime != null ? ` · ${formatGameTime(gameTime)} · ` : " · "}{locale === "zh-CN" ? "夜魇" : "DIRE"}
+                {sideScoreLabel(sides?.radiant.name, "radiant", locale)}
+                {gameTime != null ? ` · ${formatGameTime(gameTime)} · ` : " · "}
+                {sideScoreLabel(sides?.dire.name, "dire", locale)}
               </span>
             </>
           ) : (
@@ -75,7 +81,7 @@ export const PlayerMatchHeader: React.FC<PlayerMatchHeaderProps> = ({ match }) =
 
         <div className="team-cell team-dire">
           <div className="team-info align-right">
-            <span className="team-side-label">TEAM B</span>
+            <span className="team-side-label">TEAM B{teamBSide ? ` · ${mapSideName(teamBSide, locale)}` : ""}</span>
             <h2 className="team-name">{teamB}</h2>
             <div className="team-odds-pill">{formatOdds(pair?.teamB.price)}</div>
           </div>
@@ -98,7 +104,7 @@ export const PlayerMatchHeader: React.FC<PlayerMatchHeaderProps> = ({ match }) =
         </div>
         <div>
           <span>{t("radiantNetWorthLead")}</span>
-          <strong>{formatNetWorth(match.live?.radiant_nw_lead, locale)}</strong>
+          <strong>{formatNetWorth(match.live?.radiant_nw_lead, locale, sides?.radiant.name, sides?.dire.name)}</strong>
         </div>
       </div>
     </section>
@@ -114,6 +120,17 @@ function phaseLabel(phase: ReturnType<typeof getMatchDisplayPhase>, locale: stri
   return zh ? "追踪中" : "TRACKED";
 }
 
+function mapSideName(side: "radiant" | "dire", locale: string): string {
+  return side === "radiant"
+    ? (locale === "zh-CN" ? "天辉" : "RADIANT")
+    : (locale === "zh-CN" ? "夜魇" : "DIRE");
+}
+
+function sideScoreLabel(teamName: string | undefined, side: "radiant" | "dire", locale: string): string {
+  const sideName = mapSideName(side, locale);
+  return teamName ? `${teamName} · ${sideName}` : sideName;
+}
+
 function formatGameTime(seconds: number): string {
   const safe = Math.max(0, Math.floor(seconds));
   return `${Math.floor(safe / 60)}:${String(safe % 60).padStart(2, "0")}`;
@@ -124,11 +141,17 @@ function formatProbability(value: number | null, locale: string): string {
   return new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 1 }).format(value);
 }
 
-function formatNetWorth(value: number | null | undefined, locale: string): string {
+function formatNetWorth(
+  value: number | null | undefined,
+  locale: string,
+  radiantTeam?: string,
+  direTeam?: string
+): string {
   if (value == null) return "—";
   if (value === 0) return locale === "zh-CN" ? "均势" : "Even";
-  const side = value > 0 ? (locale === "zh-CN" ? "天辉" : "Radiant") : (locale === "zh-CN" ? "夜魇" : "Dire");
+  const side = value > 0 ? "radiant" : "dire";
+  const teamName = side === "radiant" ? radiantTeam : direTeam;
   const abs = Math.abs(value);
   const amount = abs >= 1000 ? `${(abs / 1000).toFixed(1)}k` : String(abs);
-  return `${side} +${amount}`;
+  return `${sideScoreLabel(teamName, side, locale)} +${amount}`;
 }
