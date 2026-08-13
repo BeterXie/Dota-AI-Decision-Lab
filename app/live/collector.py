@@ -40,10 +40,10 @@ class DltvSocketCollector:
         received_at = received_at or datetime.now(UTC)
         is_match_event = event_name.startswith("__nd2_match_")
         async with self._session_factory() as session, session.begin():
-            previous_generation = None
+            previous_socket_event = None
             if is_match_event:
-                previous_generation = await session.scalar(
-                    select(ProviderRawEvent.reconnect_generation)
+                previous_socket_event = await session.scalar(
+                    select(ProviderRawEvent)
                     .where(
                         ProviderRawEvent.provider == "dltv",
                         ProviderRawEvent.event_type == "DLTV_FAST_SOCKET",
@@ -112,17 +112,29 @@ class DltvSocketCollector:
                 )
                 return
 
-            if previous_generation is not None and reconnect_generation > previous_generation:
+            if _is_reconnect(previous_socket_event, connection_id, reconnect_generation):
+                recovery_key = connection_id or f"generation-{reconnect_generation}"
                 await self._events.record(
                     session,
                     DomainEvent(
                         event_type=DomainEventType.DLTV_MATCH_DISCOVERED,
                         aggregate_type="dltv_match",
                         aggregate_id=str(valve_match_id),
-                        dedupe_key=f"dltv-reconnect:{valve_match_id}:{reconnect_generation}",
+                        dedupe_key=f"dltv-reconnect:{valve_match_id}:{recovery_key}",
                         payload={
                             "valve_match_id": valve_match_id,
+                            "connection_id": connection_id,
+                            "previous_connection_id": (
+                                previous_socket_event.connection_id
+                                if previous_socket_event is not None
+                                else None
+                            ),
                             "reconnect_generation": reconnect_generation,
+                            "previous_reconnect_generation": (
+                                previous_socket_event.reconnect_generation
+                                if previous_socket_event is not None
+                                else None
+                            ),
                             "reason": "SOCKET_RECONNECT_RECOVERY",
                         },
                         occurred_at=received_at,
@@ -192,6 +204,19 @@ class DltvSocketCollector:
                 checkpoint_minutes=self._checkpoint_minutes,
                 observed_at=received_at,
             )
+
+
+def _is_reconnect(
+    previous: ProviderRawEvent | None,
+    connection_id: str | None,
+    reconnect_generation: int,
+) -> bool:
+    if previous is None:
+        return False
+    if connection_id is not None:
+        return previous.connection_id != connection_id
+    previous_generation = previous.reconnect_generation
+    return previous_generation is not None and reconnect_generation > previous_generation
 
 
 def _state_from_record(record: DltvLiveObservationRecord) -> DltvFastState:
