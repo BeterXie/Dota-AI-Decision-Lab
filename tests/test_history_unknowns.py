@@ -1,5 +1,5 @@
 from datetime import UTC, datetime
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
@@ -26,6 +26,9 @@ async def test_missing_team_history_remains_unknown() -> None:
 async def test_missing_player_history_has_unknown_confidence() -> None:
     session = AsyncMock()
     session.scalar.return_value = None
+    empty_result = MagicMock()
+    empty_result.all.return_value = []
+    session.execute.return_value = empty_result
     service = HistoricalIntelligenceService()
 
     player = await service.get_player_payload(
@@ -40,4 +43,9 @@ async def test_missing_player_history_has_unknown_confidence() -> None:
     )
 
     assert player["confidence"] is None
+    assert player["recent_5"] is None
+    assert player["recent_10"] is None
+    assert player["recent_20"] is None
     assert player_hero["confidence"] is None
+    assert player_hero["last_20_uses"]["maps"] == 0
+    assert player_hero["last_20_uses"]["win_rate"] is None
