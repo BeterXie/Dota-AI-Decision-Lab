@@ -211,8 +211,7 @@ class HistoricalIntelligenceService:
         wins = sum(player.won for player, _ in selected)
         maps = len(selected)
         cutoffs = [
-            max(player.basic_first_usable_at, match.first_usable_at)
-            for player, match in selected
+            max(player.basic_first_usable_at, match.first_usable_at) for player, match in selected
         ]
         return {
             "maps": maps,
