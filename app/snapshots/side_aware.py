@@ -10,6 +10,7 @@ from app.models import (
     CanonicalMap,
     CanonicalSeries,
     CanonicalTeam,
+    DltvLiveObservationRecord,
     LiveSyncEstimateRecord,
     MapResultRecord,
 )
@@ -152,6 +153,12 @@ class SideAwareSnapshotBuilder(SnapshotBuilder):
             live, live_message_age, live_age, live_complete = await self._load_live(
                 session, canonical_map_id=canonical_map_id, decision_at=decision_at
             )
+            if live is not None:
+                live["trend"] = await _live_trend(
+                    session,
+                    canonical_map_id=canonical_map_id,
+                    decision_at=decision_at,
+                )
             if (
                 canonical_map is not None
                 and canonical_map.valve_match_id is not None
@@ -251,6 +258,118 @@ async def _series_score(
     score_b = sum(result.winner_team_id == series.team_b_id for result in rows)
     cutoff = max((result.basic_first_usable_at for result in rows), default=None)
     return score_a, score_b, cutoff
+
+
+async def _live_trend(
+    session: AsyncSession,
+    *,
+    canonical_map_id: UUID,
+    decision_at: datetime,
+) -> dict[str, Any]:
+    rows = list(
+        (
+            await session.scalars(
+                select(DltvLiveObservationRecord)
+                .where(
+                    DltvLiveObservationRecord.canonical_map_id == canonical_map_id,
+                    DltvLiveObservationRecord.received_at <= decision_at,
+                    DltvLiveObservationRecord.game_time_seconds.is_not(None),
+                )
+                .order_by(DltvLiveObservationRecord.received_at)
+            )
+        ).all()
+    )
+    if len(rows) < 2:
+        return {"source": "DLTV_FAST_STATE_TRAJECTORY", "support_count": len(rows), "windows": {}}
+    current = rows[-1]
+    windows = {
+        f"{seconds // 60}m": _live_window(rows, current=current, seconds=seconds)
+        for seconds in (60, 180, 300, 600)
+    }
+    return {
+        "source": "DLTV_FAST_STATE_TRAJECTORY",
+        "support_count": len(rows),
+        "current_game_time_seconds": current.game_time_seconds,
+        "windows": windows,
+        "momentum_side_5m": _side_from_delta(windows.get("5m", {}).get("nw_delta")),
+        "last_lead_flip": _last_lead_flip(rows, current_game_time=current.game_time_seconds),
+    }
+
+
+def _live_window(rows: list[DltvLiveObservationRecord], *, current, seconds: int) -> dict[str, Any]:
+    current_time = current.game_time_seconds
+    if current_time is None:
+        return _empty_live_window(seconds)
+    target = current_time - seconds
+    baseline = min(rows, key=lambda row: abs((row.game_time_seconds or 0) - target))
+    if baseline.game_time_seconds is None or baseline is current:
+        return _empty_live_window(seconds)
+    tolerance = min(90, max(20, int(seconds * 0.25)))
+    if abs(baseline.game_time_seconds - target) > tolerance:
+        return _empty_live_window(seconds)
+    effective = current_time - baseline.game_time_seconds
+    if effective <= 0:
+        return _empty_live_window(seconds)
+    nw_delta = _int_delta(current.radiant_nw_lead, baseline.radiant_nw_lead)
+    return {
+        "requested_seconds": seconds,
+        "available": nw_delta is not None,
+        "baseline_game_time_seconds": baseline.game_time_seconds,
+        "effective_seconds": effective,
+        "nw_delta": nw_delta,
+        "nw_velocity_per_minute": (
+            nw_delta / (effective / 60.0) if nw_delta is not None else None
+        ),
+        "radiant_kills_delta": _int_delta(current.radiant_kills, baseline.radiant_kills),
+        "dire_kills_delta": _int_delta(current.dire_kills, baseline.dire_kills),
+    }
+
+
+def _last_lead_flip(
+    rows: list[DltvLiveObservationRecord], *, current_game_time: int | None
+) -> dict[str, Any] | None:
+    previous = None
+    latest = None
+    for row in rows:
+        if row.game_time_seconds is None or row.radiant_nw_lead in (None, 0):
+            continue
+        side = "RADIANT" if row.radiant_nw_lead > 0 else "DIRE"
+        if previous is not None and side != previous:
+            latest = {
+                "from_side": previous,
+                "to_side": side,
+                "game_time_seconds": row.game_time_seconds,
+                "seconds_ago_game_time": (
+                    current_game_time - row.game_time_seconds
+                    if current_game_time is not None
+                    else None
+                ),
+            }
+        previous = side
+    return latest
+
+
+def _empty_live_window(seconds: int) -> dict[str, Any]:
+    return {
+        "requested_seconds": seconds,
+        "available": False,
+        "baseline_game_time_seconds": None,
+        "effective_seconds": None,
+        "nw_delta": None,
+        "nw_velocity_per_minute": None,
+        "radiant_kills_delta": None,
+        "dire_kills_delta": None,
+    }
+
+
+def _int_delta(current: int | None, baseline: int | None) -> int | None:
+    return current - baseline if current is not None and baseline is not None else None
+
+
+def _side_from_delta(value: object) -> str | None:
+    if not isinstance(value, (int, float)):
+        return None
+    return "RADIANT" if value > 0 else "DIRE" if value < 0 else "EVEN"
 
 
 async def _enrich_history(
