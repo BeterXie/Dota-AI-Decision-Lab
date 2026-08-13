@@ -66,6 +66,11 @@ class SideAwareSnapshotBuilder(SnapshotBuilder):
                 "id": str(series.team_b_id),
                 "name": team_b.name if team_b is not None else None,
             },
+            "series_context": {
+                "best_of": series.best_of,
+                "scheduled_at": series.scheduled_at,
+                "map_number": canonical_map.map_number if canonical_map is not None else None,
+            },
             "side_identity": (
                 side_assignment_payload(side_assignment) if side_assignment is not None else None
             ),
@@ -96,6 +101,13 @@ class SideAwareSnapshotBuilder(SnapshotBuilder):
             session,
             series=series,
             slots=slots,
+            decision_at=decision_at,
+        )
+        await _enrich_history(
+            session,
+            history=history,
+            slots=slots,
+            history_service=self._history,
             decision_at=decision_at,
         )
         side_resolved = side_assignment is not None and side_assignment.resolved
@@ -203,6 +215,56 @@ class SideAwareSnapshotBuilder(SnapshotBuilder):
             quality=quality,
         )
         return SnapshotBuildOutcome(gate=gate, snapshot=snapshot)
+
+
+async def _enrich_history(
+    session: AsyncSession,
+    *,
+    history: dict[str, Any],
+    slots: list,
+    history_service,
+    decision_at: datetime,
+) -> None:
+    by_side = {
+        "radiant": history.get("players_a", []),
+        "dire": history.get("players_b", []),
+    }
+    for slot in slots:
+        if slot.canonical_player_id is None or slot.hero_id is None:
+            continue
+        player_context = await history_service.get_player_payload(
+            session,
+            slot.canonical_player_id,
+            position=slot.position,
+            as_of=decision_at,
+        )
+        hero_context = await history_service.get_player_hero_payload(
+            session,
+            slot.canonical_player_id,
+            hero_id=slot.hero_id,
+            position=slot.position,
+            as_of=decision_at,
+        )
+        player_id = str(slot.canonical_player_id)
+        target = next(
+            (
+                item
+                for item in by_side.get(slot.side, [])
+                if item.get("canonical_player_id") == player_id
+            ),
+            None,
+        )
+        if target is None:
+            continue
+        target.update(
+            {
+                "recent_5": player_context.get("recent_5"),
+                "recent_10": player_context.get("recent_10"),
+                "recent_20": player_context.get("recent_20"),
+                "player_sample_size": player_context.get("sample_size"),
+                "player_hero": hero_context,
+            }
+        )
 
 
 def _align_history_to_series(
