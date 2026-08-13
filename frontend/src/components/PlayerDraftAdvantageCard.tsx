@@ -9,6 +9,13 @@ export function PlayerDraftAdvantageCard({ match, onViewDetails }: { match: MapS
   const sides = resolveVerifiedMapSides(match);
   const curve = match.draft?.curve ?? [];
   const features = match.draft?.features ?? {};
+  const draftComplete = Boolean(match.draft?.complete);
+  const draftDecisionReady = draftComplete && sides !== null;
+  const draftStatus = !draftComplete
+    ? "PARTIAL"
+    : draftDecisionReady
+      ? "READY"
+      : (locale === "zh-CN" ? "阵营未验证" : "SIDE UNVERIFIED");
   const current = featureNumber(features, "current_edge") ?? nearestCurrentEdge(curve, match.live?.game_time_seconds);
   const next5 = featureNumber(features, "next_5m_edge");
   const peak = featureNumber(features, "peak_edge") ?? peakEdge(curve)?.edge ?? null;
@@ -47,7 +54,7 @@ export function PlayerDraftAdvantageCard({ match, onViewDetails }: { match: MapS
     <section className="analytics-card draft-advantage-card player-rosh-card">
       <div className="player-section-heading compact">
         <div><span className="section-kicker">DRAFT INTELLIGENCE</span><h3>R.O.S.H. {locale === "zh-CN" ? "阵容优势" : "Draft Advantage"}</h3></div>
-        <span className={`player-status-pill ${match.draft?.complete ? "ready" : "limited"}`}>{match.draft?.complete ? "READY" : "PARTIAL"}</span>
+        <span className={`player-status-pill ${draftDecisionReady ? "ready" : "limited"}`}>{draftStatus}</span>
       </div>
 
       <div className={`rosh-verdict ${currentSide}`}>
@@ -59,10 +66,10 @@ export function PlayerDraftAdvantageCard({ match, onViewDetails }: { match: MapS
         <small>{locale === "zh-CN"
           ? sides
             ? `R.O.S.H. 仍表示天辉相对夜魇的阵容优势；本局已验证：${sides.radiant.name} = 天辉，${sides.dire.name} = 夜魇。`
-            : "R.O.S.H. 表示天辉相对夜魇的阵容优势：正值偏天辉，负值偏夜魇。Team A / Team B 与本局阵营不会在缺少显式映射时强行等同。"
+            : "R.O.S.H. 曲线本身仍可按天辉 / 夜魇阅读，但在本局阵营映射验证前不会绑定到 Team A / Team B，也不会作为赛后选人决策输入。"
           : sides
             ? `R.O.S.H. remains Radiant-minus-Dire draft edge; verified this map: ${sides.radiant.name} = Radiant, ${sides.dire.name} = Dire.`
-            : "R.O.S.H. is Radiant-minus-Dire draft edge: positive favors Radiant, negative favors Dire. Team A/B are not forced onto map sides without explicit side identity."}</small>
+            : "The R.O.S.H. curve remains readable as Radiant vs Dire, but it is not bound to Team A/B or used for post-draft decisions until map-side identity is verified."}</small>
       </div>
 
       <div className="rosh-direction-metrics">
