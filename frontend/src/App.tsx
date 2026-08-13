@@ -31,7 +31,9 @@ function DashboardApp() {
   const jobs = useQuery({ queryKey: queryKeys.jobs, queryFn: fetchJobs, refetchInterval: 5000 });
 
   const activeMapId = useMemo(() => {
-    if (selectedMapId) return selectedMapId;
+    if (selectedMapId && maps.data?.some((match) => match.id === selectedMapId)) {
+      return selectedMapId;
+    }
     return maps.data?.[0]?.id ?? null;
   }, [selectedMapId, maps.data]);
 
