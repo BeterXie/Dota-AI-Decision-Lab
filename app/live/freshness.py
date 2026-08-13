@@ -42,9 +42,10 @@ async def load_live_basic_field_freshness(
 ) -> LiveFieldFreshness:
     """Resolve LIVE_BASIC freshness from append-only DLTV raw evidence.
 
-    A newer sparse packet only refreshes the fields it actually carries. Exact
-    normalized duplicates are ignored so repeated messages cannot make stale
-    state appear fresh.
+    A newer sparse socket packet only refreshes the fields it actually carries.
+    Exact normalized socket duplicates are ignored. A bootstrap response is a
+    separate full-state observation and can refresh the fields it explicitly
+    contains.
     """
 
     cutoff = decision_at - timedelta(seconds=max_age_seconds)
@@ -54,8 +55,10 @@ async def load_live_basic_field_freshness(
                 select(ProviderRawEvent)
                 .where(
                     ProviderRawEvent.provider == "dltv",
-                    ProviderRawEvent.event_type == "DLTV_FAST_SOCKET",
-                    ProviderRawEvent.provider_key == f"__nd2_match_{valve_match_id}",
+                    ProviderRawEvent.event_type.in_(("DLTV_FAST_SOCKET", "DLTV_BOOTSTRAP")),
+                    ProviderRawEvent.provider_key.in_(
+                        (f"__nd2_match_{valve_match_id}", str(valve_match_id))
+                    ),
                     ProviderRawEvent.received_at >= cutoff,
                     ProviderRawEvent.received_at <= decision_at,
                 )
@@ -66,7 +69,7 @@ async def load_live_basic_field_freshness(
 
     observed_at: dict[str, datetime] = {}
     for record in records:
-        if record.is_duplicate is True:
+        if record.event_type == "DLTV_FAST_SOCKET" and record.is_duplicate is True:
             continue
         patch = parse_fast_patch(
             record.payload,
