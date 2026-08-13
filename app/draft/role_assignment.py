@@ -125,8 +125,7 @@ class DraftRoleAssignmentService:
         )
         rows = normalize_current_match_roles(response.payload, match_id=valve_match_id)
         by_identity = {
-            (row["side"], row["account_id"], row["hero_id"]): row["position"]
-            for row in rows
+            (row["side"], row["account_id"], row["hero_id"]): row["position"] for row in rows
         }
         slots: list[DraftSlot] = []
         for pick in picks:
@@ -189,7 +188,9 @@ class DraftRoleAssignmentService:
             )
         ).all()
 
-        evidence: dict[int, list[tuple[int, datetime]]] = {account_id: [] for account_id in account_ids}
+        evidence: dict[int, list[tuple[int, datetime]]] = {
+            account_id: [] for account_id in account_ids
+        }
         seen_matches: dict[int, set[str]] = {account_id: set() for account_id in account_ids}
         for account_id, position, usable_at, provider_match_id, _provider, _started_at in rows:
             if account_id not in evidence or position not in (1, 2, 3, 4, 5):
@@ -302,10 +303,7 @@ def _resolve_side_from_history(
         sample = sample_sizes[pick.account_id]
         confidence = min(
             0.95,
-            0.55
-            + (0.25 * share)
-            + (0.10 * min(sample / 20.0, 1.0))
-            + (0.05 * min(margin, 1.0)),
+            0.55 + (0.25 * share) + (0.10 * min(sample / 20.0, 1.0)) + (0.05 * min(margin, 1.0)),
         )
         slots.append(
             DraftSlot(
