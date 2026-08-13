@@ -106,6 +106,28 @@ export interface AiDecision {
   error: string | null;
 }
 
+export interface MapSideIdentity {
+  status: "RESOLVED" | "UNRESOLVED" | "CONFLICT" | string;
+  radiant_team_id: string | null;
+  dire_team_id: string | null;
+  source: string | null;
+  confidence: number | null;
+  observed_at: string | null;
+  raw_event_id: string | null;
+  blocker: string | null;
+}
+
+export interface DecisionSnapshotIdentity {
+  event_id?: string | null;
+  series_id?: string | null;
+  map_id?: string | null;
+  map_number?: number | null;
+  valve_match_id?: number | null;
+  team_a?: { id: string; name: string | null } | null;
+  team_b?: { id: string; name: string | null } | null;
+  side_identity?: MapSideIdentity | null;
+}
+
 export interface MapSummary {
   entity_type: "MAP" | "SERIES";
   identity_status: "RESOLVED" | "PENDING_MAP_IDENTITY";
@@ -187,6 +209,7 @@ export interface MapDetail extends MapSummary {
   market_timeline: MarketObservation[];
   live_timeline: LiveObservation[];
   snapshot_payload?: {
+    identity?: DecisionSnapshotIdentity;
     history?: Record<string, unknown>;
     quality?: Record<string, unknown>;
   };
