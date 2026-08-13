@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field
+from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -9,7 +9,7 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/dota_ai_decision_lab"
 
-    raybet_info_base_url: str = "https://iminfo.esportsworldlink.com/v2"
+    raybet_info_base_url: str = "https://cfinfo.365raylines.com/v2"
     raybet_socket_url: str = "wss://cfsocket.365raylinks.com/socketcluster/"
     raybet_origin: str = "https://www.ray086.com"
     raybet_dota_game_id: int = 151
@@ -31,6 +31,7 @@ class Settings(BaseSettings):
     openai_api_key: str | None = None
     openai_base_url: str = "https://api.openai.com/v1"
     openai_model: str = "gpt-5.6-terra"
+    openai_reasoning_effort: str = "xhigh"
     anthropic_api_key: str | None = None
     anthropic_base_url: str = "https://api.anthropic.com/v1"
     anthropic_model: str = "claude-sonnet-4-6"
@@ -40,10 +41,20 @@ class Settings(BaseSettings):
     deepseek_api_key: str | None = None
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-v4-flash"
+    deepseek_pro_model: str = "deepseek-v4-pro"
+    deepseek_reasoning_effort: str = "xhigh"
     kimi_api_key: str | None = None
     kimi_base_url: str = "https://api.moonshot.cn/v1"
     kimi_model: str = "kimi-k2.5"
     ai_timeout_seconds: float = 120.0
+
+    email_notifications_enabled: bool = False
+    email_recipients: str = ""
+    email_subject_prefix: str = "[Dota AI Decision Lab]"
+    resend_api_key: SecretStr | None = None
+    resend_from: str | None = None
+    resend_base_url: str = "https://api.resend.com"
+    resend_timeout_seconds: float = Field(default=30.0, gt=0)
 
     live_sync_safe_seconds: float = 3.0
     live_sync_caution_seconds: float = 8.0
@@ -60,7 +71,8 @@ class Settings(BaseSettings):
 
     elo_initial_rating: float = 1_500.0
     elo_k_factor: float = 24.0
-    ai_checkpoint_minutes: str = "5,10,15,20,25,30,35,40,45,50,55,60"
+    ai_min_game_time_seconds: int = Field(default=600, ge=0)
+    ai_checkpoint_minutes: str = "10,15,20,25,30,35,40,45,50,55,60"
     significant_odds_move: float = 0.05
     decision_cooldown_seconds: float = 60.0
     future_odds_horizons_seconds: str = "30,60,180,300"
@@ -90,6 +102,23 @@ class Settings(BaseSettings):
     @property
     def future_odds_horizons(self) -> tuple[int, ...]:
         return tuple(int(value.strip()) for value in self.future_odds_horizons_seconds.split(","))
+
+    @property
+    def decision_email_recipients(self) -> tuple[str, ...]:
+        return tuple(value.strip() for value in self.email_recipients.split(",") if value.strip())
+
+    @property
+    def email_configuration_errors(self) -> tuple[str, ...]:
+        if not self.email_notifications_enabled:
+            return ()
+        missing = []
+        if self.resend_api_key is None:
+            missing.append("RESEND_API_KEY")
+        if not self.resend_from:
+            missing.append("RESEND_FROM")
+        if not self.decision_email_recipients:
+            missing.append("EMAIL_RECIPIENTS")
+        return tuple(missing)
 
 
 @lru_cache

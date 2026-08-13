@@ -33,7 +33,8 @@ const runtime = {
       "CLAUDE",
       "GEMINI",
       "DEEPSEEK",
-      "KIMI"
+      "KIMI",
+      "EMAIL"
     ].map((name) => [
       name,
       { name, status: name === "LIVE_SYNC" ? "CAUTION" : "READY", message: null, updated_at: observedAt, metadata: {} }

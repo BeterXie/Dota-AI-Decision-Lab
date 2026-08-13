@@ -49,6 +49,7 @@ async def test_openai_uses_responses_strict_text_format() -> None:
         api_key="test",
         model="gpt-5.6-terra",
         base_url="https://api.openai.com/v1",
+        reasoning_effort="xhigh",
         timeout_seconds=1,
         client=client,
     )
@@ -58,6 +59,7 @@ async def test_openai_uses_responses_strict_text_format() -> None:
     assert result.decision.action == "NO_BUY"
     assert captured["text"]["format"]["type"] == "json_schema"
     assert captured["text"]["format"]["strict"] is True
+    assert captured["reasoning"] == {"effort": "xhigh"}
     await client.aclose()
 
 
@@ -164,6 +166,7 @@ async def test_deepseek_uses_responses_strict_text_format() -> None:
         api_key="test",
         model="deepseek-v4-flash",
         base_url=base_url,
+        reasoning_effort="xhigh",
         timeout_seconds=1,
         client=client,
     )
@@ -175,6 +178,7 @@ async def test_deepseek_uses_responses_strict_text_format() -> None:
     assert captured["url"] == f"{base_url}/responses"
     assert captured["text"]["format"]["type"] == "json_schema"
     assert captured["text"]["format"]["strict"] is True
+    assert captured["reasoning"] == {"effort": "xhigh"}
     assert captured["input"] == '{"snapshot_hash":"same"}'
     await client.aclose()
 

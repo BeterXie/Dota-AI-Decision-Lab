@@ -53,7 +53,8 @@ const DEPENDENCY_ORDER = [
   "CLAUDE",
   "GEMINI",
   "DEEPSEEK",
-  "KIMI"
+  "KIMI",
+  "EMAIL"
 ];
 
 export function App() {
@@ -652,7 +653,7 @@ function AiPanel({ detail }: { detail: MapDetail }) {
   const { locale, t } = useI18n();
   return (
     <section className="ai-panel">
-      <PanelHeading title={t("independentAiDecisions")} status={`${detail.decisions.length}/5`} />
+      <PanelHeading title={t("independentAiDecisions")} status={`${detail.decisions.length}/6`} />
       {detail.decisions.length ? (
         <div className="decision-list">
           {detail.decisions.map((record) => (

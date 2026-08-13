@@ -20,3 +20,4 @@ frontend/dist/
 frontend/test-results/
 frontend/playwright-report/
 .runtime/
+.runtime.*.log

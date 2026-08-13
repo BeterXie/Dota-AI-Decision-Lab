@@ -92,7 +92,10 @@ class RayBetOddsCollector:
                         event_type=DomainEventType.ODDS_REGISTRY_REFRESH_REQUIRED,
                         aggregate_type="raybet_match",
                         aggregate_id=str(delta.match_id),
-                        dedupe_key=f"unknown-odds:{delta.odds_id}",
+                        dedupe_key=(
+                            f"unknown-odds:{delta.match_id}:"
+                            f"{received.strftime('%Y%m%d%H')}"
+                        ),
                         payload={
                             "provider_match_id": delta.match_id,
                             "odds_id": delta.odds_id,

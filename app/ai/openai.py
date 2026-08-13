@@ -21,10 +21,12 @@ class OpenAiDecisionProvider:
         api_key: str,
         model: str,
         base_url: str,
+        reasoning_effort: str,
         timeout_seconds: float,
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self.model = model
+        self.reasoning_effort = reasoning_effort
         self._owns_client = client is None
         self._client = client or httpx.AsyncClient(
             base_url=base_url.rstrip("/"),
@@ -38,6 +40,7 @@ class OpenAiDecisionProvider:
             "/responses",
             json={
                 "model": self.model,
+                "reasoning": {"effort": self.reasoning_effort},
                 "instructions": SYSTEM_PROMPT,
                 "input": snapshot_input,
                 "text": {
@@ -58,7 +61,7 @@ class OpenAiDecisionProvider:
                 parse_status="FAILED",
                 raw_response=raw,
             )
-        text = _output_text(raw, provider_name=self.name)
+        text = response_output_text(raw, provider_name=self.name)
         return AiProviderResponse(
             raw_response=raw,
             decision=parse_decision(text, raw),
@@ -70,7 +73,7 @@ class OpenAiDecisionProvider:
             await self._client.aclose()
 
 
-def _output_text(payload: dict[str, Any], *, provider_name: str) -> str:
+def response_output_text(payload: dict[str, Any], *, provider_name: str) -> str:
     for item in payload.get("output", []):
         if not isinstance(item, dict) or item.get("type") != "message":
             continue

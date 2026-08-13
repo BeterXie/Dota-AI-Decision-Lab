@@ -57,6 +57,14 @@ Copy `.env.example` to `.env` and provide the credentials available to this inst
 
 `STRATZ_TOKEN` enables primary historical synchronization and local R.O.S.H. inputs. `OPENDOTA_API_KEY` is optional. Each configured AI provider runs independently; one unavailable provider does not block the others.
 
+Decision email notifications are owned by this runtime and use the Resend HTTP API. Set
+`EMAIL_NOTIFICATIONS_ENABLED=true`, `EMAIL_RECIPIENTS`, `RESEND_API_KEY`, and
+`RESEND_FROM`. One bilingual
+text/HTML email is durably queued after a snapshot's AI decisions are persisted; the
+message uses that immutable snapshot's match, odds, live, draft, history, and quality data.
+Resend requests use a persistent notification ID as the idempotency key so job retries and
+runtime restarts do not produce duplicate messages.
+
 Provider hosts, model IDs, live synchronization thresholds, decision checkpoints, worker timing, and runtime binding are centralized in `app/config.py` and can be overridden by environment variables.
 
 ## Development and verification

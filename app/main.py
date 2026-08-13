@@ -49,12 +49,15 @@ from app.market.odds_registry import OddsRegistry
 from app.market.registry_refresh import RayBetRegistryRefreshService
 from app.models import (
     CanonicalSeries,
+    DecisionEmailNotificationRecord,
     DltvLiveObservationRecord,
     HistoricalMapRecord,
     HistoricalPlayerMapRecord,
     LiveSyncEstimateRecord,
     ProviderMatchMapping,
 )
+from app.notifications import DecisionEmailNotificationService, ResendEmailSender
+from app.notifications.translation import DeepSeekEmailTranslator
 from app.observability import Metrics, configure_logging, configure_tracing
 from app.providers.dltv.bootstrap import DltvBootstrapClient
 from app.providers.dltv.socket import DltvSocketClient
@@ -166,6 +169,11 @@ async def run() -> None:
     )
     ai_providers = _ai_providers(settings)
     ai = AiCoordinator(ai_providers, timeout_seconds=settings.ai_timeout_seconds)
+    email_notifications = _email_notifications(
+        settings,
+        session_factory=session_factory,
+        jobs=jobs,
+    )
     future_odds = FutureOddsService(
         jobs,
         market_max_age_seconds=settings.live_market_max_age_seconds,
@@ -179,6 +187,11 @@ async def run() -> None:
         health,
         session_factory=session_factory,
         stratz_configured=bool(settings.stratz_token),
+    )
+    await _restore_email_health(
+        health,
+        session_factory=session_factory,
+        configured=email_notifications is not None,
     )
 
     handlers = ApplicationJobHandlers(
@@ -201,6 +214,7 @@ async def run() -> None:
             snapshot_builder=snapshot_builder,
             snapshots=snapshots,
             ai=ai,
+            email_notifications=email_notifications,
             future_odds=future_odds,
             settlement=SettlementService(),
             evaluation=EvaluationService(),
@@ -214,6 +228,7 @@ async def run() -> None:
             for item in ai_providers
         ),
         future_odds_horizons=settings.future_odds_horizons,
+        ai_min_game_time_seconds=settings.ai_min_game_time_seconds,
     )
     async with session_factory() as session, session.begin():
         await reconciliation.run(session, now=datetime.now(UTC))
@@ -493,6 +508,8 @@ async def run() -> None:
     finally:
         await supervisor.stop()
         await supervisor_task
+        if email_notifications is not None:
+            await email_notifications.close()
         await ai.close()
         await opendota.close()
         if stratz_history is not None:
@@ -517,6 +534,8 @@ def _job_workers(*, settings, session_factory, jobs, handlers, health) -> list[S
         "SettlementWorker": (JobType.SETTLE_MAP,),
         "EvaluationWorker": (JobType.EVALUATE_DECISION,),
     }
+    if settings.email_notifications_enabled and not settings.email_configuration_errors:
+        groups["EmailNotificationWorker"] = (JobType.SEND_DECISION_EMAIL,)
     result = []
     identity = f"{socket.gethostname()}:{os.getpid()}"
     for name, job_types in groups.items():
@@ -574,6 +593,7 @@ def _ai_providers(settings: Settings):
                 api_key=settings.openai_api_key,
                 model=settings.openai_model,
                 base_url=settings.openai_base_url,
+                reasoning_effort=settings.openai_reasoning_effort,
                 timeout_seconds=settings.ai_timeout_seconds,
             )
         )
@@ -601,6 +621,16 @@ def _ai_providers(settings: Settings):
                 api_key=settings.deepseek_api_key,
                 model=settings.deepseek_model,
                 base_url=settings.deepseek_base_url,
+                reasoning_effort=settings.deepseek_reasoning_effort,
+                timeout_seconds=settings.ai_timeout_seconds,
+            )
+        )
+        providers.append(
+            DeepSeekDecisionProvider(
+                api_key=settings.deepseek_api_key,
+                model=settings.deepseek_pro_model,
+                base_url=settings.deepseek_base_url,
+                reasoning_effort=settings.deepseek_reasoning_effort,
                 timeout_seconds=settings.ai_timeout_seconds,
             )
         )
@@ -614,6 +644,38 @@ def _ai_providers(settings: Settings):
             )
         )
     return providers
+
+
+def _email_notifications(settings: Settings, *, session_factory, jobs):
+    if not settings.email_notifications_enabled or settings.email_configuration_errors:
+        return None
+    assert settings.resend_api_key is not None
+    assert settings.resend_from is not None
+    sender = ResendEmailSender(
+        api_key=settings.resend_api_key.get_secret_value(),
+        base_url=settings.resend_base_url,
+        timeout_seconds=settings.resend_timeout_seconds,
+    )
+    translator = (
+        DeepSeekEmailTranslator(
+            api_key=settings.deepseek_api_key,
+            model=settings.deepseek_model,
+            base_url=settings.deepseek_base_url,
+            reasoning_effort=settings.deepseek_reasoning_effort,
+            timeout_seconds=settings.ai_timeout_seconds,
+        )
+        if settings.deepseek_api_key
+        else None
+    )
+    return DecisionEmailNotificationService(
+        session_factory=session_factory,
+        jobs=jobs,
+        sender=sender,
+        sender_from=settings.resend_from,
+        recipients=settings.decision_email_recipients,
+        subject_prefix=settings.email_subject_prefix,
+        translator=translator,
+    )
 
 
 async def _initialize_dependency_health(
@@ -633,6 +695,20 @@ async def _initialize_dependency_health(
         )
     await health.dependency("LIVE_SYNC", "UNKNOWN")
     await health.dependency("HISTORY", "UNKNOWN")
+    if not settings.email_notifications_enabled:
+        await health.dependency("EMAIL", "DISABLED")
+    elif settings.email_configuration_errors:
+        await health.dependency(
+            "EMAIL",
+            "ACTION_REQUIRED",
+            message="missing configuration: " + ", ".join(settings.email_configuration_errors),
+        )
+    else:
+        await health.dependency(
+            "EMAIL",
+            "UNKNOWN",
+            recipient_count=len(settings.decision_email_recipients),
+        )
     await health.dependency("STRATZ", "UNKNOWN" if settings.stratz_token else "ACTION_REQUIRED")
     await health.dependency(
         "DRAFT_ENGINE", "UNKNOWN" if settings.stratz_token else "ACTION_REQUIRED"
@@ -691,6 +767,34 @@ async def _restore_historical_health(
             last_success_at=latest_stratz,
             message="local STRATZ facts restored; live provider not verified since restart",
             maps_stored=stratz_map_count,
+        )
+
+
+async def _restore_email_health(health, *, session_factory, configured: bool) -> None:
+    if not configured:
+        return
+    async with session_factory() as session:
+        latest = await session.scalar(
+            select(DecisionEmailNotificationRecord)
+            .order_by(DecisionEmailNotificationRecord.created_at.desc())
+            .limit(1)
+        )
+    if latest is None:
+        return
+    if latest.status == "SENT" and latest.sent_at is not None:
+        await health.restore_dependency(
+            "EMAIL",
+            "READY",
+            last_success_at=latest.sent_at,
+            recipient_count=len(latest.recipients),
+            notification_id=str(latest.id),
+        )
+    elif latest.status == "FAILED":
+        await health.dependency(
+            "EMAIL",
+            "DEGRADED",
+            message=latest.last_error,
+            notification_id=str(latest.id),
         )
 
 

@@ -12,11 +12,13 @@ from app.events.dispatcher import DomainEventDispatcher
 from app.jobs.reconciliation import ReconciliationService
 from app.jobs.repository import JobRepository
 from app.models import (
+    DecisionSnapshotRecord,
     DomainEventRecord,
     DurableJobRecord,
     HistoricalMapRecord,
     ProviderMatchMapping,
 )
+from app.snapshots.repository import SnapshotRepository
 
 
 @pytest.mark.asyncio
@@ -163,6 +165,74 @@ async def test_reconciliation_ignores_historical_only_maps_for_settlement() -> N
     async with factory() as session, session.begin():
         result = await reconciliation.run(session, now=now)
         assert result.settlement_jobs == 0
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_only_enqueues_ai_after_ten_minutes() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    jobs = JobRepository()
+    snapshots = SnapshotRepository()
+    now = datetime(2026, 8, 12, tzinfo=UTC)
+
+    async with factory() as session, session.begin():
+        early = await snapshots.persist(
+            session,
+            canonical_map_id=None,
+            decision_at=now,
+            mode="LIVE_BASIC",
+            identity={"team_a": {"name": "A"}, "team_b": {"name": "B"}},
+            market={},
+            draft=None,
+            history={},
+            live={"game_time_seconds": 599},
+            quality={"eligible": True, "blockers": [], "warnings": []},
+        )
+        eligible = await snapshots.persist(
+            session,
+            canonical_map_id=None,
+            decision_at=now + timedelta(seconds=1),
+            mode="LIVE_BASIC",
+            identity={"team_a": {"name": "A"}, "team_b": {"name": "B"}},
+            market={},
+            draft=None,
+            history={},
+            live={"game_time_seconds": 600},
+            quality={"eligible": True, "blockers": [], "warnings": []},
+        )
+
+    reconciliation = ReconciliationService(
+        jobs,
+        lease_seconds=120,
+        ai_experiments=(("openai", "fixture-model", "prompt-v1", "policy-v1"),),
+        future_odds_horizons=(),
+        ai_min_game_time_seconds=600,
+    )
+    for _ in range(2):
+        async with factory() as session, session.begin():
+            await reconciliation.run(session, now=now)
+
+    async with factory() as session:
+        records = list(
+            (
+                await session.scalars(
+                    select(DurableJobRecord).where(
+                        DurableJobRecord.job_type == JobType.RUN_AI_PROVIDER.value
+                    )
+                )
+            ).all()
+        )
+        assert len(records) == 1
+        assert records[0].payload["snapshot_id"] == str(eligible.snapshot_id)
+        assert records[0].payload["snapshot_id"] != str(early.snapshot_id)
+        assert (
+            await session.scalar(select(func.count()).select_from(DecisionSnapshotRecord))
+            == 2
+        )
 
     await engine.dispose()
 

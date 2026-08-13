@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.ai.coordinator import AiCoordinator
+from app.ai.eligibility import ai_decision_is_game_time_eligible
 from app.config import Settings
 from app.domain.events import DomainEvent, DomainEventType
 from app.domain.jobs import DurableJob, JobType
@@ -21,6 +22,7 @@ from app.history.repository import HistoricalRepository
 from app.history.sync import HistoricalSyncService
 from app.market.registry_refresh import RayBetRegistryRefreshService
 from app.models import (
+    AiDecisionRecord,
     CanonicalMap,
     CanonicalSeries,
     DecisionSnapshotRecord,
@@ -31,6 +33,7 @@ from app.models import (
     ProviderMatchMapping,
     ProviderTeamMapping,
 )
+from app.notifications.email import DecisionEmailNotificationService
 from app.providers.opendota.client import OpenDotaClient
 from app.repositories.raw import RawEventRepository
 from app.runtime.health import HealthRegistry
@@ -60,6 +63,7 @@ class JobHandlerDependencies:
     snapshot_builder: SnapshotBuilder
     snapshots: SnapshotRepository
     ai: AiCoordinator
+    email_notifications: DecisionEmailNotificationService | None
     future_odds: FutureOddsService
     settlement: SettlementService
     evaluation: EvaluationService
@@ -77,6 +81,7 @@ class ApplicationJobHandlers:
             JobType.BUILD_DRAFT_CURVE: self.build_draft_curve,
             JobType.BUILD_SNAPSHOT: self.build_snapshot,
             JobType.RUN_AI_PROVIDER: self.run_ai,
+            JobType.SEND_DECISION_EMAIL: self.send_decision_email,
             JobType.CAPTURE_FUTURE_ODDS: self.capture_future_odds,
             JobType.RESOLVE_POSTMATCH: self.resolve_postmatch,
             JobType.SETTLE_MAP: self.settle_map,
@@ -315,17 +320,21 @@ class ApplicationJobHandlers:
                 decision_at=outcome.snapshot.decision_at,
                 horizons_seconds=self._d.settings.future_odds_horizons,
             )
-            await self._d.events.record(
-                session,
-                DomainEvent(
-                    event_type=DomainEventType.AI_DECISION_REQUESTED,
-                    aggregate_type="decision_snapshot",
-                    aggregate_id=str(outcome.snapshot.snapshot_id),
-                    dedupe_key=f"ai:{outcome.snapshot.snapshot_hash}",
-                    payload={"snapshot_id": str(outcome.snapshot.snapshot_id)},
-                    occurred_at=datetime.now(UTC),
-                ),
-            )
+            if ai_decision_is_game_time_eligible(
+                outcome.snapshot,
+                min_game_time_seconds=self._d.settings.ai_min_game_time_seconds,
+            ):
+                await self._d.events.record(
+                    session,
+                    DomainEvent(
+                        event_type=DomainEventType.AI_DECISION_REQUESTED,
+                        aggregate_type="decision_snapshot",
+                        aggregate_id=str(outcome.snapshot.snapshot_id),
+                        dedupe_key=f"ai:{outcome.snapshot.snapshot_hash}",
+                        payload={"snapshot_id": str(outcome.snapshot.snapshot_id)},
+                        occurred_at=datetime.now(UTC),
+                    ),
+                )
 
     async def run_ai(self, job: DurableJob) -> None:
         snapshot_id = _required_uuid(job.payload, "snapshot_id")
@@ -333,6 +342,20 @@ class ApplicationJobHandlers:
             snapshot = await self._d.snapshots.get(session, snapshot_id)
             if snapshot is None:
                 raise ValueError("decision snapshot does not exist")
+            if not ai_decision_is_game_time_eligible(
+                snapshot,
+                min_game_time_seconds=self._d.settings.ai_min_game_time_seconds,
+            ):
+                return
+            existing_ids = set(
+                (
+                    await session.scalars(
+                        select(AiDecisionRecord.id).where(
+                            AiDecisionRecord.snapshot_id == snapshot_id
+                        )
+                    )
+                ).all()
+            )
             records = await self._d.ai.run_all(session, snapshot)
             dependency_names = {
                 "openai": "GPT",
@@ -341,13 +364,60 @@ class ApplicationJobHandlers:
                 "deepseek": "DEEPSEEK",
                 "kimi": "KIMI",
             }
+            records_by_dependency: dict[str, list] = {}
             for record in records:
+                dependency = dependency_names.get(record.provider, record.provider.upper())
+                records_by_dependency.setdefault(dependency, []).append(record)
+            for dependency, dependency_records in records_by_dependency.items():
+                failed = [
+                    record for record in dependency_records if record.parse_status != "SUCCESS"
+                ]
                 await self._d.health.dependency(
-                    dependency_names.get(record.provider, record.provider.upper()),
-                    "READY" if record.parse_status == "SUCCESS" else "DEGRADED",
-                    message=record.error,
-                    latency_seconds=record.latency_seconds,
+                    dependency,
+                    "DEGRADED" if failed else "READY",
+                    message="; ".join(
+                        f"{record.model}: {record.error or record.parse_status}"
+                        for record in failed
+                    )
+                    or None,
+                    models={
+                        record.model: {
+                            "parse_status": record.parse_status,
+                            "latency_seconds": record.latency_seconds,
+                        }
+                        for record in dependency_records
+                    },
                 )
+            if self._d.email_notifications is not None and any(
+                record.id not in existing_ids for record in records
+            ):
+                await self._d.email_notifications.prepare(
+                    session,
+                    snapshot=snapshot,
+                    decisions=records,
+                )
+
+    async def send_decision_email(self, job: DurableJob) -> None:
+        if self._d.email_notifications is None:
+            raise RuntimeError("decision email notifications are not configured")
+        notification_id = _required_uuid(job.payload, "notification_id")
+        try:
+            notification = await self._d.email_notifications.deliver(notification_id)
+        except Exception as exc:
+            await self._d.health.dependency(
+                "EMAIL",
+                "DEGRADED",
+                message=f"{type(exc).__name__}: {exc}",
+                notification_id=str(notification_id),
+            )
+            raise
+        await self._d.health.dependency(
+            "EMAIL",
+            "READY",
+            notification_id=str(notification.id),
+            recipient_count=len(notification.recipients),
+            sent_at=notification.sent_at,
+        )
 
     async def capture_future_odds(self, job: DurableJob) -> None:
         snapshot_id = _required_uuid(job.payload, "snapshot_id")

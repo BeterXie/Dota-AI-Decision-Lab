@@ -391,6 +391,7 @@ const statusMessages: Record<string, Record<Locale, string>> = {
   COMPLETED: { en: "COMPLETED", "zh-CN": "已完成" },
   DATA_CONFLICT: { en: "DATA CONFLICT", "zh-CN": "数据冲突" },
   DEGRADED: { en: "DEGRADED", "zh-CN": "已降级" },
+  DISABLED: { en: "DISABLED", "zh-CN": "已禁用" },
   DRAFT_PARTIAL: { en: "DRAFT PARTIAL", "zh-CN": "选人信息不完整" },
   FAILED: { en: "FAILED", "zh-CN": "失败" },
   FAILED_TERMINAL: { en: "FAILED TERMINAL", "zh-CN": "最终失败" },
@@ -445,7 +446,8 @@ const dependencyMessages: Record<string, Record<Locale, string>> = {
   CLAUDE: { en: "CLAUDE", "zh-CN": "CLAUDE" },
   GEMINI: { en: "GEMINI", "zh-CN": "GEMINI" },
   DEEPSEEK: { en: "DEEPSEEK", "zh-CN": "DEEPSEEK" },
-  KIMI: { en: "KIMI", "zh-CN": "KIMI" }
+  KIMI: { en: "KIMI", "zh-CN": "KIMI" },
+  EMAIL: { en: "EMAIL NOTIFICATIONS", "zh-CN": "邮件通知" }
 };
 
 export function translateDependency(name: string, locale: Locale): string {

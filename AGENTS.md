@@ -1033,6 +1033,7 @@ DraftCoordinator
 TemporalAligner
 SnapshotCoordinator
 AiCoordinator
+EmailNotificationWorker
 FutureOddsWorker
 SettlementWorker
 WebServer
@@ -1078,6 +1079,7 @@ CLAUDE
 GEMINI
 DEEPSEEK
 KIMI
+EMAIL
 ```
 
 Overall status should distinguish:

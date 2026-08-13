@@ -168,8 +168,7 @@ async def test_duplicate_socket_delta_keeps_raw_but_not_business_duplicate() -> 
 
 class _FakeRayBetConnection:
     def __init__(self, publish: dict) -> None:
-        self._responses = iter(("{" + '"rid":1}', "{" + '"rid":2}'))
-        self._publish = json.dumps(publish)
+        self._responses = iter(("{" + '"rid":1}', "{" + '"rid":2}', json.dumps(publish)))
         self.sent: list[str] = []
 
     async def send(self, value: str) -> None:
@@ -205,17 +204,15 @@ class _FakeConnectContext:
 
 @pytest.mark.asyncio
 async def test_raybet_socket_reconnects_and_resubscribes(monkeypatch) -> None:
-    from app.providers.raybet import socket as socket_module
-
     connection = _FakeRayBetConnection(_fixture("raybet_socket_odds.json"))
     attempts = 0
 
-    def fake_connect(*_args, **_kwargs):
+    def fake_connect(_self):
         nonlocal attempts
         attempts += 1
         return _FakeConnectContext(connection, fail=attempts == 1)
 
-    monkeypatch.setattr(socket_module, "connect", fake_connect)
+    monkeypatch.setattr(RayBetSocketClient, "_connect", fake_connect)
     client = RayBetSocketClient("wss://recorded.invalid", "https://recorded.invalid")
     states: list[str] = []
 

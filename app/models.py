@@ -683,6 +683,44 @@ class AiDecisionRecord(Base):
     error: Mapped[str | None] = mapped_column(Text)
 
 
+class DecisionEmailNotificationRecord(Base):
+    __tablename__ = "decision_email_notifications"
+    __table_args__ = (
+        UniqueConstraint(
+            "snapshot_id",
+            "decision_batch_key",
+            name="uq_decision_email_snapshot_batch",
+        ),
+        UniqueConstraint("idempotency_key", name="uq_decision_email_idempotency_key"),
+        Index("ix_decision_email_status_created", "status", "created_at"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    snapshot_id: Mapped[UUID] = mapped_column(ForeignKey("decision_snapshots.id"), nullable=False)
+    snapshot_hash: Mapped[str] = mapped_column(String(128), nullable=False)
+    decision_batch_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    sender: Mapped[str] = mapped_column(String(320), nullable=False)
+    recipients: Mapped[list[str]] = mapped_column(JSON_DOCUMENT, nullable=False)
+    subject: Mapped[str] = mapped_column(String(512), nullable=False)
+    text_body: Mapped[str] = mapped_column(Text, nullable=False)
+    html_body: Mapped[str] = mapped_column(Text, nullable=False)
+    template_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    idempotency_key: Mapped[str] = mapped_column(String(255), nullable=False)
+    provider_message_id: Mapped[str | None] = mapped_column(String(255))
+    translation_status: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="DISABLED"
+    )
+    translation_model: Mapped[str | None] = mapped_column(String(128))
+    translation_raw_response: Mapped[dict | None] = mapped_column(JSON_DOCUMENT)
+    translation_error: Mapped[str | None] = mapped_column(Text)
+    status: Mapped[str] = mapped_column(String(32), nullable=False)
+    attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    last_attempt_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    sent_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_error: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+
 class DecisionFutureOdds(Base):
     __tablename__ = "decision_future_odds"
     __table_args__ = (

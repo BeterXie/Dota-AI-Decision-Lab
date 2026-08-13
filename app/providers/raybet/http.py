@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime
 
 import httpx
@@ -33,8 +34,13 @@ class RayBetHttpClient:
     async def _get(self, path: str, *, params: dict | None = None) -> TimedPayload:
         started = datetime.now(UTC)
         response = await self._client.get(path, params=params)
+        if response.status_code == 204:
+            await asyncio.sleep(0.25)
+            response = await self._client.get(path, params=params)
         received = datetime.now(UTC)
         response.raise_for_status()
+        if "application/json" not in response.headers.get("content-type", ""):
+            raise ValueError("RayBet response is not JSON")
         payload = response.json()
         if not isinstance(payload, dict):
             raise ValueError("RayBet response must be a JSON object")

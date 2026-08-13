@@ -571,7 +571,8 @@ class Settings(BaseSettings):
     live_sync_safe_seconds: float = 3.0
     live_sync_caution_seconds: float = 8.0
 
-    ai_checkpoint_minutes: str = "5,10,15,20,25,30,35,40,45,50,55,60"
+    ai_min_game_time_seconds: int = 600
+    ai_checkpoint_minutes: str = "10,15,20,25,30,35,40,45,50,55,60"
 ```
 
 `.env`：
@@ -584,11 +585,37 @@ ANTHROPIC_API_KEY=...
 GEMINI_API_KEY=...
 DEEPSEEK_API_KEY=...
 KIMI_API_KEY=...
+OPENAI_REASONING_EFFORT=xhigh
+DEEPSEEK_MODEL=deepseek-v4-flash
+DEEPSEEK_PRO_MODEL=deepseek-v4-pro
+DEEPSEEK_REASONING_EFFORT=xhigh
 ```
 
 DeepSeek 使用 OpenAI Responses 兼容接口与严格 JSON Schema；Kimi 使用 OpenAI
 Chat Completions 兼容接口的 JSON Object 模式，并在本地执行同一 `AiDecision` 严格校验。
+OpenAI、DeepSeek Flash 和 DeepSeek Pro 的 Responses 请求使用 `reasoning.effort=xhigh`。
 所有 Provider 必须接收同一个不可变 Snapshot，独立失败和记录。
+
+### 5.1 Decision Email Notification
+
+每次 DecisionSnapshot 的 AI 决策批次完成后，系统可向配置的邮件列表发送一封双语汇总通知。
+通知必须由项目自己的 Resend HTTP API Provider 和 Durable Worker 发送，不依赖外部邮件 Agent/CLI。
+
+邮件内容冻结于同一个 DecisionSnapshot，至少包括：
+
+```text
+对阵、地图、Valve Match ID、decision_at、mode、snapshot_hash
+RayBet 赔率、市场类型、状态、更新时间
+DLTV 游戏时间、比分、经济差、第一滴血
+当前阵容、Draft Intelligence 摘要
+Historical Intelligence 与覆盖度
+同步状态、blockers、warnings
+每个 AI 的 model、parse status、action、概率、confidence、理由、反方论据、数据质量问题
+```
+
+邮件通知记录必须持久化发送状态、收件人、模板版本、确定性 Idempotency-Key、Resend 邮件 ID、尝试次数、错误和发送时间。
+任务使用 durable job 重试并在重启后恢复；已发送通知不得在正常 reconciliation 中重复发送。
+缺失比赛字段保持 `UNKNOWN`，不得用 0 补齐。Resend API Key 只存在于环境配置，不得进入日志或数据库。
 
 ---
 
@@ -4159,6 +4186,7 @@ SnapshotCoordinator
 DurableJobWorker
 DomainEventDispatcher
 AiCoordinatorWorker
+EmailNotificationWorker
 FutureOddsWorker
 SettlementWorker
 EvaluationWorker
@@ -4241,6 +4269,7 @@ CLAUDE             READY
 GEMINI             READY
 DEEPSEEK           READY
 KIMI               READY
+EMAIL              READY / DISABLED / ACTION_REQUIRED
 ```
 
 整体：

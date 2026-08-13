@@ -4,6 +4,7 @@ from datetime import datetime, timedelta
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.eligibility import ai_record_is_game_time_eligible
 from app.domain.jobs import JobType
 from app.jobs.repository import JobRepository
 from app.models import (
@@ -38,11 +39,13 @@ class ReconciliationService:
         lease_seconds: float,
         ai_experiments: tuple[tuple[str, str, str, str], ...],
         future_odds_horizons: tuple[int, ...],
+        ai_min_game_time_seconds: int = 600,
     ) -> None:
         self._jobs = jobs
         self._lease_seconds = lease_seconds
         self._ai_experiments = ai_experiments
         self._future_odds_horizons = future_odds_horizons
+        self._ai_min_game_time_seconds = ai_min_game_time_seconds
 
     async def run(self, session: AsyncSession, *, now: datetime) -> ReconciliationResult:
         reclaimed = await self._jobs.reclaim_expired(
@@ -95,6 +98,11 @@ class ReconciliationService:
         snapshots = list((await session.scalars(select(DecisionSnapshotRecord))).all())
         created = 0
         for snapshot in snapshots:
+            if not ai_record_is_game_time_eligible(
+                snapshot.canonical_payload,
+                min_game_time_seconds=self._ai_min_game_time_seconds,
+            ):
+                continue
             completed = set(
                 (
                     await session.scalars(
