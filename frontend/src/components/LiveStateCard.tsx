@@ -1,5 +1,5 @@
 import React from "react";
-import type { MapDetail, MapSummary } from "../api";
+import type { LiveObservation, MapDetail, MapSummary } from "../api";
 import { translateStatus, useI18n } from "../i18n";
 import { resolveDecisionLiveFreshness } from "../utils/liveFreshness";
 import { resolveVerifiedMapSides } from "../utils/mapSides";
@@ -13,6 +13,7 @@ export const LiveStateCard: React.FC<LiveStateCardProps> = ({ match }) => {
   const live = match.live;
   const sides = resolveVerifiedMapSides(match);
   const freshness = resolveDecisionLiveFreshness(match);
+  const recentFiveMinutes = React.useMemo(() => fiveMinuteChange(match), [match]);
   const gameTime = live?.game_time_seconds;
   const gameTimeText = gameTime == null
     ? "—"
@@ -59,6 +60,18 @@ export const LiveStateCard: React.FC<LiveStateCardProps> = ({ match }) => {
               <span className="stat-label">{t("firstBlood")}</span>
               <span className="stat-value">{formatMapSide(live.first_blood, locale, sides?.radiant.name, sides?.dire.name)}</span>
             </div>
+            {recentFiveMinutes && (
+              <>
+                <div className="live-stat-row live-trend-row">
+                  <span className="stat-label">{locale === "zh-CN" ? "过去5分钟经济" : "NW change · 5m"}</span>
+                  <span className="stat-value">{formatDeltaLead(recentFiveMinutes.nwDelta, locale, sides?.radiant.name, sides?.dire.name)}</span>
+                </div>
+                <div className="live-stat-row live-trend-row">
+                  <span className="stat-label">{locale === "zh-CN" ? "过去5分钟击杀" : "Kills · 5m"}</span>
+                  <span className="stat-value"><span className="radiant-txt">+{recentFiveMinutes.radiantKills}</span>{" · "}<span className="dire-txt">+{recentFiveMinutes.direKills}</span></span>
+                </div>
+              </>
+            )}
           </div>
           <div className="live-sync-footer">
             <span>
@@ -78,6 +91,38 @@ export const LiveStateCard: React.FC<LiveStateCardProps> = ({ match }) => {
     </div>
   );
 };
+
+function fiveMinuteChange(match: MapSummary | MapDetail) {
+  if (!("live_timeline" in match) || match.live_timeline.length < 2) return null;
+  const points = match.live_timeline
+    .filter((item) => item.game_time_seconds != null)
+    .sort((a, b) => (a.game_time_seconds ?? 0) - (b.game_time_seconds ?? 0));
+  const current = points.at(-1);
+  if (!current?.game_time_seconds) return null;
+  const target = current.game_time_seconds - 300;
+  const baseline = nearestGameTime(points, target);
+  if (!baseline?.game_time_seconds || Math.abs(baseline.game_time_seconds - target) > 75) return null;
+  if (current.radiant_nw_lead == null || baseline.radiant_nw_lead == null) return null;
+  return {
+    nwDelta: current.radiant_nw_lead - baseline.radiant_nw_lead,
+    radiantKills: Math.max(0, (current.radiant_kills ?? 0) - (baseline.radiant_kills ?? 0)),
+    direKills: Math.max(0, (current.dire_kills ?? 0) - (baseline.dire_kills ?? 0))
+  };
+}
+
+function nearestGameTime(points: LiveObservation[], target: number) {
+  return points.reduce<LiveObservation | null>((best, item) => {
+    if (item.game_time_seconds == null) return best;
+    if (!best?.game_time_seconds) return item;
+    return Math.abs(item.game_time_seconds - target) < Math.abs(best.game_time_seconds - target) ? item : best;
+  }, null);
+}
+
+function formatDeltaLead(value: number, locale: string, radiantTeam?: string, direTeam?: string) {
+  if (value === 0) return locale === "zh-CN" ? "持平" : "Flat";
+  const side = value > 0 ? "radiant" : "dire";
+  return `${sideLabel(side, locale, side === "radiant" ? radiantTeam : direTeam)} +${Math.abs(value).toLocaleString(locale)}`;
+}
 
 function sideLabel(side: "radiant" | "dire", locale: string, teamName?: string): string {
   const sideName = side === "radiant"
