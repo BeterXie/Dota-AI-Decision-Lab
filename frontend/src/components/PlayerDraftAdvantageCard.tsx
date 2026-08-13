@@ -2,9 +2,11 @@ import React from "react";
 import type { DraftPoint, MapDetail, MapSummary } from "../api";
 import IntelligenceChart from "../Chart";
 import { useI18n } from "../i18n";
+import { resolveVerifiedMapSides } from "../utils/mapSides";
 
 export function PlayerDraftAdvantageCard({ match, onViewDetails }: { match: MapSummary | MapDetail; onViewDetails?: () => void }) {
   const { locale, t } = useI18n();
+  const sides = resolveVerifiedMapSides(match);
   const curve = match.draft?.curve ?? [];
   const features = match.draft?.features ?? {};
   const current = featureNumber(features, "current_edge") ?? nearestCurrentEdge(curve, match.live?.game_time_seconds);
@@ -20,6 +22,7 @@ export function PlayerDraftAdvantageCard({ match, onViewDetails }: { match: MapS
   const pure = curve.map((point) => [point.minute, point.pure_radiant_edge]);
   const maxAbs = Math.max(5, ...curve.flatMap((point) => [Math.abs(point.adjusted_radiant_edge ?? 0), Math.abs(point.pure_radiant_edge ?? 0)]));
   const bound = Math.ceil(maxAbs * 1.25);
+  const teamForSide = (side: EdgeSide) => side === "radiant" ? sides?.radiant.name : side === "dire" ? sides?.dire.name : undefined;
 
   const chartOption = {
     animation: false,
@@ -27,7 +30,7 @@ export function PlayerDraftAdvantageCard({ match, onViewDetails }: { match: MapS
       trigger: "axis",
       formatter: (params: Array<{ seriesName: string; value: [number, number | null] }>) => params.map((item) => {
         const value = item.value?.[1];
-        return `${item.seriesName}: ${value == null ? "—" : edgeText(value, locale)}`;
+        return `${item.seriesName}: ${value == null ? "—" : edgeText(value, locale, teamForSide(edgeSide(value)))}`;
       }).join("<br/>")
     },
     legend: { top: 0, right: 0, textStyle: { color: "#9AA4B2", fontSize: 10 }, data: [t("pure"), t("playerAdjusted")] },
@@ -50,24 +53,28 @@ export function PlayerDraftAdvantageCard({ match, onViewDetails }: { match: MapS
       <div className={`rosh-verdict ${currentSide}`}>
         <div>
           <span>{locale === "zh-CN" ? "当前阵容倾向" : "Current draft favors"}</span>
-          <strong>{current == null ? "—" : currentSide === "even" ? (locale === "zh-CN" ? "双方接近均势" : "Near even") : `${sideLabel(currentSide, locale)} ${locale === "zh-CN" ? "占优" : "advantage"}`}</strong>
+          <strong>{current == null ? "—" : currentSide === "even" ? (locale === "zh-CN" ? "双方接近均势" : "Near even") : `${sideLabel(currentSide, locale, teamForSide(currentSide))} ${locale === "zh-CN" ? "占优" : "advantage"}`}</strong>
         </div>
         <b>{current == null ? "—" : currentSide === "even" ? "0.0pp" : `+${Math.abs(current).toFixed(1)}pp`}</b>
         <small>{locale === "zh-CN"
-          ? "R.O.S.H. 表示天辉相对夜魇的阵容优势：正值偏天辉，负值偏夜魇。Team A / Team B 与本局阵营不会在缺少显式映射时强行等同。"
-          : "R.O.S.H. is Radiant-minus-Dire draft edge: positive favors Radiant, negative favors Dire. Team A/B are not forced onto map sides without explicit side identity."}</small>
+          ? sides
+            ? `R.O.S.H. 仍表示天辉相对夜魇的阵容优势；本局已验证：${sides.radiant.name} = 天辉，${sides.dire.name} = 夜魇。`
+            : "R.O.S.H. 表示天辉相对夜魇的阵容优势：正值偏天辉，负值偏夜魇。Team A / Team B 与本局阵营不会在缺少显式映射时强行等同。"
+          : sides
+            ? `R.O.S.H. remains Radiant-minus-Dire draft edge; verified this map: ${sides.radiant.name} = Radiant, ${sides.dire.name} = Dire.`
+            : "R.O.S.H. is Radiant-minus-Dire draft edge: positive favors Radiant, negative favors Dire. Team A/B are not forced onto map sides without explicit side identity."}</small>
       </div>
 
       <div className="rosh-direction-metrics">
-        <DirectionalMetric label={t("currentEdge")} value={current} side={currentSide} locale={locale} />
-        <DirectionalMetric label={t("next5m")} value={next5} side={nextSide} locale={locale} />
-        <DirectionalMetric label={t("peakEdge")} value={peak} side={peakSide} locale={locale} suffix={peakMinute == null ? "" : ` @ ${peakMinute.toFixed(0)}m`} />
-        <div className="rosh-direction-metric crossover"><span>{locale === "zh-CN" ? "优势翻转" : "Cross-over"}</span><strong>{crossMinute == null ? (locale === "zh-CN" ? "未发现" : "None") : `${crossMinute.toFixed(0)}m → ${sideLabel(afterCross, locale)}`}</strong></div>
+        <DirectionalMetric label={t("currentEdge")} value={current} side={currentSide} locale={locale} teamName={teamForSide(currentSide)} />
+        <DirectionalMetric label={t("next5m")} value={next5} side={nextSide} locale={locale} teamName={teamForSide(nextSide)} />
+        <DirectionalMetric label={t("peakEdge")} value={peak} side={peakSide} locale={locale} teamName={teamForSide(peakSide)} suffix={peakMinute == null ? "" : ` @ ${peakMinute.toFixed(0)}m`} />
+        <div className="rosh-direction-metric crossover"><span>{locale === "zh-CN" ? "优势翻转" : "Cross-over"}</span><strong>{crossMinute == null ? (locale === "zh-CN" ? "未发现" : "None") : `${crossMinute.toFixed(0)}m → ${sideLabel(afterCross, locale, teamForSide(afterCross))}`}</strong></div>
       </div>
 
       <div className="rosh-chart-shell">
-        <span className="rosh-zone-label radiant">↑ {locale === "zh-CN" ? "天辉优势区" : "Radiant advantage"}</span>
-        <span className="rosh-zone-label dire">↓ {locale === "zh-CN" ? "夜魇优势区" : "Dire advantage"}</span>
+        <span className="rosh-zone-label radiant">↑ {sides?.radiant.name ? `${sides.radiant.name} · ` : ""}{locale === "zh-CN" ? "天辉优势区" : "Radiant advantage"}</span>
+        <span className="rosh-zone-label dire">↓ {sides?.dire.name ? `${sides.dire.name} · ` : ""}{locale === "zh-CN" ? "夜魇优势区" : "Dire advantage"}</span>
         <div className="rosh-chart-container">{curve.length ? <IntelligenceChart option={chartOption} /> : <span className="chart-empty">{t("noRoshCurve")}</span>}</div>
       </div>
 
@@ -76,16 +83,16 @@ export function PlayerDraftAdvantageCard({ match, onViewDetails }: { match: MapS
   );
 }
 
-function DirectionalMetric({ label, value, side, locale, suffix = "" }: { label: string; value: number | null; side: EdgeSide; locale: string; suffix?: string }) {
-  return <div className={`rosh-direction-metric ${side}`}><span>{label}</span><strong>{value == null ? "—" : side === "even" ? (locale === "zh-CN" ? "均势" : "Even") : `${sideLabel(side, locale)} +${Math.abs(value).toFixed(1)}pp${suffix}`}</strong></div>;
+function DirectionalMetric({ label, value, side, locale, teamName, suffix = "" }: { label: string; value: number | null; side: EdgeSide; locale: string; teamName?: string; suffix?: string }) {
+  return <div className={`rosh-direction-metric ${side}`}><span>{label}</span><strong>{value == null ? "—" : side === "even" ? (locale === "zh-CN" ? "均势" : "Even") : `${sideLabel(side, locale, teamName)} +${Math.abs(value).toFixed(1)}pp${suffix}`}</strong></div>;
 }
 
 type EdgeSide = "radiant" | "dire" | "even";
 function edgeSide(value: number | null): EdgeSide { return value == null || Math.abs(value) < 0.05 ? "even" : value > 0 ? "radiant" : "dire"; }
-function sideLabel(side: EdgeSide, locale: string): string {
-  if (side === "radiant") return locale === "zh-CN" ? "天辉" : "Radiant";
-  if (side === "dire") return locale === "zh-CN" ? "夜魇" : "Dire";
-  return locale === "zh-CN" ? "均势" : "Even";
+function sideLabel(side: EdgeSide, locale: string, teamName?: string): string {
+  if (side === "even") return locale === "zh-CN" ? "均势" : "Even";
+  const mapSide = side === "radiant" ? (locale === "zh-CN" ? "天辉" : "Radiant") : (locale === "zh-CN" ? "夜魇" : "Dire");
+  return teamName ? `${teamName} · ${mapSide}` : mapSide;
 }
 function featureNumber(features: Record<string, unknown>, key: string): number | null { const value = features[key]; return typeof value === "number" && Number.isFinite(value) ? value : null; }
 function nearestCurrentEdge(curve: DraftPoint[], seconds: number | null | undefined): number | null {
@@ -104,4 +111,4 @@ function edgeAfterMinute(curve: DraftPoint[], minute: number): number | null {
   const point = sorted.find((item) => item.minute > minute) ?? sorted.at(-1);
   return point?.adjusted_radiant_edge ?? point?.pure_radiant_edge ?? null;
 }
-function edgeText(value: number, locale: string): string { const side = edgeSide(value); return side === "even" ? (locale === "zh-CN" ? "均势" : "Even") : `${sideLabel(side, locale)} +${Math.abs(value).toFixed(1)}pp`; }
+function edgeText(value: number, locale: string, teamName?: string): string { const side = edgeSide(value); return side === "even" ? (locale === "zh-CN" ? "均势" : "Even") : `${sideLabel(side, locale, teamName)} +${Math.abs(value).toFixed(1)}pp`; }
