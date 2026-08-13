@@ -13,7 +13,7 @@ export const LiveStateCard: React.FC<LiveStateCardProps> = ({ match }) => {
   const live = match.live;
   const sides = resolveVerifiedMapSides(match);
   const freshness = resolveDecisionLiveFreshness(match);
-  const recentFiveMinutes = React.useMemo(() => fiveMinuteChange(match), [match]);
+  const changes = React.useMemo(() => liveChanges(match), [match]);
   const gameTime = live?.game_time_seconds;
   const gameTimeText = gameTime == null
     ? "—"
@@ -60,19 +60,24 @@ export const LiveStateCard: React.FC<LiveStateCardProps> = ({ match }) => {
               <span className="stat-label">{t("firstBlood")}</span>
               <span className="stat-value">{formatMapSide(live.first_blood, locale, sides?.radiant.name, sides?.dire.name)}</span>
             </div>
-            {recentFiveMinutes && (
-              <>
-                <div className="live-stat-row live-trend-row">
-                  <span className="stat-label">{locale === "zh-CN" ? "过去5分钟经济" : "NW change · 5m"}</span>
-                  <span className="stat-value">{formatDeltaLead(recentFiveMinutes.nwDelta, locale, sides?.radiant.name, sides?.dire.name)}</span>
-                </div>
-                <div className="live-stat-row live-trend-row">
-                  <span className="stat-label">{locale === "zh-CN" ? "过去5分钟击杀" : "Kills · 5m"}</span>
-                  <span className="stat-value"><span className="radiant-txt">+{recentFiveMinutes.radiantKills}</span>{" · "}<span className="dire-txt">+{recentFiveMinutes.direKills}</span></span>
-                </div>
-              </>
-            )}
           </div>
+
+          {Object.keys(changes).length > 0 && (
+            <div className="live-change-strip">
+              {[60, 180, 300, 600].map((seconds) => {
+                const item = changes[seconds];
+                if (!item) return null;
+                return (
+                  <div className="live-change-item" key={seconds}>
+                    <span>{seconds / 60}m</span>
+                    <strong>{formatDeltaLead(item.nwDelta, locale, sides?.radiant.name, sides?.dire.name)}</strong>
+                    <small>{locale === "zh-CN" ? "击杀" : "Kills"} {item.radiantKills}:{item.direKills}</small>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
           <div className="live-sync-footer">
             <span>
               {t("effectiveStateAge")}: {freshness.complete === false
@@ -92,28 +97,33 @@ export const LiveStateCard: React.FC<LiveStateCardProps> = ({ match }) => {
   );
 };
 
-function fiveMinuteChange(match: MapSummary | MapDetail) {
-  if (!("live_timeline" in match) || match.live_timeline.length < 2) return null;
+function liveChanges(match: MapSummary | MapDetail) {
+  if (!("live_timeline" in match) || match.live_timeline.length < 2) return {};
   const points = match.live_timeline
     .filter((item) => item.game_time_seconds != null)
     .sort((a, b) => (a.game_time_seconds ?? 0) - (b.game_time_seconds ?? 0));
   const current = points.at(-1);
-  if (!current?.game_time_seconds) return null;
-  const target = current.game_time_seconds - 300;
-  const baseline = nearestGameTime(points, target);
-  if (!baseline?.game_time_seconds || Math.abs(baseline.game_time_seconds - target) > 75) return null;
-  if (current.radiant_nw_lead == null || baseline.radiant_nw_lead == null) return null;
-  return {
-    nwDelta: current.radiant_nw_lead - baseline.radiant_nw_lead,
-    radiantKills: Math.max(0, (current.radiant_kills ?? 0) - (baseline.radiant_kills ?? 0)),
-    direKills: Math.max(0, (current.dire_kills ?? 0) - (baseline.dire_kills ?? 0))
-  };
+  if (current?.game_time_seconds == null) return {};
+  const result: Record<number, { nwDelta: number; radiantKills: number; direKills: number }> = {};
+  for (const seconds of [60, 180, 300, 600]) {
+    const target = current.game_time_seconds - seconds;
+    const baseline = nearestGameTime(points, target);
+    const tolerance = Math.min(90, Math.max(20, seconds * 0.25));
+    if (baseline?.game_time_seconds == null || Math.abs(baseline.game_time_seconds - target) > tolerance) continue;
+    if (current.radiant_nw_lead == null || baseline.radiant_nw_lead == null) continue;
+    result[seconds] = {
+      nwDelta: current.radiant_nw_lead - baseline.radiant_nw_lead,
+      radiantKills: Math.max(0, (current.radiant_kills ?? 0) - (baseline.radiant_kills ?? 0)),
+      direKills: Math.max(0, (current.dire_kills ?? 0) - (baseline.dire_kills ?? 0))
+    };
+  }
+  return result;
 }
 
 function nearestGameTime(points: LiveObservation[], target: number) {
   return points.reduce<LiveObservation | null>((best, item) => {
     if (item.game_time_seconds == null) return best;
-    if (!best?.game_time_seconds) return item;
+    if (best?.game_time_seconds == null) return item;
     return Math.abs(item.game_time_seconds - target) < Math.abs(best.game_time_seconds - target) ? item : best;
   }, null);
 }
