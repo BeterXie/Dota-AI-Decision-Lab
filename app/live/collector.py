@@ -38,13 +38,25 @@ class DltvSocketCollector:
         received_at: datetime | None = None,
     ) -> None:
         received_at = received_at or datetime.now(UTC)
+        is_match_event = event_name.startswith("__nd2_match_")
         async with self._session_factory() as session, session.begin():
+            previous_generation = None
+            if is_match_event:
+                previous_generation = await session.scalar(
+                    select(ProviderRawEvent.reconnect_generation)
+                    .where(
+                        ProviderRawEvent.provider == "dltv",
+                        ProviderRawEvent.event_type == "DLTV_FAST_SOCKET",
+                        ProviderRawEvent.provider_key == event_name,
+                    )
+                    .order_by(ProviderRawEvent.received_at.desc())
+                    .limit(1)
+                )
+
             raw_event_id = await self._raw_events.append(
                 session,
                 provider="dltv",
-                event_type=(
-                    "DLTV_FAST_SOCKET" if event_name.startswith("__nd2_match_") else "DLTV_SERIES"
-                ),
+                event_type="DLTV_FAST_SOCKET" if is_match_event else "DLTV_SERIES",
                 provider_key=event_name,
                 payload=payload,
                 received_at=received_at,
@@ -70,7 +82,7 @@ class DltvSocketCollector:
                         ),
                     )
                 return
-            if not event_name.startswith("__nd2_match_"):
+            if not is_match_event:
                 return
             try:
                 valve_match_id = int(event_name.rsplit("_", 1)[1])
@@ -99,6 +111,24 @@ class DltvSocketCollector:
                     ),
                 )
                 return
+
+            if previous_generation is not None and reconnect_generation > previous_generation:
+                await self._events.record(
+                    session,
+                    DomainEvent(
+                        event_type=DomainEventType.DLTV_MATCH_DISCOVERED,
+                        aggregate_type="dltv_match",
+                        aggregate_id=str(valve_match_id),
+                        dedupe_key=f"dltv-reconnect:{valve_match_id}:{reconnect_generation}",
+                        payload={
+                            "valve_match_id": valve_match_id,
+                            "reconnect_generation": reconnect_generation,
+                            "reason": "SOCKET_RECONNECT_RECOVERY",
+                        },
+                        occurred_at=received_at,
+                    ),
+                )
+
             latest = await session.scalar(
                 select(DltvLiveObservationRecord)
                 .where(DltvLiveObservationRecord.valve_match_id == valve_match_id)
