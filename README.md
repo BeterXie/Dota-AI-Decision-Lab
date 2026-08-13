@@ -107,8 +107,19 @@ if ($LASTEXITCODE -ne 0) { throw "Production replay failed with exit code $LASTE
 
 The deterministic replay harness verifies ordering, duplicate delivery, restart recovery, no future leakage, degradation, and deterministic snapshot hashes. The production lifecycle replay creates an isolated PostgreSQL database, applies real Alembic migrations, and drives production collectors, historical fallback, PREMATCH/POST_DRAFT/LIVE_BASIC snapshots, AI isolation, closing odds, settlement, evaluation, and durable job lease recovery. `tools/replay_timeline.py` accepts owner-recorded JSON timelines together with explicit `--canonical-map-id` and `--valve-match-id` arguments. Sanitized provider fixtures under `tests/fixtures` cover RayBet, DLTV, Historical, and pinned R.O.S.H. contracts.
 
+## Shadow runtime audit
+
+After a real shadow map has been captured, export the runtime-integrity evidence for that canonical map:
+
+```powershell
+uv run python tools\shadow_run_audit.py --canonical-map-id '<CANONICAL_MAP_UUID>' --output '.\shadow-audit.json'
+if ($LASTEXITCODE -ne 0) { throw "Shadow runtime audit failed with exit code $LASTEXITCODE" }
+```
+
+`shadow-run-audit-v1` reports RayBet/DLTV provider evidence, map-side identity stability, DLTV connection transitions and durable reconnect recovery coverage, immutable LIVE_BASIC field-freshness evidence, persisted temporal-alignment status/confidence, snapshot modes and quality warnings/blockers, and AI-to-snapshot hash alignment. Its integrity checks return `PASS`, `WARN`, `FAIL`, or `NOT_APPLICABLE` only from persisted evidence. A single audit with passing checks is evidence about that captured map; it is not a declaration that the entire system is production-ready. Closing odds, settlement, evaluation, and durable-job lifecycle remain independently auditable through their persisted records, dashboard views, and production lifecycle replay.
+
 ## Architecture invariants
 
-The implementation contract is defined by `AGENTS.md`, `docs/ARCHITECTURE.md`, and the normative addendum `docs/MAP_SIDE_IDENTITY.md`. Provider data is raw-first and append-oriented; unknown values remain unknown; historical facts obey `first_usable_at` and `knowledge_cutoff`; snapshots are immutable; every AI receives the same canonical `snapshot_hash`; and unsafe live synchronization degrades to a valid lower decision mode. RayBet pairs must pass strict identity/freshness/skew checks, DLTV freshness uses effective state changes as well as message receipt, and closing/result evidence remains explicit and auditable.
+The implementation contract is defined by `AGENTS.md`, `docs/ARCHITECTURE.md`, and the normative addendum `docs/MAP_SIDE_IDENTITY.md`. Provider data is raw-first and append-oriented; unknown values remain unknown; historical facts obey `first_usable_at` and `knowledge_cutoff`; snapshots are immutable; every AI receives the same canonical `snapshot_hash`; and unsafe live synchronization degrades to a valid lower decision mode. RayBet pairs must pass strict identity/freshness/skew checks, DLTV LIVE_BASIC freshness is derived from the oldest required field's latest explicit raw observation rather than socket receipt alone, and closing/result evidence remains explicit and auditable.
 
 Map-side identity is an explicit correctness gate: canonical Team A / Team B ordering is not Radiant / Dire ordering, and DLTV `first_team` is never treated as Radiant by position. POST_DRAFT or LIVE decision inputs may bind R.O.S.H., roster, Player×Hero, or live side-relative features to Team A / Team B only after the immutable snapshot contains verified Radiant / Dire canonical team identity. See `docs/MAP_SIDE_IDENTITY.md` for the evidence, temporal, degradation, UI, and regression requirements.
