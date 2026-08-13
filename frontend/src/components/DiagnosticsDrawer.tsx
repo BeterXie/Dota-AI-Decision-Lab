@@ -10,6 +10,22 @@ interface DiagnosticsDrawerProps {
   match?: MapSummary | MapDetail | null;
 }
 
+const LIVE_BASIC_FIELDS = [
+  "game_time_seconds",
+  "radiant_kills",
+  "dire_kills",
+  "radiant_nw_lead"
+] as const;
+
+type LiveBasicField = (typeof LIVE_BASIC_FIELDS)[number];
+
+interface LiveFieldFreshnessView {
+  complete: boolean | null;
+  effectiveAgeSeconds: number | null;
+  agesSeconds: Partial<Record<LiveBasicField, number>>;
+  observedAt: Partial<Record<LiveBasicField, string>>;
+}
+
 export const DiagnosticsDrawer: React.FC<DiagnosticsDrawerProps> = ({
   isOpen,
   onClose,
@@ -17,12 +33,15 @@ export const DiagnosticsDrawer: React.FC<DiagnosticsDrawerProps> = ({
   jobs,
   match
 }) => {
-  const { locale, t } = useI18n();
+  const { locale } = useI18n();
 
   if (!isOpen) return null;
 
   const workers = Object.values(runtime?.workers || {});
   const dependencies = Object.values(runtime?.dependencies || {});
+  const detail = isMapDetail(match) ? match : undefined;
+  const sideIdentity = detail?.snapshot_payload?.identity?.side_identity;
+  const liveFieldFreshness = readLiveFieldFreshness(detail);
 
   return (
     <div className="drawer-backdrop" onClick={onClose}>
@@ -40,7 +59,6 @@ export const DiagnosticsDrawer: React.FC<DiagnosticsDrawerProps> = ({
         </div>
 
         <div className="drawer-body">
-          {/* Snapshot metadata if match is selected */}
           {match && (
             <div className="drawer-section">
               <h4>Active Match Snapshot</h4>
@@ -71,7 +89,96 @@ export const DiagnosticsDrawer: React.FC<DiagnosticsDrawerProps> = ({
             </div>
           )}
 
-          {/* Subsystem Dependencies */}
+          {detail && (
+            <div className="drawer-section">
+              <h4>{locale === "zh-CN" ? "比赛身份与 Live Freshness 审计" : "Map Identity & Live Freshness Audit"}</h4>
+              <div className="diag-kv-grid">
+                <div className="kv-item">
+                  <span className="k">Side Status:</span>
+                  <span className="v mono">{sideIdentity?.status || "UNAVAILABLE"}</span>
+                </div>
+                <div className="kv-item">
+                  <span className="k">Radiant:</span>
+                  <span className="v mono">
+                    {teamLabel(detail, sideIdentity?.radiant_team_id)}
+                  </span>
+                </div>
+                <div className="kv-item">
+                  <span className="k">Dire:</span>
+                  <span className="v mono">
+                    {teamLabel(detail, sideIdentity?.dire_team_id)}
+                  </span>
+                </div>
+                <div className="kv-item">
+                  <span className="k">Side Source:</span>
+                  <span className="v mono">{sideIdentity?.source || "—"}</span>
+                </div>
+                <div className="kv-item">
+                  <span className="k">Side Confidence:</span>
+                  <span className="v mono">
+                    {sideIdentity?.confidence != null
+                      ? sideIdentity.confidence.toFixed(3)
+                      : "—"}
+                  </span>
+                </div>
+                <div className="kv-item">
+                  <span className="k">Side Observed At:</span>
+                  <span className="v mono">{sideIdentity?.observed_at || "—"}</span>
+                </div>
+                <div className="kv-item">
+                  <span className="k">Side Blocker:</span>
+                  <span className="v mono">{sideIdentity?.blocker || "—"}</span>
+                </div>
+                <div className="kv-item">
+                  <span className="k">Live Effective Age:</span>
+                  <span className="v mono">
+                    {formatAge(liveFieldFreshness?.effectiveAgeSeconds)}
+                  </span>
+                </div>
+              </div>
+
+              <div className="diag-table-container">
+                <table className="diag-table">
+                  <thead>
+                    <tr>
+                      <th>{locale === "zh-CN" ? "LIVE_BASIC 字段" : "LIVE_BASIC Field"}</th>
+                      <th>{locale === "zh-CN" ? "字段年龄" : "Field Age"}</th>
+                      <th>{locale === "zh-CN" ? "最后明确观测" : "Last Explicit Observation"}</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {liveFieldFreshness ? (
+                      LIVE_BASIC_FIELDS.map((field) => (
+                        <tr key={field}>
+                          <td className="mono">{liveFieldLabel(field, locale)}</td>
+                          <td className="mono">
+                            {formatAge(liveFieldFreshness.agesSeconds[field])}
+                          </td>
+                          <td className="mono">
+                            {liveFieldFreshness.observedAt[field] || "—"}
+                          </td>
+                        </tr>
+                      ))
+                    ) : (
+                      <tr>
+                        <td colSpan={3}>
+                          {locale === "zh-CN"
+                            ? "最新 Snapshot 尚无字段级 Live freshness 证据"
+                            : "Latest snapshot has no field-level live freshness evidence"}
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              {liveFieldFreshness && (
+                <div className="mono">
+                  {locale === "zh-CN" ? "Required fields complete" : "Required fields complete"}: {liveFieldFreshness.complete === null ? "—" : liveFieldFreshness.complete ? "YES" : "NO"}
+                </div>
+              )}
+            </div>
+          )}
+
           <div className="drawer-section">
             <h4>Subsystem Dependencies ({dependencies.length})</h4>
             <div className="diag-table-container">
@@ -110,7 +217,6 @@ export const DiagnosticsDrawer: React.FC<DiagnosticsDrawerProps> = ({
             </div>
           </div>
 
-          {/* Workers Health */}
           <div className="drawer-section">
             <h4>Worker Processes ({workers.length})</h4>
             <div className="diag-table-container">
@@ -149,7 +255,6 @@ export const DiagnosticsDrawer: React.FC<DiagnosticsDrawerProps> = ({
             </div>
           </div>
 
-          {/* Job Queue Status */}
           {jobs && (
             <div className="drawer-section">
               <h4>Durable Job Queue Summary</h4>
@@ -168,3 +273,59 @@ export const DiagnosticsDrawer: React.FC<DiagnosticsDrawerProps> = ({
     </div>
   );
 };
+
+function isMapDetail(match: MapSummary | MapDetail | null | undefined): match is MapDetail {
+  return Boolean(match && "snapshot_payload" in match);
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function readLiveFieldFreshness(detail: MapDetail | undefined): LiveFieldFreshnessView | null {
+  const raw = detail?.snapshot_payload?.quality?.live_field_freshness;
+  if (!isRecord(raw)) return null;
+
+  const rawAges = isRecord(raw.ages_seconds) ? raw.ages_seconds : {};
+  const rawObservedAt = isRecord(raw.observed_at) ? raw.observed_at : {};
+  const agesSeconds: Partial<Record<LiveBasicField, number>> = {};
+  const observedAt: Partial<Record<LiveBasicField, string>> = {};
+
+  for (const field of LIVE_BASIC_FIELDS) {
+    const age = rawAges[field];
+    if (typeof age === "number" && Number.isFinite(age)) agesSeconds[field] = age;
+    const observed = rawObservedAt[field];
+    if (typeof observed === "string") observedAt[field] = observed;
+  }
+
+  return {
+    complete: typeof raw.complete === "boolean" ? raw.complete : null,
+    effectiveAgeSeconds:
+      typeof raw.effective_age_seconds === "number" && Number.isFinite(raw.effective_age_seconds)
+        ? raw.effective_age_seconds
+        : null,
+    agesSeconds,
+    observedAt
+  };
+}
+
+function teamLabel(match: MapDetail, teamId: string | null | undefined): string {
+  if (!teamId) return "—";
+  if (match.team_a?.id === teamId) return `${match.team_a.name} · TEAM A`;
+  if (match.team_b?.id === teamId) return `${match.team_b.name} · TEAM B`;
+  return teamId;
+}
+
+function formatAge(value: number | null | undefined): string {
+  return value != null && Number.isFinite(value) ? `${value.toFixed(1)}s` : "—";
+}
+
+function liveFieldLabel(field: LiveBasicField, locale: string): string {
+  const labels: Record<LiveBasicField, [string, string]> = {
+    game_time_seconds: ["比赛时间", "Game time"],
+    radiant_kills: ["天辉击杀", "Radiant kills"],
+    dire_kills: ["夜魇击杀", "Dire kills"],
+    radiant_nw_lead: ["天辉经济差", "Radiant NW lead"]
+  };
+  return labels[field][locale === "zh-CN" ? 0 : 1];
+}
