@@ -16,6 +16,7 @@ from app.models import (
     ProviderMatchMapping,
     ProviderRawEvent,
 )
+from app.shadow_audit_snapshot import live_freshness, snapshot_quality
 
 
 async def build_shadow_run_audit(
@@ -37,7 +38,6 @@ async def build_shadow_run_audit(
             )
         ).all()
     )
-    modes = Counter(snapshot.mode for snapshot in snapshots)
     provider_evidence, dltv_raw = await _provider_evidence(session, canonical_map)
     reconnect = _reconnect_report(
         dltv_raw,
@@ -55,10 +55,8 @@ async def build_shadow_run_audit(
         "provider_evidence": provider_evidence,
         "side_identity": _side_identity(snapshots),
         "dltv_reconnect": reconnect,
-        "snapshots": {
-            "count": len(snapshots),
-            "mode_counts": dict(modes),
-        },
+        "live_freshness": live_freshness(snapshots),
+        "snapshots": snapshot_quality(snapshots),
     }
 
 
