@@ -12,7 +12,7 @@ from app.repositories.raw import RawEventRepository
 
 
 @pytest.mark.asyncio
-async def test_dltv_reconnect_requests_generation_scoped_bootstrap_recovery() -> None:
+async def test_dltv_reconnect_uses_connection_identity_across_generation_reset() -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
@@ -40,22 +40,22 @@ async def test_dltv_reconnect_requests_generation_scoped_bootstrap_recovery() ->
     await collector.collect(
         event_name,
         {},
-        "connection-1",
-        1,
+        "connection-before-restart",
+        4,
         received_at=started_at,
     )
     await collector.collect(
         event_name,
         {},
-        "connection-2",
-        2,
+        "connection-after-restart",
+        1,
         received_at=started_at + timedelta(seconds=5),
     )
     await collector.collect(
         event_name,
         {},
-        "connection-2",
-        2,
+        "connection-after-restart",
+        1,
         received_at=started_at + timedelta(seconds=6),
     )
 
@@ -71,10 +71,15 @@ async def test_dltv_reconnect_requests_generation_scoped_bootstrap_recovery() ->
         )
 
     assert len(records) == 1
-    assert records[0].dedupe_key == f"dltv-reconnect:{valve_match_id}:2"
+    assert records[0].dedupe_key == (
+        f"dltv-reconnect:{valve_match_id}:connection-after-restart"
+    )
     assert records[0].payload == {
         "valve_match_id": valve_match_id,
-        "reconnect_generation": 2,
+        "connection_id": "connection-after-restart",
+        "previous_connection_id": "connection-before-restart",
+        "reconnect_generation": 1,
+        "previous_reconnect_generation": 4,
         "reason": "SOCKET_RECONNECT_RECOVERY",
     }
     await engine.dispose()
