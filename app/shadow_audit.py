@@ -31,6 +31,7 @@ async def build_shadow_run_audit(
         ).all()
     )
     modes = Counter(snapshot.mode for snapshot in snapshots)
+    side = _side_identity(snapshots)
     return {
         "schema_version": "shadow-run-audit-v1",
         "generated_at": generated_at.isoformat(),
@@ -40,8 +41,33 @@ async def build_shadow_run_audit(
             "map_number": canonical_map.map_number,
             "valve_match_id": canonical_map.valve_match_id,
         },
+        "side_identity": side,
         "snapshots": {
             "count": len(snapshots),
             "mode_counts": dict(modes),
         },
+    }
+
+
+def _side_identity(snapshots: list[DecisionSnapshotRecord]) -> dict[str, Any]:
+    statuses: Counter[str] = Counter()
+    pairs: set[tuple[str, str]] = set()
+    latest = None
+    for snapshot in snapshots:
+        identity = snapshot.canonical_payload.get("identity", {})
+        raw = identity.get("side_identity") if isinstance(identity, dict) else None
+        if not isinstance(raw, dict):
+            continue
+        status = str(raw.get("status") or "UNKNOWN")
+        statuses[status] += 1
+        radiant = raw.get("radiant_team_id")
+        dire = raw.get("dire_team_id")
+        if status == "RESOLVED" and isinstance(radiant, str) and isinstance(dire, str):
+            pairs.add((radiant, dire))
+        latest = raw
+    return {
+        "status_counts": dict(statuses),
+        "resolved_pair_count": len(pairs),
+        "stable": len(pairs) <= 1 and statuses.get("CONFLICT", 0) == 0,
+        "latest": latest,
     }
