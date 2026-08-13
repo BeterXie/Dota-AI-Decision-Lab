@@ -46,7 +46,7 @@ test("renders player-first empty state and persists locale", async () => {
 
   const first = renderApp();
   expect(await screen.findByText("No discovered matches")).toBeInTheDocument();
-  expect(screen.getByText("Waiting for canonical map discovery")).toBeInTheDocument();
+  expect(screen.getByText("Waiting for RayBet match discovery.")).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("button", { name: "中文" }));
   expect(await screen.findByText("暂无已发现比赛")).toBeInTheDocument();
@@ -266,7 +266,7 @@ test("renders player-first match, AI strip, overview and diagnostics", async () 
   expect(screen.getByText("Yatoro")).toBeInTheDocument();
   expect(screen.getByText("23savage")).toBeInTheDocument();
 
-  fireEvent.click(screen.getByRole("button", { name: /System readiness/i }));
+  fireEvent.click(screen.getByRole("button", { name: /System/i }));
   expect(await screen.findByRole("heading", { name: "Diagnostics" })).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("button", { name: "Close diagnostics" }));
