@@ -41,9 +41,9 @@ export const LiveStateCard: React.FC<LiveStateCardProps> = ({ match }) => {
             <div className="live-stat-row">
               <span className="stat-label">{t("kills")}</span>
               <span className="stat-value">
-                <span className="radiant-txt">{live.radiant_kills ?? "—"}</span>
-                {" - "}
-                <span className="dire-txt">{live.dire_kills ?? "—"}</span>
+                <span className="radiant-txt">{locale === "zh-CN" ? "天辉" : "Radiant"} {live.radiant_kills ?? "—"}</span>
+                {" · "}
+                <span className="dire-txt">{live.dire_kills ?? "—"} {locale === "zh-CN" ? "夜魇" : "Dire"}</span>
               </span>
             </div>
             <div className="live-stat-row">
@@ -58,7 +58,7 @@ export const LiveStateCard: React.FC<LiveStateCardProps> = ({ match }) => {
             </div>
             <div className="live-stat-row">
               <span className="stat-label">{t("firstBlood")}</span>
-              <span className="stat-value">{live.first_blood || "—"}</span>
+              <span className="stat-value">{formatMapSide(live.first_blood, locale)}</span>
             </div>
           </div>
           <div className="live-sync-footer">
@@ -73,3 +73,11 @@ export const LiveStateCard: React.FC<LiveStateCardProps> = ({ match }) => {
     </div>
   );
 };
+
+function formatMapSide(value: string | null | undefined, locale: string): string {
+  if (!value) return "—";
+  const normalized = value.toLowerCase();
+  if (normalized.includes("radiant")) return locale === "zh-CN" ? "天辉" : "Radiant";
+  if (normalized.includes("dire")) return locale === "zh-CN" ? "夜魇" : "Dire";
+  return value;
+}
