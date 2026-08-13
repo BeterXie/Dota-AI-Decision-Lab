@@ -8,6 +8,9 @@ interface PlayerMatchHeaderProps {
   match: MapSummary | MapDetail;
 }
 
+const teamAStyle: React.CSSProperties = { background: "rgba(124,156,255,.12)", color: "#7C9CFF", border: "1px solid rgba(124,156,255,.30)" };
+const teamBStyle: React.CSSProperties = { background: "rgba(156,130,255,.12)", color: "#9C82FF", border: "1px solid rgba(156,130,255,.30)" };
+
 export const PlayerMatchHeader: React.FC<PlayerMatchHeaderProps> = ({ match }) => {
   const { locale, t } = useI18n();
   const teamA = match.team_a?.name || t("unknownTeam");
@@ -41,7 +44,7 @@ export const PlayerMatchHeader: React.FC<PlayerMatchHeaderProps> = ({ match }) =
 
       <div className="header-scoreboard player-scoreboard">
         <div className="team-cell team-radiant">
-          <div className="team-logo-avatar team-a-order">{getTeamAbbreviation(teamA)}</div>
+          <div className="team-logo-avatar team-a-order" style={teamAStyle}>{getTeamAbbreviation(teamA)}</div>
           <div className="team-info">
             <span className="team-side-label">TEAM A</span>
             <h2 className="team-name">{teamA}</h2>
@@ -64,7 +67,7 @@ export const PlayerMatchHeader: React.FC<PlayerMatchHeaderProps> = ({ match }) =
             <h2 className="team-name">{teamB}</h2>
             <div className="team-odds-pill">{formatOdds(pair?.teamB.price)}</div>
           </div>
-          <div className="team-logo-avatar team-b-order">{getTeamAbbreviation(teamB)}</div>
+          <div className="team-logo-avatar team-b-order" style={teamBStyle}>{getTeamAbbreviation(teamB)}</div>
         </div>
       </div>
 
