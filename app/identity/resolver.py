@@ -6,7 +6,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.identity import ProviderMatch
-from app.identity.aliases import normalize_alias
+from app.identity.aliases import equivalent_team_aliases, normalize_alias
 from app.models import (
     CanonicalEvent,
     CanonicalHero,
@@ -260,10 +260,11 @@ class IdentityResolver:
         if mapping is not None:
             return mapping.canonical_team_id
         normalized = normalize_alias(name)
+        equivalent_aliases = equivalent_team_aliases(name)
         candidates = list(
             (
                 await session.scalars(
-                    select(TeamAlias).where(TeamAlias.normalized_name == normalized)
+                    select(TeamAlias).where(TeamAlias.normalized_name.in_(equivalent_aliases))
                 )
             ).all()
         )

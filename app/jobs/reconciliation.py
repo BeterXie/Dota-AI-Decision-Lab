@@ -1,7 +1,8 @@
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
+from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.eligibility import ai_record_is_game_time_eligible
@@ -13,19 +14,24 @@ from app.models import (
     DecisionEvaluationRecord,
     DecisionFutureOdds,
     DecisionSnapshotRecord,
+    DltvLiveObservationRecord,
     DomainEventRecord,
     DraftMinuteCurveRecord,
     DraftSnapshotRecord,
+    DurableJobRecord,
     HistoricalMapRecord,
     MapResultRecord,
+    OddsObservationRecord,
     ProviderMatchMapping,
 )
+from app.time import ensure_utc
 
 
 @dataclass(frozen=True)
 class ReconciliationResult:
     reclaimed_jobs: int
     draft_jobs: int
+    snapshot_jobs: int
     ai_jobs: int
     future_odds_jobs: int
     settlement_jobs: int
@@ -53,6 +59,7 @@ class ReconciliationService:
             session, lease_seconds=self._lease_seconds, now=now
         )
         draft_jobs = await self._reconcile_drafts(session)
+        snapshot_jobs = await self._reconcile_snapshots(session, now=now)
         ai_jobs = await self._reconcile_ai(session)
         future_jobs = await self._reconcile_future_odds(session)
         settlement_jobs = await self._reconcile_settlements(session)
@@ -60,6 +67,7 @@ class ReconciliationService:
         return ReconciliationResult(
             reclaimed_jobs=reclaimed,
             draft_jobs=draft_jobs,
+            snapshot_jobs=snapshot_jobs,
             ai_jobs=ai_jobs,
             future_odds_jobs=future_jobs,
             settlement_jobs=settlement_jobs,
@@ -94,6 +102,105 @@ class ReconciliationService:
                 },
             )
             created += 1
+        return created
+
+    async def _reconcile_snapshots(self, session: AsyncSession, *, now: datetime) -> int:
+        """Requeue processed snapshot triggers that produced no snapshot.
+
+        A provider identity merge can make an earlier, correctly failed
+        BUILD_SNAPSHOT job eligible on replay (for example, the market and
+        DLTV map used to point at different canonical series).  The original
+        job must remain immutable for auditability, so reconciliation creates
+        one durable replay job per trigger instead of mutating job history.
+        """
+        trigger_types = {"DECISION_CHECKPOINT_DUE"}
+        events = list(
+            (
+                await session.scalars(
+                    select(DomainEventRecord)
+                    .where(
+                        DomainEventRecord.event_type.in_(trigger_types),
+                        DomainEventRecord.processed_at.is_not(None),
+                        DomainEventRecord.occurred_at >= now - timedelta(hours=3),
+                    )
+                    .order_by(DomainEventRecord.occurred_at.desc())
+                )
+            ).all()
+        )
+        events_by_map: dict[str, list[DomainEventRecord]] = {}
+        for event in events:
+            map_id = (event.payload or {}).get("canonical_map_id")
+            checkpoint = (event.payload or {}).get("checkpoint_minute")
+            if not isinstance(map_id, str) or not isinstance(checkpoint, int) or checkpoint < 10:
+                continue
+            events_by_map.setdefault(map_id, []).append(event)
+
+        created = 0
+        for canonical_map_id, map_events in events_by_map.items():
+            try:
+                map_id_value = UUID(canonical_map_id)
+            except ValueError:
+                continue
+            snapshot_exists = await session.scalar(
+                select(DecisionSnapshotRecord.id)
+                .where(DecisionSnapshotRecord.canonical_map_id == map_id_value)
+                .limit(1)
+            )
+            if snapshot_exists is not None:
+                continue
+            live_at = await session.scalar(
+                select(DltvLiveObservationRecord.received_at)
+                .where(DltvLiveObservationRecord.canonical_map_id == map_id_value)
+                .order_by(DltvLiveObservationRecord.received_at.desc())
+                .limit(1)
+            )
+            if live_at is None or ensure_utc(live_at) < now - timedelta(hours=3):
+                continue
+            for event in map_events:
+                payload = event.payload or {}
+                decision_at = payload.get("decision_at")
+                try:
+                    decision_at_value = (
+                        datetime.fromisoformat(decision_at).astimezone(UTC)
+                        if isinstance(decision_at, str)
+                        else ensure_utc(event.occurred_at)
+                    )
+                except ValueError:
+                    continue
+                market_team_count = await session.scalar(
+                    select(func.count(func.distinct(OddsObservationRecord.selection_team_id))).where(
+                        OddsObservationRecord.canonical_map_id == map_id_value,
+                        OddsObservationRecord.market_type == "Winner",
+                        OddsObservationRecord.selection_team_id.is_not(None),
+                        OddsObservationRecord.received_at <= decision_at_value,
+                    )
+                )
+                if (market_team_count or 0) < 2:
+                    continue
+                dedupe_key = f"reconcile-snapshot-v2:{event.id}"
+                existing = await session.scalar(
+                    select(DurableJobRecord).where(
+                        DurableJobRecord.job_type == JobType.BUILD_SNAPSHOT.value,
+                        DurableJobRecord.dedupe_key == dedupe_key,
+                    )
+                )
+                if existing is not None:
+                    if existing.status in {"PENDING", "RUNNING", "RETRY_WAIT"}:
+                        break
+                    continue
+                await self._jobs.enqueue(
+                    session,
+                    job_type=JobType.BUILD_SNAPSHOT,
+                    dedupe_key=dedupe_key,
+                    payload={
+                        "canonical_map_id": canonical_map_id,
+                        "canonical_series_id": payload.get("canonical_series_id"),
+                        "decision_at": decision_at_value.isoformat(),
+                        "reconciliation_event_id": str(event.id),
+                    },
+                )
+                created += 1
+                break
         return created
 
     async def _reconcile_ai(self, session: AsyncSession) -> int:

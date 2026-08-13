@@ -10,7 +10,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db import Base
 from app.events.outbox import EventRepository
-from app.market.collector import RayBetOddsCollector
+from app.market.collector import RayBetOddsCollector, _map_number
 from app.market.odds_registry import OddsRegistry
 from app.models import (
     DomainEventRecord,
@@ -92,6 +92,16 @@ def test_recorded_match_and_odds_payloads_preserve_provider_contract() -> None:
     assert [item.raw_status for item in bootstrap] == [4, 5]
     assert socket[0].raw_status == 1
     assert socket[0].provider_updated_at == datetime.fromtimestamp(1786467681, tz=UTC)
+
+
+@pytest.mark.parametrize(
+    ("stage", "expected"),
+    (("r1", 1), ("Map r2", 2), ("map3", 3), ("Map 4", 4), ("q1", None), ("1st", None)),
+)
+def test_only_explicit_map_stages_resolve_map_number(
+    stage: str, expected: int | None
+) -> None:
+    assert _map_number(stage) == expected
 
 
 @pytest.mark.asyncio

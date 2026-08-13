@@ -1,7 +1,14 @@
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-from app.temporal.aligner import CalibrationSignal, estimate_synchronization
+import pytest
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+from app.config import Settings
+from app.db import Base
+from app.models import LiveSyncEstimateRecord
+from app.temporal.aligner import CalibrationSignal, TemporalAligner, estimate_synchronization
 
 
 def _signals(base: datetime, offsets: tuple[float, ...]) -> list[CalibrationSignal]:
@@ -97,3 +104,32 @@ def test_high_jitter_never_becomes_safe() -> None:
 
     assert estimate.jitter_seconds is not None
     assert estimate.status != "SAFE"
+
+
+@pytest.mark.asyncio
+async def test_calculate_reuses_existing_estimate_for_same_checkpoint() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    map_id = uuid4()
+    calculated_at = datetime(2026, 8, 13, 8, 0, tzinfo=UTC)
+
+    async with factory() as session, session.begin():
+        aligner = TemporalAligner(Settings())
+        first = await aligner.calculate(
+            session,
+            canonical_map_id=map_id,
+            as_of=calculated_at,
+        )
+        await session.flush()
+        second = await aligner.calculate(
+            session,
+            canonical_map_id=map_id,
+            as_of=calculated_at,
+        )
+        count = await session.scalar(select(func.count()).select_from(LiveSyncEstimateRecord))
+
+    assert second == first
+    assert count == 1
+    await engine.dispose()

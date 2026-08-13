@@ -16,6 +16,7 @@ from app.models import (
     LiveSyncEstimateRecord,
     OddsObservationRecord,
 )
+from app.time import ensure_utc
 
 
 @dataclass(frozen=True)
@@ -196,6 +197,14 @@ class TemporalAligner:
         canonical_map_id: UUID,
         as_of: datetime,
     ) -> LiveSynchronizationEstimate:
+        existing = await session.scalar(
+            select(LiveSyncEstimateRecord).where(
+                LiveSyncEstimateRecord.canonical_map_id == canonical_map_id,
+                LiveSyncEstimateRecord.calculated_at == as_of,
+            )
+        )
+        if existing is not None:
+            return _estimate_from_record(existing)
         odds = list(
             reversed(
                 (
@@ -263,6 +272,23 @@ class TemporalAligner:
                 )
             )
         return estimate
+
+
+def _estimate_from_record(record: LiveSyncEstimateRecord) -> LiveSynchronizationEstimate:
+    return LiveSynchronizationEstimate(
+        canonical_map_id=str(record.canonical_map_id),
+        estimated_lag_seconds=record.estimated_lag_seconds,
+        p50_seconds=record.p50_seconds,
+        p90_seconds=record.p90_seconds,
+        jitter_seconds=record.jitter_seconds,
+        sample_size=record.sample_size,
+        accepted_pair_ratio=record.accepted_pair_ratio,
+        ambiguous_ratio=record.ambiguous_ratio,
+        outlier_ratio=record.outlier_ratio,
+        confidence=record.confidence,
+        status=record.status,
+        calculated_at=ensure_utc(record.calculated_at),
+    )
 
 
 def _raybet_signals(

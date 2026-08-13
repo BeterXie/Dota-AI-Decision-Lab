@@ -3,7 +3,7 @@ from uuid import UUID
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.identity.aliases import normalize_alias
+from app.identity.aliases import equivalent_team_aliases, normalize_alias
 from app.models import (
     CanonicalSeries,
     CanonicalTeam,
@@ -38,9 +38,8 @@ class HistoricalTeamResolver:
         for team_id in canonical_team_ids:
             team = await session.get(CanonicalTeam, team_id)
             if team is not None:
-                names.setdefault(normalize_alias(team.name), set()).add(team.id)
-                for alternate in _known_provider_names(team.name):
-                    names.setdefault(normalize_alias(alternate), set()).add(team.id)
+                for alias in equivalent_team_aliases(team.name):
+                    names.setdefault(alias, set()).add(team.id)
             aliases = list(
                 (
                     await session.scalars(
@@ -49,7 +48,8 @@ class HistoricalTeamResolver:
                 ).all()
             )
             for alias in aliases:
-                names.setdefault(alias.normalized_name, set()).add(team_id)
+                for equivalent in equivalent_team_aliases(alias.normalized_name):
+                    names.setdefault(equivalent, set()).add(team_id)
 
         unresolved = set(canonical_team_ids)
         existing_ids = set(
@@ -222,22 +222,10 @@ class HistoricalTeamResolver:
         return resolved
 
 
-def _known_provider_names(name: str) -> tuple[str, ...]:
-    aliases = {
-        "liquid": ("Team Liquid",),
-        "spirit": ("Team Spirit",),
-        "level up": ("Level UP", "Level UP esports"),
-        "aurora": ("Aurora Gaming", "Aurora.1xBet"),
-    }
-    return aliases.get(normalize_alias(name), ())
-
-
 def _names_match(canonical_name: str, provider_name: str) -> bool:
-    normalized_provider = normalize_alias(provider_name)
-    return normalized_provider in {
-        normalize_alias(canonical_name),
-        *(normalize_alias(alias) for alias in _known_provider_names(canonical_name)),
-    }
+    return bool(
+        equivalent_team_aliases(canonical_name) & equivalent_team_aliases(provider_name)
+    )
 
 
 async def _merge_placeholder_team(

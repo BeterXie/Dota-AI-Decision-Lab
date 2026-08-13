@@ -13,9 +13,11 @@ from app.jobs.reconciliation import ReconciliationService
 from app.jobs.repository import JobRepository
 from app.models import (
     DecisionSnapshotRecord,
+    DltvLiveObservationRecord,
     DomainEventRecord,
     DurableJobRecord,
     HistoricalMapRecord,
+    OddsObservationRecord,
     ProviderMatchMapping,
 )
 from app.snapshots.repository import SnapshotRepository
@@ -233,6 +235,110 @@ async def test_reconciliation_only_enqueues_ai_after_ten_minutes() -> None:
             await session.scalar(select(func.count()).select_from(DecisionSnapshotRecord))
             == 2
         )
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_replays_processed_snapshot_trigger_without_snapshot() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    jobs = JobRepository()
+    now = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
+    canonical_map_id = uuid4()
+
+    async with factory() as session, session.begin():
+        event = DomainEventRecord(
+            event_type=DomainEventType.DECISION_CHECKPOINT_DUE.value,
+            aggregate_type="canonical_map",
+            aggregate_id=str(canonical_map_id),
+            dedupe_key=f"checkpoint:{canonical_map_id}:10",
+            payload={
+                "canonical_map_id": str(canonical_map_id),
+                "decision_at": now.isoformat(),
+                "checkpoint_minute": 10,
+            },
+            occurred_at=now,
+            processed_at=now,
+        )
+        session.add(event)
+        team_a_id = uuid4()
+        team_b_id = uuid4()
+        session.add_all(
+            [
+                DltvLiveObservationRecord(
+                    canonical_map_id=canonical_map_id,
+                    valve_match_id=1,
+                    game_time_seconds=600,
+                    radiant_kills=1,
+                    dire_kills=1,
+                    radiant_nw_lead=0,
+                    first_blood=None,
+                    source_game_time=600,
+                    received_at=now,
+                    payload_hash="fixture-live",
+                    last_message_received_at=now,
+                    last_state_change_received_at=now,
+                    raw_event_id=uuid4(),
+                ),
+                OddsObservationRecord(
+                    provider_match_id=1,
+                    odds_id=10,
+                    canonical_map_id=canonical_map_id,
+                    market_type="Winner",
+                    match_stage="r1",
+                    selection_team_id=team_a_id,
+                    price=2.0,
+                    implied_probability=0.5,
+                    received_at=now,
+                    raw_event_id=uuid4(),
+                ),
+                OddsObservationRecord(
+                    provider_match_id=1,
+                    odds_id=11,
+                    canonical_map_id=canonical_map_id,
+                    market_type="Winner",
+                    match_stage="r1",
+                    selection_team_id=team_b_id,
+                    price=2.0,
+                    implied_probability=0.5,
+                    received_at=now,
+                    raw_event_id=uuid4(),
+                ),
+            ]
+        )
+        await session.flush()
+        event_id = event.id
+
+    reconciliation = ReconciliationService(
+        jobs,
+        lease_seconds=120,
+        ai_experiments=(),
+        future_odds_horizons=(),
+    )
+    async with factory() as session, session.begin():
+        first = await reconciliation.run(session, now=now)
+        assert first.snapshot_jobs == 1
+    async with factory() as session, session.begin():
+        second = await reconciliation.run(session, now=now)
+        assert second.snapshot_jobs == 0
+
+    async with factory() as session:
+        record = await session.scalar(
+            select(DurableJobRecord).where(
+                DurableJobRecord.job_type == JobType.BUILD_SNAPSHOT.value,
+                DurableJobRecord.dedupe_key == f"reconcile-snapshot-v2:{event_id}",
+            )
+        )
+        assert record is not None
+        assert record.payload == {
+            "canonical_map_id": str(canonical_map_id),
+            "canonical_series_id": None,
+            "decision_at": now.isoformat(),
+            "reconciliation_event_id": str(event_id),
+        }
 
     await engine.dispose()
 

@@ -1,3 +1,4 @@
+import re
 from datetime import UTC, datetime
 from typing import Any
 
@@ -191,8 +192,13 @@ class RayBetOddsCollector:
 def _map_number(match_stage: str | None) -> int | None:
     if match_stage is None:
         return None
-    digits = "".join(character for character in match_stage if character.isdigit())
-    return int(digits) if digits else None
+    match = re.fullmatch(
+        r"(?i)\s*(?:r([1-9][0-9]*)|map\s*r?([1-9][0-9]*))\s*",
+        match_stage,
+    )
+    if match is None:
+        return None
+    return int(match.group(1) or match.group(2))
 
 
 def _same_provider_time(first: datetime | None, second: datetime | None) -> bool:
