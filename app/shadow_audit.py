@@ -73,14 +73,16 @@ async def build_shadow_run_audit(
 async def _provider_evidence(
     session: AsyncSession, canonical_map: CanonicalMap
 ) -> tuple[dict[str, Any], list[ProviderRawEvent]]:
+    match_conditions = [ProviderMatchMapping.canonical_map_id == canonical_map.id]
+    if canonical_map.series_id is not None:
+        match_conditions.append(
+            ProviderMatchMapping.canonical_series_id == canonical_map.series_id
+        )
     mapping = await session.scalar(
         select(ProviderMatchMapping)
         .where(
             ProviderMatchMapping.provider == "raybet",
-            or_(
-                ProviderMatchMapping.canonical_map_id == canonical_map.id,
-                ProviderMatchMapping.canonical_series_id == canonical_map.series_id,
-            ),
+            or_(*match_conditions),
         )
         .order_by(ProviderMatchMapping.created_at.desc())
         .limit(1)
