@@ -6,7 +6,13 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.live.freshness import load_live_basic_field_freshness
-from app.models import CanonicalMap, CanonicalSeries, CanonicalTeam, LiveSyncEstimateRecord
+from app.models import (
+    CanonicalMap,
+    CanonicalSeries,
+    CanonicalTeam,
+    LiveSyncEstimateRecord,
+    MapResultRecord,
+)
 from app.providers.dltv.side_identity import (
     MapSideAssignment,
     project_map_sides,
@@ -42,6 +48,7 @@ class SideAwareSnapshotBuilder(SnapshotBuilder):
             raise ValueError("canonical series does not exist")
         team_a = await session.get(CanonicalTeam, series.team_a_id)
         team_b = await session.get(CanonicalTeam, series.team_b_id)
+        series_score = await _series_score(session, series=series, decision_at=decision_at)
         side_assignment = (
             await project_map_sides(
                 session,
@@ -70,6 +77,9 @@ class SideAwareSnapshotBuilder(SnapshotBuilder):
                 "best_of": series.best_of,
                 "scheduled_at": series.scheduled_at,
                 "map_number": canonical_map.map_number if canonical_map is not None else None,
+                "score_a": series_score[0],
+                "score_b": series_score[1],
+                "score_knowledge_cutoff": series_score[2],
             },
             "side_identity": (
                 side_assignment_payload(side_assignment) if side_assignment is not None else None
@@ -217,6 +227,32 @@ class SideAwareSnapshotBuilder(SnapshotBuilder):
         return SnapshotBuildOutcome(gate=gate, snapshot=snapshot)
 
 
+async def _series_score(
+    session: AsyncSession,
+    *,
+    series: CanonicalSeries,
+    decision_at: datetime,
+) -> tuple[int, int, datetime | None]:
+    rows = list(
+        (
+            await session.scalars(
+                select(MapResultRecord)
+                .join(CanonicalMap, CanonicalMap.id == MapResultRecord.canonical_map_id)
+                .where(
+                    CanonicalMap.series_id == series.id,
+                    MapResultRecord.basic_first_usable_at <= decision_at,
+                    MapResultRecord.winner_team_id.is_not(None),
+                )
+                .order_by(MapResultRecord.basic_first_usable_at)
+            )
+        ).all()
+    )
+    score_a = sum(result.winner_team_id == series.team_a_id for result in rows)
+    score_b = sum(result.winner_team_id == series.team_b_id for result in rows)
+    cutoff = max((result.basic_first_usable_at for result in rows), default=None)
+    return score_a, score_b, cutoff
+
+
 async def _enrich_history(
     session: AsyncSession,
     *,
@@ -262,6 +298,8 @@ async def _enrich_history(
                 "recent_10": player_context.get("recent_10"),
                 "recent_20": player_context.get("recent_20"),
                 "player_sample_size": player_context.get("sample_size"),
+                "position_source": slot.source,
+                "position_confidence": slot.confidence,
                 "player_hero": hero_context,
             }
         )
