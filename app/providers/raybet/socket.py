@@ -28,9 +28,13 @@ class RayBetSocketClient:
             try:
                 await on_state("CONNECTING", None)
                 async with self._connect() as websocket:
-                    await self._handshake(websocket)
+                    buffered = await self._handshake(websocket)
                     await on_state("CONNECTED", None)
                     backoff = 1.0
+                    for message in buffered:
+                        if self._stop.is_set():
+                            break
+                        await on_publish(message)
                     while not self._stop.is_set():
                         raw = await websocket.recv()
                         if isinstance(raw, tuple):
@@ -42,16 +46,8 @@ class RayBetSocketClient:
                         if raw == "#1":
                             await _send_text(websocket, "#2")
                             continue
-                        if not isinstance(raw, str):
-                            continue
-                        try:
-                            message = json.loads(raw)
-                        except json.JSONDecodeError:
-                            continue
-                        if (
-                            message.get("event") == "#publish"
-                            and message.get("data", {}).get("channel") == "match"
-                        ):
+                        message = _match_publish(raw)
+                        if message is not None:
                             await on_publish(message)
             except asyncio.CancelledError:
                 raise
@@ -79,7 +75,7 @@ class RayBetSocketClient:
             timeout=10,
         )
 
-    async def _handshake(self, websocket: RayBetSocketConnection) -> None:
+    async def _handshake(self, websocket: RayBetSocketConnection) -> list[dict]:
         await _send_text(
             websocket,
             json.dumps(
@@ -87,7 +83,7 @@ class RayBetSocketClient:
                 separators=(",", ":"),
             ),
         )
-        await self._wait_for_rid(websocket, 1)
+        buffered = await self._wait_for_rid(websocket, 1)
         await _send_text(
             websocket,
             json.dumps(
@@ -95,9 +91,11 @@ class RayBetSocketClient:
                 separators=(",", ":"),
             ),
         )
-        await self._wait_for_rid(websocket, 2)
+        buffered.extend(await self._wait_for_rid(websocket, 2))
+        return buffered
 
-    async def _wait_for_rid(self, websocket: RayBetSocketConnection, rid: int) -> None:
+    async def _wait_for_rid(self, websocket: RayBetSocketConnection, rid: int) -> list[dict]:
+        buffered: list[dict] = []
         while True:
             raw = await asyncio.wait_for(websocket.recv(), timeout=10)
             if isinstance(raw, tuple):
@@ -114,7 +112,9 @@ class RayBetSocketClient:
             except json.JSONDecodeError:
                 continue
             if message.get("rid") == rid:
-                return
+                return buffered
+            if _is_match_publish(message):
+                buffered.append(message)
 
 
 async def _send_text(websocket: RayBetSocketConnection, value: str) -> None:
@@ -123,3 +123,22 @@ async def _send_text(websocket: RayBetSocketConnection, value: str) -> None:
         await send_str(value)
         return
     await websocket.send(value)
+
+
+def _match_publish(raw: object) -> dict | None:
+    if not isinstance(raw, str):
+        return None
+    try:
+        message = json.loads(raw)
+    except json.JSONDecodeError:
+        return None
+    return message if _is_match_publish(message) else None
+
+
+def _is_match_publish(message: object) -> bool:
+    return (
+        isinstance(message, dict)
+        and message.get("event") == "#publish"
+        and isinstance(message.get("data"), dict)
+        and message["data"].get("channel") == "match"
+    )
