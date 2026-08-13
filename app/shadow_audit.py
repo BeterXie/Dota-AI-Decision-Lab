@@ -11,6 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.models import (
     CanonicalMap,
     DecisionSnapshotRecord,
+    DomainEventRecord,
     OddsObservationRecord,
     ProviderMatchMapping,
     ProviderRawEvent,
@@ -37,8 +38,11 @@ async def build_shadow_run_audit(
         ).all()
     )
     modes = Counter(snapshot.mode for snapshot in snapshots)
-    side = _side_identity(snapshots)
     provider_evidence, dltv_raw = await _provider_evidence(session, canonical_map)
+    reconnect = _reconnect_report(
+        dltv_raw,
+        await _recovery_events(session, canonical_map),
+    )
     return {
         "schema_version": "shadow-run-audit-v1",
         "generated_at": generated_at.isoformat(),
@@ -49,12 +53,12 @@ async def build_shadow_run_audit(
             "valve_match_id": canonical_map.valve_match_id,
         },
         "provider_evidence": provider_evidence,
-        "side_identity": side,
+        "side_identity": _side_identity(snapshots),
+        "dltv_reconnect": reconnect,
         "snapshots": {
             "count": len(snapshots),
             "mode_counts": dict(modes),
         },
-        "_audit_context": {"dltv_raw_event_count": len(dltv_raw)},
     }
 
 
@@ -137,6 +141,52 @@ async def _raw_events(
             )
         ).all()
     )
+
+
+async def _recovery_events(
+    session: AsyncSession, canonical_map: CanonicalMap
+) -> list[DomainEventRecord]:
+    if canonical_map.valve_match_id is None:
+        return []
+    events = list(
+        (
+            await session.scalars(
+                select(DomainEventRecord).where(
+                    DomainEventRecord.event_type == "DLTV_MATCH_DISCOVERED",
+                    DomainEventRecord.aggregate_id == str(canonical_map.valve_match_id),
+                )
+            )
+        ).all()
+    )
+    return [
+        item
+        for item in events
+        if item.payload.get("reason") == "SOCKET_RECONNECT_RECOVERY"
+    ]
+
+
+def _reconnect_report(
+    raw: list[ProviderRawEvent], recovery: list[DomainEventRecord]
+) -> dict[str, Any]:
+    connections: list[str] = []
+    for item in raw:
+        if item.event_type != "DLTV_FAST_SOCKET" or item.connection_id is None:
+            continue
+        if not connections or connections[-1] != item.connection_id:
+            connections.append(item.connection_id)
+    recovered = {
+        item.payload.get("connection_id")
+        for item in recovery
+        if isinstance(item.payload.get("connection_id"), str)
+    }
+    transition_targets = set(connections[1:])
+    return {
+        "connection_sequence": connections,
+        "connection_transitions": max(len(connections) - 1, 0),
+        "recovery_event_count": len(recovery),
+        "recovery_connection_ids": sorted(recovered),
+        "uncovered_connection_transitions": len(transition_targets - recovered),
+    }
 
 
 def _side_identity(snapshots: list[DecisionSnapshotRecord]) -> dict[str, Any]:
