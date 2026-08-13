@@ -20,3 +20,26 @@ def snapshot_quality(snapshots: list[DecisionSnapshotRecord]) -> dict[str, Any]:
         "warning_counts": dict(warnings),
         "blocker_counts": dict(blockers),
     }
+
+
+def live_freshness(snapshots: list[DecisionSnapshotRecord]) -> dict[str, Any]:
+    evidence: list[tuple[DecisionSnapshotRecord, dict[str, Any]]] = []
+    for snapshot in snapshots:
+        quality = snapshot.canonical_payload.get("quality", {})
+        raw = quality.get("live_field_freshness") if isinstance(quality, dict) else None
+        if isinstance(raw, dict):
+            evidence.append((snapshot, raw))
+    return {
+        "snapshot_count_with_field_evidence": len(evidence),
+        "complete_snapshot_count": sum(raw.get("complete") is True for _, raw in evidence),
+        "incomplete_snapshot_count": sum(raw.get("complete") is False for _, raw in evidence),
+        "latest": (
+            {
+                "snapshot_id": str(evidence[-1][0].id),
+                "decision_at": evidence[-1][0].decision_at.isoformat(),
+                **evidence[-1][1],
+            }
+            if evidence
+            else None
+        ),
+    }
