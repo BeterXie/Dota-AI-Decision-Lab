@@ -18,6 +18,7 @@ export const PlayerMatchHeader: React.FC<PlayerMatchHeaderProps> = ({ match }) =
   const pair = primaryMarketPair(match.market, match.team_a?.id, match.team_b?.id);
   const phase = getMatchDisplayPhase(match);
   const gameTime = match.live?.game_time_seconds;
+  const hasLiveScore = match.live?.radiant_kills != null && match.live?.dire_kills != null;
   const aiMedian = median(
     match.decisions
       .map((decision) => decision.decision?.fair_probability_a)
@@ -53,12 +54,23 @@ export const PlayerMatchHeader: React.FC<PlayerMatchHeaderProps> = ({ match }) =
         </div>
 
         <div className="score-cell">
-          <div className="score-number" aria-label={locale === "zh-CN" ? "天辉与夜魇击杀比分" : "Radiant versus Dire kill score"}>
-            <span className="score-radiant">{match.live?.radiant_kills ?? "—"}</span>
-            <span className="score-divider">:</span>
-            <span className="score-dire">{match.live?.dire_kills ?? "—"}</span>
-          </div>
-          <span className="score-time">{locale === "zh-CN" ? "天辉" : "RADIANT"}{gameTime != null ? ` · ${formatGameTime(gameTime)} · ` : " · "}{locale === "zh-CN" ? "夜魇" : "DIRE"}</span>
+          {hasLiveScore ? (
+            <>
+              <div className="score-number" aria-label={locale === "zh-CN" ? "天辉与夜魇击杀比分" : "Radiant versus Dire kill score"}>
+                <span className="score-radiant">{match.live?.radiant_kills}</span>
+                <span className="score-divider">:</span>
+                <span className="score-dire">{match.live?.dire_kills}</span>
+              </div>
+              <span className="score-time">
+                {locale === "zh-CN" ? "天辉" : "RADIANT"}{gameTime != null ? ` · ${formatGameTime(gameTime)} · ` : " · "}{locale === "zh-CN" ? "夜魇" : "DIRE"}
+              </span>
+            </>
+          ) : (
+            <>
+              <div className="score-number"><span className="score-divider">VS</span></div>
+              <span className="score-time">{phaseLabel(phase, locale)}</span>
+            </>
+          )}
         </div>
 
         <div className="team-cell team-dire">
