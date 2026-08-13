@@ -41,7 +41,7 @@ export const PlayerMatchHeader: React.FC<PlayerMatchHeaderProps> = ({ match }) =
 
       <div className="header-scoreboard player-scoreboard">
         <div className="team-cell team-radiant">
-          <div className="team-logo-avatar radiant">{getTeamAbbreviation(teamA)}</div>
+          <div className="team-logo-avatar team-a-order">{getTeamAbbreviation(teamA)}</div>
           <div className="team-info">
             <span className="team-side-label">TEAM A</span>
             <h2 className="team-name">{teamA}</h2>
@@ -64,7 +64,7 @@ export const PlayerMatchHeader: React.FC<PlayerMatchHeaderProps> = ({ match }) =
             <h2 className="team-name">{teamB}</h2>
             <div className="team-odds-pill">{formatOdds(pair?.teamB.price)}</div>
           </div>
-          <div className="team-logo-avatar dire">{getTeamAbbreviation(teamB)}</div>
+          <div className="team-logo-avatar team-b-order">{getTeamAbbreviation(teamB)}</div>
         </div>
       </div>
 
