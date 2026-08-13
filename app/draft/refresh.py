@@ -5,6 +5,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.jobs import JobType
+from app.draft.data_repair import repair_legacy_drafts
 from app.jobs.repository import JobRepository
 from app.models import CanonicalMap, DltvLiveObservationRecord, DraftSnapshotRecord
 
@@ -24,6 +25,7 @@ async def schedule_incomplete_draft_refreshes(
     active_window: timedelta = timedelta(minutes=15),
     recovery_window: timedelta = timedelta(hours=6),
 ) -> DraftRefreshResult:
+    await repair_legacy_drafts(session)
     current = now or datetime.now(UTC)
     active_map_ids = set(
         (
