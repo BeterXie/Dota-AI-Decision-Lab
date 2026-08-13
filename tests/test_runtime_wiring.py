@@ -33,6 +33,29 @@ def test_provider_socket_workers_are_registered_before_messages() -> None:
     ]
 
 
+def test_core_durable_job_workers_are_all_registered() -> None:
+    workers = _job_workers(
+        settings=Settings(_env_file=None),
+        session_factory=None,
+        jobs=None,
+        handlers={},
+        health=HealthRegistry(),
+    )
+
+    assert [worker.name for worker in workers] == [
+        "RayBetRegistryRefreshWorker",
+        "DltvBootstrapWorker",
+        "HistoricalSyncWorker",
+        "DraftCoordinator",
+        "SnapshotCoordinator",
+        "AiCoordinatorWorker",
+        "FutureOddsWorker",
+        "PostmatchResolverWorker",
+        "SettlementWorker",
+        "EvaluationWorker",
+    ]
+
+
 def test_email_notification_worker_is_registered() -> None:
     disabled = _job_workers(
         settings=Settings(_env_file=None),
