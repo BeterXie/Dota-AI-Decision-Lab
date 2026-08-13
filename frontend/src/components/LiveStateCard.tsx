@@ -16,6 +16,8 @@ export const LiveStateCard: React.FC<LiveStateCardProps> = ({ match }) => {
   const effectiveAge = live?.effective_state_age_seconds;
   const messageAge = live?.message_age_seconds;
   const isStale = effectiveAge != null && effectiveAge > 45;
+  const syncStatus = isStale ? "LIVE_STALE" : match.sync?.status || "UNKNOWN";
+  const syncIsSafe = syncStatus === "SAFE";
 
   return (
     <div className="analytics-card live-state-card">
@@ -61,8 +63,8 @@ export const LiveStateCard: React.FC<LiveStateCardProps> = ({ match }) => {
           </div>
           <div className="live-sync-footer">
             <span>{t("effectiveStateAge")}: {effectiveAge == null ? "—" : `${Math.round(effectiveAge)}s`}</span>
-            <span className={`sync-status-tag ${isStale ? "" : "safe"}`}>
-              {translateStatus(isStale ? "LIVE_STALE" : match.sync?.status || "UNKNOWN", locale)}
+            <span className={`sync-status-tag ${syncIsSafe ? "safe" : ""}`}>
+              {translateStatus(syncStatus, locale)}
             </span>
             <span>{t("messageAge")}: {messageAge == null ? "—" : `${Math.round(messageAge)}s`}</span>
           </div>
