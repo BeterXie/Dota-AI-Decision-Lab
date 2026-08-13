@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.db import Base
 from app.models import CanonicalMap, CanonicalSeries, CanonicalTeam, MapResultRecord
 from app.snapshots.side_aware import _series_score
+from app.time import ensure_utc
 
 
 @pytest.mark.asyncio
@@ -54,5 +55,5 @@ async def test_series_score_only_uses_results_available_by_decision_time() -> No
 
     assert score[0] == 1
     assert score[1] == 0
-    assert score[2] == start + timedelta(minutes=50)
+    assert ensure_utc(score[2]) == start + timedelta(minutes=50)
     await engine.dispose()
