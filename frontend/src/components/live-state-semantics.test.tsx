@@ -21,7 +21,7 @@ test("effective state age controls stale presentation", () => {
       reconnect_generation: 0
     },
     sync: { status: "SAFE" }
-  } as MapSummary;
+  } as unknown as MapSummary;
 
   const { container } = render(<I18nProvider><LiveStateCard match={match} /></I18nProvider>);
   expect(container.querySelector(".stale-warning-banner")).not.toBeNull();
