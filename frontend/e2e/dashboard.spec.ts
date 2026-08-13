@@ -13,6 +13,7 @@ const runtime = {
 const match = {
   entity_type: "MAP",
   identity_status: "RESOLVED",
+  phase: "LIVE",
   id: mapId,
   series_id: "series-1",
   canonical_map_id: mapId,
@@ -43,7 +44,8 @@ const match = {
     curve: [
       { minute: 20, pure_radiant_edge: 1.2, adjusted_radiant_edge: 2.0, support: 950, confidence: 0.72 },
       { minute: 40, pure_radiant_edge: 3.8, adjusted_radiant_edge: 4.6, support: 810, confidence: 0.68 },
-      { minute: 54, pure_radiant_edge: -0.3, adjusted_radiant_edge: -0.5, support: 510, confidence: 0.58 }
+      { minute: 54, pure_radiant_edge: -0.3, adjusted_radiant_edge: -0.5, support: 510, confidence: 0.58 },
+      { minute: 55, pure_radiant_edge: -0.6, adjusted_radiant_edge: -0.9, support: 500, confidence: 0.56 }
     ],
     model_version: "rosh-v1",
     data_version: "stratz-v1",
@@ -79,8 +81,10 @@ test("renders player-first Dota decision workspace", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Independent AI decisions" })).toBeVisible();
   await expect(page.getByText("BUY A", { exact: true }).last()).toBeVisible();
   await expect(page.getByRole("heading", { name: "R.O.S.H. Draft Advantage" })).toBeVisible();
-  await expect(page.getByText("Team Spirit advantage", { exact: true })).toBeVisible();
-  await expect(page.getByText("Team Spirit +3.2pp", { exact: true })).toBeVisible();
+  await expect(page.getByText("Radiant advantage", { exact: true })).toBeVisible();
+  await expect(page.getByText("Radiant +3.2pp", { exact: true })).toBeVisible();
+  await expect(page.getByText("54m → Dire", { exact: true })).toBeVisible();
+  await expect(page.getByText("Team Spirit advantage", { exact: true })).toHaveCount(0);
   await expect(page.getByText("DRAFT LINEUP", { exact: true })).toBeVisible();
   await expect(page.getByText("Collapse", { exact: true })).toBeVisible();
 
