@@ -5,6 +5,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.live.freshness import load_live_basic_field_freshness
 from app.models import CanonicalMap, CanonicalSeries, CanonicalTeam, LiveSyncEstimateRecord
 from app.providers.dltv.side_identity import (
     MapSideAssignment,
@@ -116,6 +117,7 @@ class SideAwareSnapshotBuilder(SnapshotBuilder):
                 if side_assignment is not None and side_assignment.blocker is not None
                 else "SIDE_IDENTITY_UNRESOLVED"
             )
+        live_field_freshness = None
         if canonical_map_id is None:
             live, live_message_age, live_age, live_complete, sync = (
                 None,
@@ -128,6 +130,19 @@ class SideAwareSnapshotBuilder(SnapshotBuilder):
             live, live_message_age, live_age, live_complete = await self._load_live(
                 session, canonical_map_id=canonical_map_id, decision_at=decision_at
             )
+            if (
+                canonical_map is not None
+                and canonical_map.valve_match_id is not None
+                and live is not None
+            ):
+                live_field_freshness = await load_live_basic_field_freshness(
+                    session,
+                    valve_match_id=canonical_map.valve_match_id,
+                    decision_at=decision_at,
+                    max_age_seconds=self._settings.live_state_max_age_seconds,
+                )
+                live_age = live_field_freshness.effective_age_seconds
+                live["field_freshness"] = live_field_freshness.payload()
             sync = await session.scalar(
                 select(LiveSyncEstimateRecord)
                 .where(
@@ -170,6 +185,9 @@ class SideAwareSnapshotBuilder(SnapshotBuilder):
             "market_age_seconds": market_age,
             "live_message_age_seconds": live_message_age,
             "live_effective_state_age_seconds": live_age,
+            "live_field_freshness": (
+                live_field_freshness.payload() if live_field_freshness is not None else None
+            ),
             "live_sync": _sync_payload(sync),
         }
         snapshot = await self._repository.persist(
