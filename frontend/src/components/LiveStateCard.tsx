@@ -1,6 +1,7 @@
 import React from "react";
 import type { MapDetail, MapSummary } from "../api";
 import { translateStatus, useI18n } from "../i18n";
+import { resolveVerifiedMapSides } from "../utils/mapSides";
 
 interface LiveStateCardProps {
   match: MapSummary | MapDetail;
@@ -9,6 +10,7 @@ interface LiveStateCardProps {
 export const LiveStateCard: React.FC<LiveStateCardProps> = ({ match }) => {
   const { locale, t } = useI18n();
   const live = match.live;
+  const sides = resolveVerifiedMapSides(match);
   const gameTime = live?.game_time_seconds;
   const gameTimeText = gameTime == null
     ? "—"
@@ -41,24 +43,18 @@ export const LiveStateCard: React.FC<LiveStateCardProps> = ({ match }) => {
             <div className="live-stat-row">
               <span className="stat-label">{t("kills")}</span>
               <span className="stat-value">
-                <span className="radiant-txt">{locale === "zh-CN" ? "天辉" : "Radiant"} {live.radiant_kills ?? "—"}</span>
+                <span className="radiant-txt">{sideLabel("radiant", locale, sides?.radiant.name)} {live.radiant_kills ?? "—"}</span>
                 {" · "}
-                <span className="dire-txt">{live.dire_kills ?? "—"} {locale === "zh-CN" ? "夜魇" : "Dire"}</span>
+                <span className="dire-txt">{live.dire_kills ?? "—"} {sideLabel("dire", locale, sides?.dire.name)}</span>
               </span>
             </div>
             <div className="live-stat-row">
               <span className="stat-label">{t("radiantNetWorthLead")}</span>
-              <span className="stat-value">
-                {live.radiant_nw_lead == null
-                  ? "—"
-                  : live.radiant_nw_lead === 0
-                    ? (locale === "zh-CN" ? "均势" : "Even")
-                    : `${live.radiant_nw_lead > 0 ? (locale === "zh-CN" ? "天辉" : "Radiant") : (locale === "zh-CN" ? "夜魇" : "Dire")} +${Math.abs(live.radiant_nw_lead).toLocaleString(locale)}`}
-              </span>
+              <span className="stat-value">{formatNetWorth(live.radiant_nw_lead, locale, sides?.radiant.name, sides?.dire.name)}</span>
             </div>
             <div className="live-stat-row">
               <span className="stat-label">{t("firstBlood")}</span>
-              <span className="stat-value">{formatMapSide(live.first_blood, locale)}</span>
+              <span className="stat-value">{formatMapSide(live.first_blood, locale, sides?.radiant.name, sides?.dire.name)}</span>
             </div>
           </div>
           <div className="live-sync-footer">
@@ -74,10 +70,34 @@ export const LiveStateCard: React.FC<LiveStateCardProps> = ({ match }) => {
   );
 };
 
-function formatMapSide(value: string | null | undefined, locale: string): string {
+function sideLabel(side: "radiant" | "dire", locale: string, teamName?: string): string {
+  const sideName = side === "radiant"
+    ? (locale === "zh-CN" ? "天辉" : "Radiant")
+    : (locale === "zh-CN" ? "夜魇" : "Dire");
+  return teamName ? `${teamName} · ${sideName}` : sideName;
+}
+
+function formatNetWorth(
+  value: number | null | undefined,
+  locale: string,
+  radiantTeam?: string,
+  direTeam?: string
+): string {
+  if (value == null) return "—";
+  if (value === 0) return locale === "zh-CN" ? "均势" : "Even";
+  const radiantLeads = value > 0;
+  return `${sideLabel(radiantLeads ? "radiant" : "dire", locale, radiantLeads ? radiantTeam : direTeam)} +${Math.abs(value).toLocaleString(locale)}`;
+}
+
+function formatMapSide(
+  value: string | null | undefined,
+  locale: string,
+  radiantTeam?: string,
+  direTeam?: string
+): string {
   if (!value) return "—";
   const normalized = value.toLowerCase();
-  if (normalized.includes("radiant")) return locale === "zh-CN" ? "天辉" : "Radiant";
-  if (normalized.includes("dire")) return locale === "zh-CN" ? "夜魇" : "Dire";
+  if (normalized.includes("radiant")) return sideLabel("radiant", locale, radiantTeam);
+  if (normalized.includes("dire")) return sideLabel("dire", locale, direTeam);
   return value;
 }
