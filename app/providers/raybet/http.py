@@ -1,5 +1,7 @@
 import asyncio
 from datetime import UTC, datetime
+from email.utils import parsedate_to_datetime
+from random import uniform
 
 import httpx
 
@@ -7,7 +9,17 @@ from app.providers.common import TimedPayload, create_system_ssl_context
 
 
 class RayBetHttpClient:
-    def __init__(self, base_url: str, origin: str, *, timeout_seconds: float = 8.0) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        origin: str,
+        *,
+        timeout_seconds: float = 8.0,
+        max_attempts: int = 2,
+    ) -> None:
+        if max_attempts < 1:
+            raise ValueError("max_attempts must be positive")
+        self._max_attempts = max_attempts
         self._client = httpx.AsyncClient(
             base_url=base_url,
             timeout=timeout_seconds,
@@ -33,10 +45,22 @@ class RayBetHttpClient:
 
     async def _get(self, path: str, *, params: dict | None = None) -> TimedPayload:
         started = datetime.now(UTC)
-        response = await self._client.get(path, params=params)
-        if response.status_code == 204:
-            await asyncio.sleep(0.25)
-            response = await self._client.get(path, params=params)
+        response = None
+        for attempt in range(self._max_attempts):
+            try:
+                response = await self._client.get(path, params=params)
+            except httpx.HTTPError:
+                if attempt + 1 >= self._max_attempts:
+                    raise
+                await asyncio.sleep(0.25 * (attempt + 1))
+                continue
+            if response.status_code not in (403, 429, 500, 502, 503, 504, 204):
+                break
+            if attempt + 1 < self._max_attempts:
+                delay = _retry_after_seconds(response.headers.get("retry-after"))
+                await asyncio.sleep(delay + uniform(0.0, 0.15))
+        if response is None:
+            raise RuntimeError("RayBet request produced no response")
         received = datetime.now(UTC)
         response.raise_for_status()
         if "application/json" not in response.headers.get("content-type", ""):
@@ -49,3 +73,15 @@ class RayBetHttpClient:
             request_started_at=started,
             received_at=received,
         )
+
+
+def _retry_after_seconds(value: str | None) -> float:
+    if not value:
+        return 0.25
+    try:
+        return max(0.0, float(value))
+    except ValueError:
+        try:
+            return max(0.0, (parsedate_to_datetime(value) - datetime.now(UTC)).total_seconds())
+        except (TypeError, ValueError, OverflowError):
+            return 0.25

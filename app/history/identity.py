@@ -1,10 +1,22 @@
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.identity.aliases import normalize_alias
-from app.models import CanonicalTeam, ProviderTeamMapping, TeamAlias
+from app.models import (
+    CanonicalSeries,
+    CanonicalTeam,
+    HistoricalMapRecord,
+    HistoricalPlayerMapRecord,
+    MapResultEvidenceRecord,
+    MapResultRecord,
+    OddsObservationRecord,
+    ProviderTeamMapping,
+    TeamAlias,
+    TeamFormSnapshotRecord,
+    TeamRatingSnapshotRecord,
+)
 from app.providers.opendota.client import OpenDotaClient
 from app.repositories.raw import RawEventRepository
 
@@ -70,6 +82,36 @@ class HistoricalTeamResolver:
             if not isinstance(payload, list):
                 return 0
             self._opendota_catalog = [item for item in payload if isinstance(item, dict)]
+        resolved = await self._match_opendota_catalog(names, unresolved, session)
+        if unresolved:
+            # The in-process catalog may have been fetched before a newly
+            # discovered tournament team appeared in OpenDota. Refresh once
+            # when an unresolved identity remains instead of keeping stale
+            # process-local coverage forever.
+            response = await client.get_team_catalog(0)
+            payload = response.payload
+            await self._raw_events.append(
+                session,
+                provider="opendota",
+                event_type="OPENDOTA_TEAM_CATALOG_REFRESH",
+                provider_key="0",
+                payload={"teams": payload} if isinstance(payload, list) else payload,
+                request_started_at=response.request_started_at,
+                received_at=response.received_at,
+                parser_version=client.normalizer_version,
+            )
+            if isinstance(payload, list):
+                self._opendota_catalog = [item for item in payload if isinstance(item, dict)]
+                resolved += await self._match_opendota_catalog(names, unresolved, session)
+        return resolved
+
+    async def _match_opendota_catalog(
+        self,
+        names: dict[str, set[UUID]],
+        unresolved: set[UUID],
+        session: AsyncSession,
+    ) -> int:
+        resolved = 0
         for item in self._opendota_catalog or []:
             provider_id = item.get("team_id")
             name = item.get("name")
@@ -94,6 +136,18 @@ class HistoricalTeamResolver:
                         observed_name=name,
                     )
                 )
+            elif existing.canonical_team_id != canonical_team_id:
+                placeholder = await session.get(CanonicalTeam, existing.canonical_team_id)
+                if placeholder is None or placeholder.name != f"OPENDOTA team {provider_id}":
+                    continue
+                await _merge_placeholder_team(
+                    session,
+                    source_team_id=placeholder.id,
+                    target_team_id=canonical_team_id,
+                )
+                existing.canonical_team_id = canonical_team_id
+                existing.observed_name = name
+                await session.delete(placeholder)
             unresolved.remove(canonical_team_id)
             resolved += 1
         return resolved
@@ -184,3 +238,31 @@ def _names_match(canonical_name: str, provider_name: str) -> bool:
         normalize_alias(canonical_name),
         *(normalize_alias(alias) for alias in _known_provider_names(canonical_name)),
     }
+
+
+async def _merge_placeholder_team(
+    session: AsyncSession,
+    *,
+    source_team_id: UUID,
+    target_team_id: UUID,
+) -> None:
+    references = (
+        (TeamAlias, "canonical_team_id"),
+        (CanonicalSeries, "team_a_id"),
+        (CanonicalSeries, "team_b_id"),
+        (OddsObservationRecord, "selection_team_id"),
+        (HistoricalMapRecord, "radiant_team_id"),
+        (HistoricalMapRecord, "dire_team_id"),
+        (HistoricalMapRecord, "winner_team_id"),
+        (HistoricalPlayerMapRecord, "canonical_team_id"),
+        (HistoricalPlayerMapRecord, "opponent_team_id"),
+        (TeamRatingSnapshotRecord, "canonical_team_id"),
+        (TeamFormSnapshotRecord, "canonical_team_id"),
+        (MapResultRecord, "winner_team_id"),
+        (MapResultEvidenceRecord, "winner_team_id"),
+    )
+    for model, field_name in references:
+        field = getattr(model, field_name)
+        await session.execute(
+            update(model).where(field == source_team_id).values({field_name: target_team_id})
+        )

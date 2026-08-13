@@ -17,6 +17,7 @@ from app.models import (
     DltvLiveObservationRecord,
     DraftSlotRecord,
     DraftSnapshotRecord,
+    OddsObservationRecord,
     ProviderMatchMapping,
     RayBetMatch,
     TeamRatingSnapshotRecord,
@@ -56,6 +57,78 @@ async def test_operational_api_contract_without_business_data(tmp_path: Path) ->
         "recent_failures": [],
     }
     assert missing.status_code == 404
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_map_api_uses_map_winner_market_beyond_recent_observation_window() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    observed_at = datetime(2026, 8, 13, 5, 0, tzinfo=UTC)
+    async with factory.begin() as session:
+        team_a = CanonicalTeam(name="Team Falcons")
+        team_b = CanonicalTeam(name="LGD Gaming")
+        session.add_all((team_a, team_b))
+        await session.flush()
+        series = CanonicalSeries(team_a_id=team_a.id, team_b_id=team_b.id)
+        session.add(series)
+        await session.flush()
+        canonical_map = CanonicalMap(series_id=series.id, map_number=2)
+        session.add(canonical_map)
+        await session.flush()
+        for odds_id, team_id, price in (
+            (10, team_a.id, "1.01"),
+            (11, team_b.id, "13.34"),
+        ):
+            session.add(
+                OddsObservationRecord(
+                    provider_match_id=38423248,
+                    odds_id=odds_id,
+                    canonical_series_id=series.id,
+                    canonical_map_id=canonical_map.id,
+                    market_type="Winner",
+                    match_stage="r2",
+                    selection_team_id=team_id,
+                    price=price,
+                    implied_probability=0.5,
+                    raw_status=1,
+                    normalized_status="UNKNOWN",
+                    metadata_version="recorded-v1",
+                    received_at=observed_at,
+                    raw_event_id=uuid4(),
+                )
+            )
+        # More than the old 64-row query window. These other-map observations
+        # must not hide the correct Map 2 winner pair.
+        for index in range(70):
+            session.add(
+                OddsObservationRecord(
+                    provider_match_id=38423248,
+                    odds_id=1000 + index,
+                    canonical_series_id=series.id,
+                    canonical_map_id=canonical_map.id,
+                    market_type="Kill Handicap",
+                    match_stage="r3",
+                    price="1.90",
+                    implied_probability=0.5,
+                    raw_status=1,
+                    normalized_status="UNKNOWN",
+                    metadata_version="recorded-v1",
+                    received_at=observed_at + timedelta(seconds=index + 1),
+                    raw_event_id=uuid4(),
+                )
+            )
+    app = create_app(factory, HealthRegistry())
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        payload = (await client.get(f"/api/maps/{canonical_map.id}")).json()
+
+    assert [(item["match_stage"], item["price"]) for item in payload["market"]] == [
+        ("r2", "1.01000"),
+        ("r2", "13.34000"),
+    ]
     await engine.dispose()
 
 

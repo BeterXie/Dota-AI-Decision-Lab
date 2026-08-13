@@ -34,6 +34,71 @@ class _Provider:
         raise AssertionError("empty team history should not fetch match details")
 
 
+class _OpenDotaCatalog:
+    normalizer_version = "opendota-v1"
+
+    async def get_team_catalog(self, _page: int) -> TimedPayload:
+        return await _timed_payload(
+            [{"team_id": 9247354, "name": "Team Falcons"}]
+        )
+
+
+@pytest.mark.asyncio
+async def test_opendota_catalog_merges_generated_placeholder_identity() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    source_id = uuid4()
+    target_id = uuid4()
+    async with factory() as session, session.begin():
+        session.add_all(
+            (
+                CanonicalTeam(id=source_id, name="OPENDOTA team 9247354"),
+                CanonicalTeam(id=target_id, name="Team Falcons"),
+                ProviderTeamMapping(
+                    provider="opendota",
+                    provider_team_id="9247354",
+                    canonical_team_id=source_id,
+                ),
+                HistoricalMapRecord(
+                    provider="opendota",
+                    provider_match_id="8943072784",
+                    started_at=datetime(2026, 8, 13, tzinfo=UTC),
+                    radiant_team_id=source_id,
+                    winner_team_id=source_id,
+                    first_usable_at=datetime(2026, 8, 13, tzinfo=UTC),
+                    sync_status="BASIC_READY",
+                    raw_event_id=uuid4(),
+                ),
+            )
+        )
+
+    async with factory() as session, session.begin():
+        resolved = await HistoricalTeamResolver(RawEventRepository()).refresh_opendota_catalog(
+            session,
+            _OpenDotaCatalog(),
+            canonical_team_ids=[target_id],
+        )
+
+    async with factory() as session:
+        mapping = await session.scalar(
+            select(ProviderTeamMapping).where(
+                ProviderTeamMapping.provider == "opendota",
+                ProviderTeamMapping.provider_team_id == "9247354",
+            )
+        )
+        fact = await session.scalar(select(HistoricalMapRecord))
+        placeholder = await session.get(CanonicalTeam, source_id)
+
+    assert resolved == 1
+    assert mapping is not None and mapping.canonical_team_id == target_id
+    assert fact is not None and fact.radiant_team_id == target_id
+    assert fact.winner_team_id == target_id
+    assert placeholder is None
+    await engine.dispose()
+
+
 @pytest.mark.asyncio
 async def test_stratz_never_receives_opendota_team_id() -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")

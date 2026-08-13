@@ -1,5 +1,6 @@
 import asyncio
 from datetime import UTC, datetime
+from random import uniform
 
 from curl_cffi.requests import AsyncSession
 
@@ -7,7 +8,17 @@ from app.providers.common import TimedPayload
 
 
 class CurlRayBetHttpClient:
-    def __init__(self, base_url: str, origin: str, *, timeout_seconds: float = 8.0) -> None:
+    def __init__(
+        self,
+        base_url: str,
+        origin: str,
+        *,
+        timeout_seconds: float = 8.0,
+        max_attempts: int = 2,
+    ) -> None:
+        if max_attempts < 1:
+            raise ValueError("max_attempts must be positive")
+        self._max_attempts = max_attempts
         self._base_url = base_url.rstrip("/")
         self._origin = origin
         self._timeout = timeout_seconds
@@ -24,10 +35,21 @@ class CurlRayBetHttpClient:
 
     async def _get(self, path: str, params: dict) -> TimedPayload:
         started = datetime.now(UTC)
-        response = await self._request(path, params)
-        if response.status_code == 204:
-            await asyncio.sleep(0.25)
-            response = await self._request(path, params)
+        response = None
+        for attempt in range(self._max_attempts):
+            try:
+                response = await self._request(path, params)
+            except (OSError, TimeoutError):
+                if attempt + 1 >= self._max_attempts:
+                    raise
+                await asyncio.sleep(0.25 * (attempt + 1) + uniform(0.0, 0.15))
+                continue
+            if response.status_code not in (403, 429, 500, 502, 503, 504, 204):
+                break
+            if attempt + 1 < self._max_attempts:
+                await asyncio.sleep(0.25 * (attempt + 1) + uniform(0.0, 0.15))
+        if response is None:
+            raise RuntimeError("RayBet curl request produced no response")
         received = datetime.now(UTC)
         response.raise_for_status()
         if "application/json" not in response.headers.get("content-type", ""):

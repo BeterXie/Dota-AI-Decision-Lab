@@ -22,7 +22,7 @@ ROSH_HERO_ADJUSTMENT_WEIGHT = 2.0
 ROSH_SYNERGY_RELIABILITY_MATCH_COUNT = 100
 ROSH_SYNERGY_ADJUSTMENT_CAP = 30.0
 ROSH_TEAM_PLAYER_ADJUSTMENT_CAP = 2.5
-MODEL_VERSION = "rosh-c7a54b5-v1"
+MODEL_VERSION = "rosh-c7a54b5-v2"
 
 
 def score_rosh_lineups(
@@ -161,12 +161,7 @@ def _build_player_analysis(
         else resolved_count
     )
     fallback_count = (
-        sum(
-            isinstance(status.get("fallback_reason"), str)
-            and bool(str(status.get("fallback_reason")).strip())
-            for status in slot_statuses
-            if status.get("selected") is True
-        )
+        max(0, selected_count - resolved_count)
         if slot_statuses is not None
         else 10 - resolved_count
     )

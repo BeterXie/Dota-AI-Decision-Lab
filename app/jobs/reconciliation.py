@@ -6,6 +6,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.eligibility import ai_record_is_game_time_eligible
 from app.domain.jobs import JobType
+from app.draft.engine import MODEL_VERSION
 from app.jobs.repository import JobRepository
 from app.models import (
     AiDecisionRecord,
@@ -77,7 +78,8 @@ class ReconciliationService:
         for draft in drafts:
             curve = await session.scalar(
                 select(DraftMinuteCurveRecord.id).where(
-                    DraftMinuteCurveRecord.draft_snapshot_id == draft.id
+                    DraftMinuteCurveRecord.draft_snapshot_id == draft.id,
+                    DraftMinuteCurveRecord.model_version == MODEL_VERSION,
                 )
             )
             if curve is not None:
@@ -85,7 +87,7 @@ class ReconciliationService:
             await self._jobs.enqueue(
                 session,
                 job_type=JobType.BUILD_DRAFT_CURVE,
-                dedupe_key=f"reconcile-draft:{draft.id}",
+                dedupe_key=f"reconcile-draft:{MODEL_VERSION}:{draft.id}",
                 payload={
                     "canonical_map_id": str(draft.canonical_map_id),
                     "draft_snapshot_id": str(draft.id),

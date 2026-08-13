@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
-from sqlalchemy import func, or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.history.service import HistoricalIntelligenceService
@@ -250,18 +250,35 @@ async def _map_payload(
     team_a = await session.get(CanonicalTeam, series.team_a_id) if series else None
     team_b = await session.get(CanonicalTeam, series.team_b_id) if series else None
     raybet_match = await _latest_raybet_match(session, canonical_map.series_id)
+    market_criteria = (
+        or_(
+            OddsObservationRecord.canonical_map_id == canonical_map.id,
+            OddsObservationRecord.canonical_series_id == canonical_map.series_id,
+        ),
+        OddsObservationRecord.market_type == "Winner",
+        OddsObservationRecord.match_stage.in_(_map_market_stages(canonical_map.map_number)),
+    )
+    latest_market_times = (
+        select(
+            OddsObservationRecord.odds_id,
+            func.max(OddsObservationRecord.received_at).label("latest_received_at"),
+        )
+        .where(*market_criteria)
+        .group_by(OddsObservationRecord.odds_id)
+        .subquery()
+    )
     odds = list(
         (
             await session.scalars(
                 select(OddsObservationRecord)
-                .where(
-                    or_(
-                        OddsObservationRecord.canonical_map_id == canonical_map.id,
-                        OddsObservationRecord.canonical_series_id == canonical_map.series_id,
-                    )
+                .join(
+                    latest_market_times,
+                    and_(
+                        OddsObservationRecord.odds_id == latest_market_times.c.odds_id,
+                        OddsObservationRecord.received_at
+                        == latest_market_times.c.latest_received_at,
+                    ),
                 )
-                .order_by(OddsObservationRecord.received_at.desc())
-                .limit(64)
             )
         ).all()
     )
@@ -645,7 +662,7 @@ async def _pending_series_payload(session: AsyncSession, series: CanonicalSeries
         team_id: index for index, team_id in enumerate((series.team_a_id, series.team_b_id))
     }
     current_market = sorted(
-        latest_odds.values(),
+        _series_market_rows(latest_odds.values()),
         key=lambda item: (team_order.get(item.selection_team_id, 2), item.odds_id),
     )
     snapshot = await session.scalar(
@@ -761,6 +778,22 @@ async def _latest_raybet_match(session: AsyncSession, series_id: UUID | None) ->
         .order_by(RayBetMatch.observed_at.desc())
         .limit(1)
     )
+
+
+def _map_market_stages(map_number: int | None) -> tuple[str, ...]:
+    if map_number is None:
+        return ()
+    return (
+        f"r{map_number}",
+        f"Map r{map_number}",
+        f"map r{map_number}",
+        f"Map {map_number}",
+        f"map {map_number}",
+    )
+
+
+def _series_market_rows(rows):
+    return list(rows)
 
 
 def _decision_payload(record: AiDecisionRecord) -> dict:

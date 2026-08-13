@@ -779,7 +779,7 @@ function HistoryPanel({ detail }: { detail: MapDetail }) {
     <section className="tab-content">
       <div className="audit-grid history-coverage">
         <Metric label={t("historyCoverage")} value={`${metricText(coverage?.team_strength_ready_count, locale)}/2`} />
-        <Metric label={t("workers")} value={metricText(coverage?.roster_player_count, locale)} />
+        <Metric label={t("rosterCount")} value={`${metricText(coverage?.roster_player_count, locale)}/10`} />
         <Metric label={t("hero")} value={metricText(coverage?.player_hero_ready_count, locale)} />
         <Metric
           label={t("knowledgeCutoff")}
@@ -1233,7 +1233,8 @@ function primaryMarketPair(
 
 function marketPriority(key: string): number {
   const normalized = key.toLowerCase();
-  if (normalized.startsWith("winner\u0000final")) return 0;
+  if (normalized.startsWith("winner\u0000r")) return 0;
+  if (normalized.startsWith("winner\u0000final")) return 2;
   if (normalized.startsWith("winner\u0000")) return 1;
   return 2;
 }

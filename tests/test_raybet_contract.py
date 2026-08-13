@@ -3,6 +3,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
 
+import httpx
 import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
@@ -17,6 +18,7 @@ from app.models import (
     ProviderRawEvent,
     RayBetOddsRegistry,
 )
+from app.providers.raybet.http import RayBetHttpClient
 from app.providers.raybet.parser import (
     parse_matches,
     parse_odds_bootstrap,
@@ -31,6 +33,43 @@ FIXTURES = Path(__file__).parent / "fixtures"
 
 def _fixture(name: str) -> dict:
     return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+
+
+@pytest.mark.asyncio
+async def test_http_odds_retries_protection_response(monkeypatch) -> None:
+    client = RayBetHttpClient(
+        "https://recorded.invalid/v2",
+        "https://www.ray086.com",
+        max_attempts=3,
+    )
+    responses = [
+        httpx.Response(403, request=httpx.Request("GET", "https://recorded.invalid/v2/odds")),
+        httpx.Response(
+            200,
+            headers={"content-type": "application/json"},
+            json={"result": []},
+            request=httpx.Request("GET", "https://recorded.invalid/v2/odds"),
+        ),
+    ]
+    calls = 0
+
+    async def fake_get(*_args, **_kwargs):
+        nonlocal calls
+        calls += 1
+        return responses.pop(0)
+
+    async def no_wait(_seconds: float) -> None:
+        return None
+
+    monkeypatch.setattr(client._client, "get", fake_get)
+    monkeypatch.setattr("app.providers.raybet.http.asyncio.sleep", no_wait)
+    try:
+        payload = await client.get_odds(123)
+    finally:
+        await client.close()
+
+    assert calls == 2
+    assert payload.payload == {"result": []}
 
 
 def test_recorded_match_and_odds_payloads_preserve_provider_contract() -> None:

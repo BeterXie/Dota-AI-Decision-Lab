@@ -4,7 +4,7 @@ from statistics import mean
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import or_, select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
@@ -203,23 +203,48 @@ class SnapshotBuilder:
         tuple[str, ...],
         tuple[str, ...],
     ]:
+        map_number = (
+            await session.scalar(
+                select(CanonicalMap.map_number).where(CanonicalMap.id == canonical_map_id)
+            )
+            if canonical_map_id is not None
+            else None
+        )
+        criteria = [
+            or_(
+                (
+                    OddsObservationRecord.canonical_map_id == canonical_map_id
+                    if canonical_map_id is not None
+                    else False
+                ),
+                OddsObservationRecord.canonical_series_id == canonical_series_id,
+            ),
+            OddsObservationRecord.received_at <= decision_at,
+            OddsObservationRecord.market_type == "Winner",
+        ]
+        if canonical_map_id is not None:
+            criteria.append(OddsObservationRecord.match_stage.in_(_map_market_stages(map_number)))
+        latest_times = (
+            select(
+                OddsObservationRecord.odds_id,
+                func.max(OddsObservationRecord.received_at).label("latest_received_at"),
+            )
+            .where(*criteria)
+            .group_by(OddsObservationRecord.odds_id)
+            .subquery()
+        )
         records = list(
             (
                 await session.scalars(
                     select(OddsObservationRecord)
-                    .where(
-                        or_(
-                            (
-                                OddsObservationRecord.canonical_map_id == canonical_map_id
-                                if canonical_map_id is not None
-                                else False
-                            ),
-                            OddsObservationRecord.canonical_series_id == canonical_series_id,
+                    .join(
+                        latest_times,
+                        and_(
+                            OddsObservationRecord.odds_id == latest_times.c.odds_id,
+                            OddsObservationRecord.received_at
+                            == latest_times.c.latest_received_at,
                         ),
-                        OddsObservationRecord.received_at <= decision_at,
                     )
-                    .order_by(OddsObservationRecord.received_at.desc())
-                    .limit(256)
                 )
             ).all()
         )
@@ -280,7 +305,6 @@ class SnapshotBuilder:
             quality.blockers,
             quality.warnings,
         )
-
     async def _load_draft(
         self,
         session: AsyncSession,
@@ -571,3 +595,15 @@ def _sync_payload(record: LiveSyncEstimateRecord | None) -> dict[str, Any] | Non
         "status": record.status,
         "calculated_at": record.calculated_at,
     }
+
+
+def _map_market_stages(map_number: int | None) -> tuple[str, ...]:
+    if map_number is None:
+        return ()
+    return (
+        f"r{map_number}",
+        f"Map r{map_number}",
+        f"map r{map_number}",
+        f"Map {map_number}",
+        f"map {map_number}",
+    )

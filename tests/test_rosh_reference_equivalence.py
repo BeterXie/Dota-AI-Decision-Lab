@@ -102,7 +102,7 @@ def test_rosh_matches_pinned_reference_curve_and_high_sample_adjustment() -> Non
 
     expected = GOLDEN["scenarios"]["high_support_player_adjusted"]
     assert REFERENCE_COMMIT == GOLDEN["reference"]["commit"]
-    assert MODEL_VERSION == "rosh-c7a54b5-v1"
+    assert MODEL_VERSION == "rosh-c7a54b5-v2"
     assert [row["minute"] for row in result["pure_minute_table"]] == GOLDEN["minutes"]
     assert [row["win_rate_graph"] for row in result["pure_minute_table"]] == expected["pure_curve"]
     assert [row["win_rate_graph"] for row in result["minute_table"]] == expected["adjusted_curve"]
