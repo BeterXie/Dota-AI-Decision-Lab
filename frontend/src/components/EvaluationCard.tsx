@@ -16,6 +16,7 @@ export const EvaluationCard: React.FC<EvaluationCardProps> = ({ match }) => {
       ? match.team_b?.name
       : null;
   const evidenceCount = detail?.result_evidence?.length || 0;
+  const hasEvidence = evidenceCount > 0 || (detail?.future_odds?.length || 0) > 0 || detail?.result != null;
 
   return (
     <div className="analytics-card evaluation-card">
@@ -30,9 +31,8 @@ export const EvaluationCard: React.FC<EvaluationCardProps> = ({ match }) => {
           <span className="res-lbl">{t("winner")}</span>
         </div>
       </div>
-      <div className="eval-footer-note">
-        {detail?.result?.provider_conflict ? t("resultConflict") : t("noEvaluationEvidence")}
-      </div>
+      {!hasEvidence && <div className="eval-footer-note">{t("noEvaluationEvidence")}</div>}
+      {detail?.result?.provider_conflict && <div className="eval-footer-note">{t("resultConflict")}</div>}
     </div>
   );
 };
