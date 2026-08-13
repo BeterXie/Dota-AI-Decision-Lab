@@ -317,9 +317,7 @@ def _live_window(rows: list[DltvLiveObservationRecord], *, current, seconds: int
         "baseline_game_time_seconds": baseline.game_time_seconds,
         "effective_seconds": effective,
         "nw_delta": nw_delta,
-        "nw_velocity_per_minute": (
-            nw_delta / (effective / 60.0) if nw_delta is not None else None
-        ),
+        "nw_velocity_per_minute": (nw_delta / (effective / 60.0) if nw_delta is not None else None),
         "radiant_kills_delta": _int_delta(current.radiant_kills, baseline.radiant_kills),
         "dire_kills_delta": _int_delta(current.dire_kills, baseline.dire_kills),
     }
