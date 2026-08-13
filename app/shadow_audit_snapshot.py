@@ -1,7 +1,11 @@
 from collections import Counter
 from typing import Any
+from uuid import UUID
 
-from app.models import DecisionSnapshotRecord
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.models import DecisionSnapshotRecord, LiveSyncEstimateRecord
 
 
 def snapshot_quality(snapshots: list[DecisionSnapshotRecord]) -> dict[str, Any]:
@@ -40,6 +44,40 @@ def live_freshness(snapshots: list[DecisionSnapshotRecord]) -> dict[str, Any]:
                 **evidence[-1][1],
             }
             if evidence
+            else None
+        ),
+    }
+
+
+async def temporal_alignment(session: AsyncSession, canonical_map_id: UUID) -> dict[str, Any]:
+    estimates = list(
+        (
+            await session.scalars(
+                select(LiveSyncEstimateRecord)
+                .where(LiveSyncEstimateRecord.canonical_map_id == canonical_map_id)
+                .order_by(LiveSyncEstimateRecord.calculated_at)
+            )
+        ).all()
+    )
+    latest = estimates[-1] if estimates else None
+    return {
+        "estimate_count": len(estimates),
+        "status_counts": dict(Counter(item.status for item in estimates)),
+        "confidence_counts": dict(Counter(item.confidence for item in estimates)),
+        "latest": (
+            {
+                "status": latest.status,
+                "confidence": latest.confidence,
+                "estimated_lag_seconds": latest.estimated_lag_seconds,
+                "p50_seconds": latest.p50_seconds,
+                "p90_seconds": latest.p90_seconds,
+                "jitter_seconds": latest.jitter_seconds,
+                "sample_size": latest.sample_size,
+                "accepted_pair_ratio": latest.accepted_pair_ratio,
+                "ambiguous_ratio": latest.ambiguous_ratio,
+                "outlier_ratio": latest.outlier_ratio,
+            }
+            if latest is not None
             else None
         ),
     }
