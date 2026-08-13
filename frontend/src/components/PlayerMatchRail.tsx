@@ -50,8 +50,8 @@ export const PlayerMatchRail: React.FC<PlayerMatchRailProps> = ({ matches, selec
                       <span className="league-info">{match.tournament_name || t("unknownTournament")}{match.map_number ? ` · ${t("map")} ${match.map_number}` : ""}</span>
                     </div>
                     <div className="rail-card-teams">
-                      <div className="team-row"><span className="team-dot radiant" /><span className="team-name">{match.team_a?.name ?? t("unknownTeam")}</span><span className="team-odds">{formatOdds(pair?.teamA.price)}</span></div>
-                      <div className="team-row"><span className="team-dot dire" /><span className="team-name">{match.team_b?.name ?? t("unknownTeam")}</span><span className="team-odds">{formatOdds(pair?.teamB.price)}</span></div>
+                      <div className="team-row"><span className="team-dot team-a-order" /><span className="team-name">{match.team_a?.name ?? t("unknownTeam")}</span><span className="team-odds">{formatOdds(pair?.teamA.price)}</span></div>
+                      <div className="team-row"><span className="team-dot team-b-order" /><span className="team-name">{match.team_b?.name ?? t("unknownTeam")}</span><span className="team-odds">{formatOdds(pair?.teamB.price)}</span></div>
                     </div>
                     <div className="rail-card-footer"><span className="quality-pill">{match.latest_snapshot?.mode || match.identity_status}</span><span>{phaseFooter(phase, locale)}</span></div>
                   </button>
