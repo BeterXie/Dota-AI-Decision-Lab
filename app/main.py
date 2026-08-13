@@ -27,6 +27,7 @@ from app.db_partitions import ensure_weekly_partitions
 from app.domain.jobs import JobType
 from app.draft.coordinator import DltvBootstrapCoordinator
 from app.draft.refresh import schedule_incomplete_draft_refreshes
+from app.draft.role_assignment import DraftRoleAssignmentService
 from app.draft.rosh_service import RoshService
 from app.evaluation import EvaluationService, FutureOddsService, SettlementService
 from app.events.dispatcher import DomainEventDispatcher, OutboxDispatcher
@@ -148,6 +149,10 @@ async def run() -> None:
         raw_events=raw_events,
         events=events,
         identities=identities,
+        role_assignment=DraftRoleAssignmentService(
+            stratz=stratz_client,
+            raw_events=raw_events,
+        ),
     )
     dltv_collector = DltvSocketCollector(
         session_factory=session_factory,

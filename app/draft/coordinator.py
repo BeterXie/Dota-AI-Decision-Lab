@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.canonical import content_digest
 from app.domain.draft import DraftSlot, DraftValidation
 from app.domain.events import DomainEvent, DomainEventType
+from app.draft.role_assignment import DraftRoleAssignmentService
 from app.events.outbox import EventRepository
 from app.identity.resolver import IdentityResolver, ResolvedMap
 from app.models import (
@@ -18,15 +19,21 @@ from app.models import (
     DraftSnapshotRecord,
 )
 from app.providers.dltv.bootstrap import DltvBootstrapClient
+from app.providers.dltv.draft_picks import parse_dltv_provider_picks
 from app.providers.dltv.parser import (
     PARSER_VERSION,
     parse_bootstrap_identity,
-    parse_draft,
     parse_draft_labels,
     parse_fast_patch,
 )
 from app.providers.dltv.reducer import reduce_fast_state
 from app.repositories.raw import RawEventRepository
+
+VERIFIED_POSITION_SOURCES = {
+    "STRATZ_CURRENT_MATCH",
+    "HISTORICAL_ROLE_ASSIGNMENT",
+    "MANUAL",
+}
 
 
 @dataclass(frozen=True)
@@ -45,11 +52,16 @@ class DltvBootstrapCoordinator:
         raw_events: RawEventRepository,
         events: EventRepository,
         identities: IdentityResolver,
+        role_assignment: DraftRoleAssignmentService | None = None,
     ) -> None:
         self._client = client
         self._raw_events = raw_events
         self._events = events
         self._identities = identities
+        self._role_assignment = role_assignment or DraftRoleAssignmentService(
+            stratz=None,
+            raw_events=raw_events,
+        )
 
     async def bootstrap(
         self,
@@ -89,7 +101,16 @@ class DltvBootstrapCoordinator:
                 occurred_at=response.received_at,
             ),
         )
-        draft = parse_draft(response.payload)
+
+        provider_picks = parse_dltv_provider_picks(response.payload)
+        resolution = await self._role_assignment.resolve(
+            session,
+            valve_match_id=valve_match_id,
+            picks=provider_picks,
+            observed_at=response.received_at,
+        )
+        draft = resolution.draft
+        draft_observed_at = max(response.received_at, resolution.evidence_cutoff)
         player_names, hero_names = parse_draft_labels(response.payload)
         draft_hash = content_digest(
             {
@@ -115,25 +136,27 @@ class DltvBootstrapCoordinator:
             .limit(1)
         )
         if latest is not None and latest.complete and not draft.complete:
-            await self._append_bootstrap_fast_state(
-                session,
-                canonical_map_id=resolved.canonical_map_id,
-                valve_match_id=valve_match_id,
-                payload=response.payload,
-                received_at=response.received_at,
-                raw_event_id=raw_event_id,
-            )
-            return DltvBootstrapResult(
-                resolved=resolved,
-                draft=DraftValidation(
-                    complete=True,
-                    slots=tuple(await self._stored_slots(session, latest.id)),
-                    blockers=(),
-                    warnings=tuple(latest.warnings),
-                ),
-                draft_snapshot_id=latest.id,
-                appended=False,
-            )
+            latest_slots = await self._stored_slots(session, latest.id)
+            if _positions_are_verified(latest_slots):
+                await self._append_bootstrap_fast_state(
+                    session,
+                    canonical_map_id=resolved.canonical_map_id,
+                    valve_match_id=valve_match_id,
+                    payload=response.payload,
+                    received_at=response.received_at,
+                    raw_event_id=raw_event_id,
+                )
+                return DltvBootstrapResult(
+                    resolved=resolved,
+                    draft=DraftValidation(
+                        complete=True,
+                        slots=tuple(latest_slots),
+                        blockers=(),
+                        warnings=tuple(latest.warnings),
+                    ),
+                    draft_snapshot_id=latest.id,
+                    appended=False,
+                )
         if existing is not None:
             await self._append_bootstrap_fast_state(
                 session,
@@ -149,6 +172,7 @@ class DltvBootstrapCoordinator:
                 draft_snapshot_id=existing.id,
                 appended=False,
             )
+
         snapshot = DraftSnapshotRecord(
             canonical_map_id=resolved.canonical_map_id,
             valve_match_id=valve_match_id,
@@ -156,8 +180,8 @@ class DltvBootstrapCoordinator:
             blockers=list(draft.blockers),
             warnings=list(draft.warnings),
             payload_hash=draft_hash,
-            statistics_cutoff=response.received_at,
-            observed_at=response.received_at,
+            statistics_cutoff=draft_observed_at,
+            observed_at=draft_observed_at,
             raw_event_id=raw_event_id,
         )
         session.add(snapshot)
@@ -202,7 +226,7 @@ class DltvBootstrapCoordinator:
                         "canonical_map_id": str(resolved.canonical_map_id),
                         "draft_snapshot_id": str(snapshot.id),
                     },
-                    occurred_at=response.received_at,
+                    occurred_at=draft_observed_at,
                 ),
             )
         await self._append_bootstrap_fast_state(
@@ -297,3 +321,7 @@ class DltvBootstrapCoordinator:
                 raw_event_id=raw_event_id,
             )
         )
+
+
+def _positions_are_verified(slots: list[DraftSlot]) -> bool:
+    return len(slots) == 10 and all(slot.source in VERIFIED_POSITION_SOURCES for slot in slots)
