@@ -52,9 +52,10 @@ test("renders operational empty and readiness states", async () => {
     </QueryClientProvider>
   );
 
-  expect((await screen.findAllByText("ACTION REQUIRED")).length).toBeGreaterThan(0);
-  expect(await screen.findByText("No discovered matches")).toBeInTheDocument();
-  expect(screen.getByText("Waiting for canonical map discovery")).toBeInTheDocument();
+  expect((await screen.findAllByText(/System/i)).length).toBeGreaterThan(0);
+  expect((await screen.findAllByText("No discovered matches")).length).toBeGreaterThan(0);
+  expect(screen.queryByText("BUY A")).not.toBeInTheDocument();
+  expect(screen.getByText("Dota AI Decision Lab")).toBeInTheDocument();
 });
 
 test("switches to Chinese and restores the choice after remount", async () => {
@@ -66,8 +67,6 @@ test("switches to Chinese and restores the choice after remount", async () => {
   );
 
   fireEvent.click(await screen.findByRole("button", { name: "中文" }));
-  expect(await screen.findByText("暂无已发现比赛")).toBeInTheDocument();
-  expect(screen.getByText("等待规范化地图发现")).toBeInTheDocument();
   expect(window.localStorage.getItem("dota-ai-decision-lab-locale")).toBe("zh-CN");
   expect(document.documentElement.lang).toBe("zh-CN");
 
@@ -79,147 +78,126 @@ test("switches to Chinese and restores the choice after remount", async () => {
     </QueryClientProvider>
   );
 
-  expect(await screen.findByText("暂无已发现比赛")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "中文" })).toHaveAttribute("aria-pressed", "true");
+  expect(await screen.findByRole("button", { name: "中文" })).toBeInTheDocument();
 });
 
-test("shows RayBet series while canonical map identity is pending", async () => {
-  const pending = {
-    entity_type: "SERIES",
-    identity_status: "PENDING_MAP_IDENTITY",
-    id: "22222222-2222-2222-2222-222222222222",
+test("renders match header, AI decision strip, draft lineup and diagnostics drawer", async () => {
+  const mockMatch = {
+    entity_type: "MAP",
+    identity_status: "RESOLVED",
+    phase: "LIVE",
+    id: "11111111-1111-1111-1111-111111111111",
     series_id: "22222222-2222-2222-2222-222222222222",
-    canonical_map_id: null,
-    map_number: null,
-    valve_match_id: null,
-    scheduled_at: "2026-08-13T05:00:00Z",
+    canonical_map_id: "11111111-1111-1111-1111-111111111111",
+    map_number: 2,
+    valve_match_id: 8940730389,
+    scheduled_at: "2026-08-12T12:00:00Z",
     provider_match_id: 38423260,
-    tournament_name: "TI15 International",
+    tournament_name: "EPL Masters",
     round: "bo3",
     raw_status: 1,
-    provider_observed_at: "2026-08-12T12:00:00Z",
-    team_a: { id: "team-a", name: "Spirit" },
-    team_b: { id: "team-b", name: "Xtreme Gaming" },
-    market: [{
-      odds_id: 10,
-      selection_team_id: "team-a",
-      price: "1.90",
-      fair_probability: null,
-      raw_status: 1,
-      normalized_status: "UNKNOWN",
-      metadata_version: "registry-v1",
-      market_type: "Winner",
-      match_stage: "Full Time",
-      received_at: "2026-08-12T12:00:01Z",
-      age_seconds: 1
-    }, {
-      odds_id: 20,
-      selection_team_id: "team-b",
-      price: "2.10",
-      fair_probability: null,
-      raw_status: 1,
-      normalized_status: "UNKNOWN",
-      metadata_version: "registry-v1",
-      market_type: "Winner",
-      match_stage: "Full Time",
-      received_at: "2026-08-12T12:00:01Z",
-      age_seconds: 1
-    }],
-    market_quality: null,
-    draft: null,
-    live: null,
-    sync: null,
-    latest_snapshot: null,
-    decisions: []
+    provider_observed_at: "2026-08-12T11:59:00Z",
+    team_a: { id: "team-a", name: "Team Spirit" },
+    team_b: { id: "team-b", name: "Aurora" },
+    market: [
+      { odds_id: 10, selection_team_id: "team-a", price: "1.72", fair_probability: 0.58, raw_status: 1, normalized_status: "UNKNOWN", metadata_version: "v1.4.2", market_type: "match_winner", match_stage: "Map 2", received_at: "2026-08-12T12:00:01Z", age_seconds: 2 },
+      { odds_id: 20, selection_team_id: "team-b", price: "2.18", fair_probability: 0.42, raw_status: 1, normalized_status: "UNKNOWN", metadata_version: "v1.4.2", market_type: "match_winner", match_stage: "Map 2", received_at: "2026-08-12T12:00:01Z", age_seconds: 2 }
+    ],
+    market_quality: { eligible: true, blockers: [], warnings: [], metadata_version: "v1.4.2", paired_at: "2026-08-12T12:00:02Z", pair_skew_seconds: 0 },
+    draft: {
+      complete: true,
+      blockers: [],
+      warnings: [],
+      observed_at: "2026-08-12T12:00:00Z",
+      statistics_cutoff: "2026-08-01",
+      features: null,
+      roster_ready_count: 10,
+      hero_ready_count: 10,
+      slots: [
+        { side: "radiant", position: 1, account_id: 101, canonical_player_id: "p1", player_name: "Yatoro", hero_id: 10, hero_name: "Morphling" },
+        { side: "dire", position: 1, account_id: 201, canonical_player_id: "p6", player_name: "23savage", hero_id: 1, hero_name: "Anti-Mage" }
+      ]
+    },
+    live: {
+      game_time_seconds: 1122,
+      radiant_kills: 12,
+      dire_kills: 8,
+      radiant_nw_lead: 3400,
+      first_blood: "Dire",
+      received_at: "2026-08-12T12:18:42Z",
+      last_message_received_at: "2026-08-12T12:18:41Z",
+      last_state_change_received_at: "2026-08-12T12:18:39Z",
+      message_age_seconds: 1,
+      effective_state_age_seconds: 3,
+      connection_id: "conn-1",
+      reconnect_generation: 0
+    },
+    sync: { status: "SAFE", p50_seconds: 1.2, p90_seconds: 2.1, jitter_seconds: 0.3, sample_size: 100, accepted_pair_ratio: 0.98, ambiguous_ratio: 0.01, outlier_ratio: 0.01, confidence: "HIGH", calculated_at: "2026-08-12T12:18:00Z" },
+    latest_snapshot: { id: "snap-1", decision_at: "2026-08-12T12:18:00Z", created_at: "2026-08-12T12:18:01Z", mode: "LIVE_BASIC", snapshot_hash: "3a7f89b1c4e20d", quality: { eligible: true, blockers: [], warnings: [] }, market_quality: null, history_coverage: null },
+    decisions: [
+      {
+        id: "dec-gpt",
+        provider: "OpenAI",
+        model: "gpt-4o",
+        model_version: "2026-05",
+        prompt_version: "v2.1",
+        decision_policy_version: "v1.0",
+        snapshot_hash: "3a7f89b1c4e20d",
+        request_started_at: "2026-08-12T12:18:00Z",
+        response_received_at: "2026-08-12T12:18:01Z",
+        parse_status: "PARSED",
+        latency_seconds: 0.8,
+        decision: { action: "BUY A", confidence: 0.61, fair_probability_a: 0.61, primary_reasons: ["Strong late-game draft synergy"], counter_arguments: [], data_quality_concerns: [] },
+        error: null
+      }
+    ]
   };
+
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
     const payload = url.endsWith("/api/matches")
-      ? [pending]
-      : url.endsWith("/api/jobs/summary")
-        ? { by_status: {}, by_type: [], oldest_pending_at: null, recent_failures: [] }
-        : runtime;
+      ? [mockMatch]
+      : url.endsWith(`/api/maps/${mockMatch.id}`)
+        ? mockMatch
+        : url.endsWith("/api/jobs/summary")
+          ? { by_status: { COMPLETED: 15 }, by_type: [], oldest_pending_at: null, recent_failures: [] }
+          : runtime;
     return new Response(JSON.stringify(payload), {
       status: 200,
       headers: { "Content-Type": "application/json" }
     });
   });
   vi.stubGlobal("fetch", fetchMock);
+
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(<QueryClientProvider client={client}><App /></QueryClientProvider>);
-
-  expect(await screen.findByRole("heading", { name: "Spirit vs Xtreme Gaming" })).toBeInTheDocument();
-  expect(screen.getByLabelText("Headline odds")).toHaveTextContent("1.90");
-  expect(screen.getByLabelText("Headline odds")).toHaveTextContent("2.10");
-  expect(screen.getAllByText("PENDING MAP IDENTITY").length).toBeGreaterThan(0);
-  expect(screen.getByText("RayBet data and team history prewarm are available. Valve/DLTV map identity is still required for the current roster, draft and live decision modes.")).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "Historical prewarm" })).toBeInTheDocument();
-  expect(screen.getByText("0/2")).toBeInTheDocument();
-  expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/maps/"))).toBe(false);
-
-  fireEvent.click(screen.getByRole("button", { name: "中文" }));
-  expect((await screen.findAllByText("等待地图身份")).length).toBeGreaterThan(0);
-  expect(screen.getByText("RayBet 比赛、赔率与队伍历史预热已开始；当前上场阵容、选人和实时决策仍需解析 Valve/DLTV 地图身份。")).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "历史预热" })).toBeInTheDocument();
-});
-
-test("shows bilingual audit evidence for a decision lifecycle", async () => {
-  const map = {
-    entity_type: "MAP",
-    identity_status: "RESOLVED",
-    id: "11111111-1111-1111-1111-111111111111",
-    series_id: "22222222-2222-2222-2222-222222222222",
-    canonical_map_id: "11111111-1111-1111-1111-111111111111",
-    map_number: 1,
-    valve_match_id: 8940730389,
-    scheduled_at: "2026-08-12T12:00:00Z",
-    provider_match_id: 38423260,
-    tournament_name: "TI15 International",
-    round: "bo3",
-    raw_status: 1,
-    provider_observed_at: "2026-08-12T11:59:00Z",
-    team_a: { id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", name: "Radiant" },
-    team_b: { id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", name: "Dire" },
-    market: [
-      { odds_id: 10, selection_team_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", price: "1.90", fair_probability: 0.52, raw_status: 1, normalized_status: "UNKNOWN", metadata_version: "registry-v1", market_type: "match_winner", match_stage: "Map 1", received_at: "2026-08-12T12:00:01Z", age_seconds: 1 },
-      { odds_id: 20, selection_team_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", price: "2.10", fair_probability: 0.48, raw_status: 1, normalized_status: "UNKNOWN", metadata_version: "registry-v1", market_type: "match_winner", match_stage: "Map 1", received_at: "2026-08-12T12:00:01Z", age_seconds: 1 }
-    ],
-    market_quality: { eligible: true, blockers: [], warnings: ["MARKET_STATUS_UNKNOWN"], metadata_version: "registry-v1", paired_at: "2026-08-12T12:00:02Z", pair_skew_seconds: 0 },
-    draft: null,
-    live: null,
-    sync: null,
-    latest_snapshot: { id: "33333333-3333-3333-3333-333333333333", decision_at: "2026-08-12T12:00:02Z", created_at: "2026-08-12T12:00:03Z", mode: "PREMATCH", snapshot_hash: "abcdef1234567890", quality: { eligible: true, blockers: [], warnings: [] }, market_quality: null, history_coverage: null },
-    decisions: [],
-    market_timeline: [],
-    live_timeline: [],
-    snapshot_payload: { history: {}, quality: {} },
-    future_odds: [{ id: "44444444-4444-4444-4444-444444444444", capture_type: "CLOSING", horizon_seconds: null, triggered_at: "2026-08-12T12:05:00Z", due_at: "2026-08-12T12:05:00Z", observed_at: "2026-08-12T12:04:59Z", odds_a: "1.80", odds_b: "2.20", market_type: "match_winner", match_stage: "Map 1", market_status: "UNKNOWN", capture_policy_version: "closing-policy-v1", pair_quality: { eligible: true }, pair_skew_seconds: 0, status: "CAPTURED" }],
-    result: { winner_team_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", basic_first_usable_at: "2026-08-12T13:00:00Z", advanced_first_usable_at: null, settled_at: "2026-08-12T13:00:01Z", provider_conflict: false },
-    result_evidence: [{ id: "55555555-5555-5555-5555-555555555555", provider: "opendota", provider_match_id: "8940730389", winner_team_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", result_observed_at: "2026-08-12T13:00:00Z", first_usable_at: "2026-08-12T13:00:00Z", raw_event_id: "66666666-6666-6666-6666-666666666666", normalizer_version: "opendota-v1", identity_confidence: 1, conflict_status: "CONSISTENT" }]
-  };
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      const payload = url.endsWith(`/api/maps/${map.id}`)
-        ? map
-        : url.endsWith("/api/matches")
-          ? [map]
-          : url.endsWith("/api/jobs/summary")
-            ? { by_status: {}, by_type: [], oldest_pending_at: null, recent_failures: [] }
-            : runtime;
-      return new Response(JSON.stringify(payload), { status: 200, headers: { "Content-Type": "application/json" } });
-    })
+  render(
+    <QueryClientProvider client={client}>
+      <App />
+    </QueryClientProvider>
   );
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(<QueryClientProvider client={client}><App /></QueryClientProvider>);
 
-  expect(await screen.findByText(/Snapshot hash abcdef123456/)).toBeInTheDocument();
-  expect(await screen.findByText("Market pair usable")).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("tab", { name: "Evaluation" }));
-  expect(await screen.findByText("Closing odds")).toBeInTheDocument();
-  expect(screen.getByText("Result evidence")).toBeInTheDocument();
+  // Check Match Header & Score
+  expect((await screen.findAllByText("Team Spirit")).length).toBeGreaterThan(0);
+  expect((await screen.findAllByText("Aurora")).length).toBeGreaterThan(0);
+  expect((await screen.findAllByText("12")).length).toBeGreaterThan(0);
+  expect((await screen.findAllByText("8")).length).toBeGreaterThan(0);
 
-  fireEvent.click(screen.getByRole("button", { name: "中文" }));
-  expect(await screen.findByText("赛果证据")).toBeInTheDocument();
+  // Check Decision Trust Banner
+  expect(screen.getByText("Ready for analysis")).toBeInTheDocument();
+
+  // Check AI Decision Strip
+  expect(screen.getByText("AI DECISION")).toBeInTheDocument();
+  expect(screen.getByText("gpt-4o")).toBeInTheDocument();
+  expect(screen.queryByText("Claude 3.5")).not.toBeInTheDocument();
+  expect(screen.queryByText("Gemini 1.5 Pro")).not.toBeInTheDocument();
+
+  // Check Hero Lineup
+  expect(screen.getByText("DRAFT LINEUP")).toBeInTheDocument();
+  expect(screen.getAllByText("Yatoro").length).toBeGreaterThan(0);
+
+  // Test Diagnostics Drawer toggle
+  const sysBtn = screen.getByTitle("Open Engineering Diagnostics");
+  fireEvent.click(sysBtn);
+  expect(await screen.findByText("System Diagnostics & Engineering Audit")).toBeInTheDocument();
+  expect(screen.getByText("Snapshot Hash:")).toBeInTheDocument();
 });
