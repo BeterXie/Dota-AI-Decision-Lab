@@ -78,16 +78,16 @@ async def project_map_sides(
 ) -> MapSideAssignment:
     if canonical_map.valve_match_id is None:
         return _unresolved_assignment("SIDE_IDENTITY_VALVE_MATCH_MISSING")
-    criteria = [
+    raw_criteria = [
         ProviderRawEvent.provider == "dltv",
         ProviderRawEvent.event_type == "DLTV_BOOTSTRAP",
         ProviderRawEvent.provider_key == str(canonical_map.valve_match_id),
     ]
     if as_of is not None:
-        criteria.append(ProviderRawEvent.received_at <= as_of)
+        raw_criteria.append(ProviderRawEvent.received_at <= as_of)
     raw = await session.scalar(
         select(ProviderRawEvent)
-        .where(*criteria)
+        .where(*raw_criteria)
         .order_by(ProviderRawEvent.received_at.desc())
         .limit(1)
     )
@@ -109,14 +109,15 @@ async def project_map_sides(
         str(evidence.radiant_provider_team_id),
         str(evidence.dire_provider_team_id),
     }
+    mapping_criteria = [
+        ProviderTeamMapping.provider == "dltv",
+        ProviderTeamMapping.provider_team_id.in_(provider_ids),
+    ]
+    if as_of is not None:
+        mapping_criteria.append(ProviderTeamMapping.first_seen_at <= as_of)
     mappings = list(
         (
-            await session.scalars(
-                select(ProviderTeamMapping).where(
-                    ProviderTeamMapping.provider == "dltv",
-                    ProviderTeamMapping.provider_team_id.in_(provider_ids),
-                )
-            )
+            await session.scalars(select(ProviderTeamMapping).where(*mapping_criteria))
         ).all()
     )
     canonical_by_provider = {
