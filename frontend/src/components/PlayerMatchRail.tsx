@@ -12,20 +12,17 @@ interface PlayerMatchRailProps {
 export const PlayerMatchRail: React.FC<PlayerMatchRailProps> = ({ matches, selectedId, onSelectMatch }) => {
   const { locale, t } = useI18n();
   const groups = React.useMemo(() => {
-    const live: MapSummary[] = [];
-    const upcoming: MapSummary[] = [];
-    const tracked: MapSummary[] = [];
-    matches.forEach((match) => {
-      const phase = getMatchDisplayPhase(match);
-      if (phase === "LIVE") live.push(match);
-      else if (phase === "UPCOMING") upcoming.push(match);
-      else tracked.push(match);
-    });
+    const buckets: Record<"LIVE" | "UPCOMING" | "AWAITING_RESULT" | "TRACKED" | "POSTMATCH", MapSummary[]> = {
+      LIVE: [], UPCOMING: [], AWAITING_RESULT: [], TRACKED: [], POSTMATCH: []
+    };
+    matches.forEach((match) => buckets[getMatchDisplayPhase(match)].push(match));
     return [
-      { key: "live", label: locale === "zh-CN" ? "直播" : "LIVE", items: live },
-      { key: "upcoming", label: locale === "zh-CN" ? "即将开始" : "UPCOMING", items: upcoming },
-      { key: "tracked", label: locale === "zh-CN" ? "追踪中" : "TRACKED", items: tracked }
-    ].filter((group) => group.items.length > 0);
+      { key: "LIVE", label: locale === "zh-CN" ? "直播" : "LIVE" },
+      { key: "UPCOMING", label: locale === "zh-CN" ? "即将开始" : "UPCOMING" },
+      { key: "AWAITING_RESULT", label: locale === "zh-CN" ? "等待赛果" : "AWAITING RESULT" },
+      { key: "TRACKED", label: locale === "zh-CN" ? "追踪中" : "TRACKED" },
+      { key: "POSTMATCH", label: locale === "zh-CN" ? "已结束" : "FINISHED" }
+    ].map((group) => ({ ...group, items: buckets[group.key as keyof typeof buckets] })).filter((group) => group.items.length > 0);
   }, [matches, locale]);
 
   return (
@@ -38,28 +35,25 @@ export const PlayerMatchRail: React.FC<PlayerMatchRailProps> = ({ matches, selec
         {groups.length === 0 ? <div className="empty-rail-msg">{t("noCanonicalMaps")}</div> : groups.map((group) => (
           <section className="player-match-group" key={group.key}>
             <div className="player-match-group-title">
-              <span>{group.key === "live" && <i className="live-group-dot" />}{group.label}</span>
+              <span>{group.key === "LIVE" && <i className="live-group-dot" />}{group.label}</span>
               <small>{group.items.length}</small>
             </div>
             <div className="player-match-group-list">
               {group.items.map((match) => {
                 const phase = getMatchDisplayPhase(match);
                 const pair = primaryMarketPair(match.market, match.team_a?.id, match.team_b?.id);
-                const gameTime = match.live?.game_time_seconds;
-                const timeLabel = phase === "LIVE" && gameTime != null
-                  ? `${Math.floor(gameTime / 60)}:${String(Math.max(0, gameTime % 60)).padStart(2, "0")}`
-                  : scheduleLabel(match.scheduled_at, locale);
+                const headline = phaseHeadline(phase, match.live?.game_time_seconds, match.scheduled_at, locale);
                 return (
                   <button type="button" key={match.id} className={`rail-match-card player-rail-card ${match.id === selectedId ? "selected" : ""}`} onClick={() => onSelectMatch(match.id)}>
                     <div className="rail-card-top">
-                      <span className={`phase-badge ${phase === "LIVE" ? "badge-live" : "badge-upcoming"}`}>{phase === "LIVE" ? `● ${timeLabel}` : timeLabel}</span>
+                      <span className={`phase-badge ${phase === "LIVE" ? "badge-live" : "badge-upcoming"}`}>{headline}</span>
                       <span className="league-info">{match.tournament_name || t("unknownTournament")}{match.map_number ? ` · ${t("map")} ${match.map_number}` : ""}</span>
                     </div>
                     <div className="rail-card-teams">
                       <div className="team-row"><span className="team-dot radiant" /><span className="team-name">{match.team_a?.name ?? t("unknownTeam")}</span><span className="team-odds">{formatOdds(pair?.teamA.price)}</span></div>
                       <div className="team-row"><span className="team-dot dire" /><span className="team-name">{match.team_b?.name ?? t("unknownTeam")}</span><span className="team-odds">{formatOdds(pair?.teamB.price)}</span></div>
                     </div>
-                    <div className="rail-card-footer"><span className="quality-pill">{match.latest_snapshot?.mode || match.identity_status}</span></div>
+                    <div className="rail-card-footer"><span className="quality-pill">{match.latest_snapshot?.mode || match.identity_status}</span><span>{phaseFooter(phase, locale)}</span></div>
                   </button>
                 );
               })}
@@ -70,6 +64,27 @@ export const PlayerMatchRail: React.FC<PlayerMatchRailProps> = ({ matches, selec
     </aside>
   );
 };
+
+function phaseHeadline(phase: ReturnType<typeof getMatchDisplayPhase>, gameTime: number | null | undefined, scheduledAt: string | null, locale: string): string {
+  if (phase === "LIVE" && gameTime != null) return `● ${formatGameTime(gameTime)}`;
+  if (phase === "AWAITING_RESULT") return locale === "zh-CN" ? "等待赛果" : "AWAITING";
+  if (phase === "POSTMATCH") return locale === "zh-CN" ? "已结束" : "FINISHED";
+  return scheduleLabel(scheduledAt, locale);
+}
+
+function phaseFooter(phase: ReturnType<typeof getMatchDisplayPhase>, locale: string): string {
+  const zh = locale === "zh-CN";
+  if (phase === "LIVE") return zh ? "进行中" : "IN PLAY";
+  if (phase === "UPCOMING") return zh ? "赛前" : "PREMATCH";
+  if (phase === "AWAITING_RESULT") return zh ? "结算待确认" : "RESULT PENDING";
+  if (phase === "POSTMATCH") return zh ? "赛后" : "POSTMATCH";
+  return zh ? "状态确认中" : "STATUS PENDING";
+}
+
+function formatGameTime(seconds: number): string {
+  const safe = Math.max(0, Math.floor(seconds));
+  return `${Math.floor(safe / 60)}:${String(safe % 60).padStart(2, "0")}`;
+}
 
 function scheduleLabel(value: string | null, locale: string): string {
   if (!value) return locale === "zh-CN" ? "待定" : "TBD";
