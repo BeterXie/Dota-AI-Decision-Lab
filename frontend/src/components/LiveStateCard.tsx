@@ -15,7 +15,7 @@ export const LiveStateCard: React.FC<LiveStateCardProps> = ({ match }) => {
     : `${Math.floor(gameTime / 60)}:${String(gameTime % 60).padStart(2, "0")}`;
   const effectiveAge = live?.effective_state_age_seconds;
   const messageAge = live?.message_age_seconds;
-  const isStale = messageAge != null && messageAge > 45;
+  const isStale = effectiveAge != null && effectiveAge > 45;
 
   return (
     <div className="analytics-card live-state-card">
@@ -28,7 +28,7 @@ export const LiveStateCard: React.FC<LiveStateCardProps> = ({ match }) => {
         <>
           {isStale && (
             <div className="stale-warning-banner">
-              {translateStatus("LIVE_STALE", locale)} · {Math.round(messageAge)}s
+              {translateStatus("LIVE_STALE", locale)} · {Math.round(effectiveAge)}s
             </div>
           )}
           <div className="live-state-grid">
@@ -49,7 +49,9 @@ export const LiveStateCard: React.FC<LiveStateCardProps> = ({ match }) => {
               <span className="stat-value">
                 {live.radiant_nw_lead == null
                   ? "—"
-                  : `${live.radiant_nw_lead >= 0 ? "+" : ""}${live.radiant_nw_lead.toLocaleString()}`}
+                  : live.radiant_nw_lead === 0
+                    ? (locale === "zh-CN" ? "均势" : "Even")
+                    : `${live.radiant_nw_lead > 0 ? (locale === "zh-CN" ? "天辉" : "Radiant") : (locale === "zh-CN" ? "夜魇" : "Dire")} +${Math.abs(live.radiant_nw_lead).toLocaleString(locale)}`}
               </span>
             </div>
             <div className="live-stat-row">
