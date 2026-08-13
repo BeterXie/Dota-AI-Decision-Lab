@@ -97,8 +97,9 @@ class SideAwareSnapshotBuilder(SnapshotBuilder):
             slots=slots,
             decision_at=decision_at,
         )
+        side_resolved = side_assignment is not None and side_assignment.resolved
         if slots:
-            if side_assignment is not None and side_assignment.resolved:
+            if side_resolved:
                 _align_history_to_series(history, side_assignment, series)
             else:
                 _remove_unassigned_roster_history(history)
@@ -108,8 +109,9 @@ class SideAwareSnapshotBuilder(SnapshotBuilder):
                     if blocker != "ROSTER_IDENTITY_AMBIGUOUS"
                 ]
                 history_warnings.append("ROSTER_SIDE_IDENTITY_UNRESOLVED")
-        if draft_complete and (side_assignment is None or not side_assignment.resolved):
-            history_blockers.append(
+        effective_draft_complete = draft_complete and side_resolved
+        if draft_complete and not side_resolved:
+            history_warnings.append(
                 side_assignment.blocker
                 if side_assignment is not None and side_assignment.blocker is not None
                 else "SIDE_IDENTITY_UNRESOLVED"
@@ -147,7 +149,7 @@ class SideAwareSnapshotBuilder(SnapshotBuilder):
                 market_age_seconds=market_age,
                 market_max_age_seconds=self._settings.live_market_max_age_seconds,
                 draft_available=draft is not None,
-                draft_complete=draft_complete,
+                draft_complete=effective_draft_complete,
                 historical_future_leak=False,
                 historical_blockers=tuple(history_blockers),
                 historical_warnings=tuple(history_warnings),
