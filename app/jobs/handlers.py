@@ -442,42 +442,41 @@ class ApplicationJobHandlers:
 
     async def resolve_postmatch(self, job: DurableJob) -> None:
         canonical_map_id = _required_uuid(job.payload, "canonical_map_id")
-        async with self._d.session_factory() as session, session.begin():
+        async with self._d.session_factory() as session:
             canonical_map = await session.get(CanonicalMap, canonical_map_id)
             if canonical_map is None or canonical_map.valve_match_id is None:
                 raise ValueError("postmatch map has no Valve Match ID")
-            response = await self._d.opendota.get_match_advanced(canonical_map.valve_match_id)
-            if not isinstance(response.payload, dict):
-                raise ValueError("OpenDota postmatch response is invalid")
-            raw_event_id = await self._d.raw_events.append(
-                session,
-                provider="opendota",
-                event_type="OPENDOTA_POSTMATCH",
-                provider_key=str(canonical_map.valve_match_id),
-                payload=response.payload,
-                request_started_at=response.request_started_at,
-                received_at=response.received_at,
-                parser_version=self._d.opendota.normalizer_version,
-            )
-            bundle = self._d.opendota.normalize_match(
-                response.payload, fetched_at=response.received_at
-            )
+            series = await session.get(CanonicalSeries, canonical_map.series_id)
+            if series is None:
+                raise ValueError("postmatch map has no canonical series")
+            valve_match_id = canonical_map.valve_match_id
+            expected_team_ids = {series.team_a_id, series.team_b_id}
+        provider, response, bundle, raw_event_id = await self._postmatch_response(
+            valve_match_id,
+            expected_team_ids=expected_team_ids,
+        )
+        async with self._d.session_factory() as session, session.begin():
+            canonical_map = await session.get(CanonicalMap, canonical_map_id)
+            if canonical_map is None or canonical_map.valve_match_id != valve_match_id:
+                raise ValueError("postmatch map identity changed during resolution")
             fact = await self._d.historical_repository.persist_bundle(
                 session,
                 bundle,
                 raw_event_id=raw_event_id,
-                normalizer_version=self._d.opendota.normalizer_version,
+                normalizer_version=provider.normalizer_version,
             )
+            if fact.winner_team_id is None:
+                raise ValueError("postmatch winner identity is not available yet")
             result = await self._d.settlement.settle(
                 session,
                 canonical_map_id=canonical_map_id,
                 winner_team_id=fact.winner_team_id,
-                provider="opendota",
+                provider=provider.name,
                 provider_match_id=bundle.match.provider_match_id,
                 result_observed_at=response.received_at,
                 basic_first_usable_at=bundle.match.first_usable_at,
                 raw_event_id=raw_event_id,
-                normalizer_version=self._d.opendota.normalizer_version,
+                normalizer_version=provider.normalizer_version,
                 identity_confidence=1.0,
                 advanced_first_usable_at=(
                     bundle.match.first_usable_at if bundle.advanced_available else None
@@ -508,6 +507,67 @@ class ApplicationJobHandlers:
                     ),
                 )
 
+    async def _postmatch_response(self, valve_match_id: int, *, expected_team_ids: set[UUID]):
+        failures: list[str] = []
+        providers = tuple(
+            provider
+            for provider in (self._d.historical_primary, self._d.opendota)
+            if provider is not None
+        )
+        for provider in providers:
+            try:
+                response = await provider.get_match_advanced(valve_match_id)
+                if not isinstance(response.payload, dict) or response.payload.get("errors"):
+                    raise ValueError("postmatch response is invalid")
+                async with self._d.session_factory() as session, session.begin():
+                    raw_event_id = await self._d.raw_events.append(
+                        session,
+                        provider=provider.name,
+                        event_type=f"{provider.name.upper()}_POSTMATCH",
+                        provider_key=str(valve_match_id),
+                        payload=response.payload,
+                        request_started_at=response.request_started_at,
+                        received_at=response.received_at,
+                        parser_version=provider.normalizer_version,
+                    )
+                bundle = provider.normalize_match(
+                    response.payload,
+                    fetched_at=response.received_at,
+                )
+                if bundle.match.winner_team_id is None:
+                    raise ValueError("winner is not published")
+                provider_team_ids = {
+                    bundle.match.radiant_team_id,
+                    bundle.match.dire_team_id,
+                }
+                if None in provider_team_ids:
+                    raise ValueError("postmatch team identity is incomplete")
+                async with self._d.session_factory() as session, session.begin():
+                    await self._d.historical_team_resolver.resolve_observed_match_teams(
+                        session,
+                        provider=provider.name,
+                        observed_teams=_observed_postmatch_teams(provider.name, response.payload),
+                        expected_team_ids=expected_team_ids,
+                    )
+                    canonical_team_ids = set(
+                        (
+                            await session.scalars(
+                                select(ProviderTeamMapping.canonical_team_id).where(
+                                    ProviderTeamMapping.provider == provider.name,
+                                    ProviderTeamMapping.provider_team_id.in_(provider_team_ids),
+                                )
+                            )
+                        ).all()
+                    )
+                if canonical_team_ids != expected_team_ids:
+                    raise ValueError("postmatch team identity is not canonicalized")
+                return provider, response, bundle, raw_event_id
+            except Exception as exc:
+                failures.append(f"{provider.name}={type(exc).__name__}: {exc}")
+        raise RuntimeError(
+            f"postmatch result unavailable for Valve match {valve_match_id}: "
+            + "; ".join(failures)
+        )
     async def settle_map(self, job: DurableJob) -> None:
         canonical_map_id = _required_uuid(job.payload, "canonical_map_id")
         async with self._d.session_factory() as session, session.begin():
@@ -633,6 +693,34 @@ def _required_int(payload: dict, key: str) -> int:
     if value is None:
         raise ValueError(f"job payload field {key} must be an integer")
     return value
+
+
+def _observed_postmatch_teams(
+    provider: str,
+    payload: dict,
+) -> tuple[tuple[str, str | None], ...]:
+    if provider == "opendota":
+        pairs = (
+            (payload.get("radiant_team_id"), payload.get("radiant_name")),
+            (payload.get("dire_team_id"), payload.get("dire_name")),
+        )
+    elif provider == "stratz":
+        match = payload.get("data", {}).get("match")
+        if not isinstance(match, dict):
+            return ()
+        radiant = match.get("radiantTeam") if isinstance(match.get("radiantTeam"), dict) else {}
+        dire = match.get("direTeam") if isinstance(match.get("direTeam"), dict) else {}
+        pairs = (
+            (match.get("radiantTeamId"), radiant.get("name")),
+            (match.get("direTeamId"), dire.get("name")),
+        )
+    else:
+        return ()
+    return tuple(
+        (str(team_id), name if isinstance(name, str) and name.strip() else None)
+        for team_id, name in pairs
+        if isinstance(team_id, int)
+    )
 
 
 def _required_str(payload: dict, key: str) -> str:

@@ -34,6 +34,8 @@ query HistoricalMatch($matchId: Long!) {
     didRadiantWin
     radiantTeamId
     direTeamId
+    radiantTeam { name }
+    direTeam { name }
     gameVersionId
     league { id name }
     players {

@@ -17,13 +17,62 @@ from app.models import (
     DltvLiveObservationRecord,
     DraftSlotRecord,
     DraftSnapshotRecord,
+    MapResultRecord,
     OddsObservationRecord,
     ProviderMatchMapping,
     RayBetMatch,
     TeamRatingSnapshotRecord,
 )
 from app.runtime.health import HealthRegistry
-from app.web.api import create_app
+from app.web.api import _match_phase, create_app
+
+
+def test_match_phase_uses_result_and_fresh_live_facts() -> None:
+    now = datetime(2026, 8, 13, 12, 0, tzinfo=UTC)
+    live = DltvLiveObservationRecord(
+        canonical_map_id=uuid4(),
+        valve_match_id=8941656460,
+        received_at=now - timedelta(seconds=20),
+        payload_hash="phase-live",
+        last_message_received_at=now - timedelta(seconds=20),
+        last_state_change_received_at=now - timedelta(seconds=20),
+        raw_event_id=uuid4(),
+    )
+    result = MapResultRecord(
+        canonical_map_id=uuid4(),
+        basic_first_usable_at=now,
+        settled_at=now,
+    )
+
+    assert _match_phase(
+        scheduled_at=now + timedelta(hours=1),
+        live=None,
+        result=None,
+        observed_at=now,
+        live_state_max_age_seconds=45,
+    ) == "PREMATCH"
+    assert _match_phase(
+        scheduled_at=now - timedelta(hours=1),
+        live=live,
+        result=None,
+        observed_at=now,
+        live_state_max_age_seconds=45,
+    ) == "LIVE"
+    live.last_message_received_at = now - timedelta(seconds=46)
+    assert _match_phase(
+        scheduled_at=now - timedelta(hours=1),
+        live=live,
+        result=None,
+        observed_at=now,
+        live_state_max_age_seconds=45,
+    ) == "AWAITING_RESULT"
+    assert _match_phase(
+        scheduled_at=now - timedelta(hours=1),
+        live=live,
+        result=result,
+        observed_at=now,
+        live_state_max_age_seconds=45,
+    ) == "POSTMATCH"
 
 
 @pytest.mark.asyncio

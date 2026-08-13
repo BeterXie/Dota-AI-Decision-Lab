@@ -30,6 +30,11 @@ export default defineConfig({
     environment: "jsdom",
     include: ["src/**/*.test.{ts,tsx}"],
     setupFiles: ["./src/test-setup.ts"],
-    css: true
+    css: true,
+    server: {
+      deps: {
+        inline: ["jsdom", "parse5", "@exodus/bytes", "whatwg-url", "html-encoding-sniffer"]
+      }
+    }
   }
 });

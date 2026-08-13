@@ -62,8 +62,8 @@ from app.observability import Metrics, configure_logging, configure_tracing
 from app.providers.dltv.bootstrap import DltvBootstrapClient
 from app.providers.dltv.socket import DltvSocketClient
 from app.providers.opendota.client import OpenDotaClient
-from app.providers.raybet.http import RayBetHttpClient
-from app.providers.raybet.http_transport import CurlRayBetHttpClient
+from app.providers.raybet.http import RayBetHttpClient, RayBetHttpPool
+from app.providers.raybet.http_transport import CurlRayBetHttpClient, CurlRayBetHttpPool
 from app.providers.raybet.socket import RayBetSocketClient
 from app.providers.stratz.client import StratzClient
 from app.providers.stratz.history import StratzHistoricalProvider
@@ -99,8 +99,18 @@ async def run() -> None:
     jobs = JobRepository()
     identities = IdentityResolver()
     odds_registry = OddsRegistry()
-    raybet_http = RayBetHttpClient(settings.raybet_info_base_url, settings.raybet_origin)
-    raybet_curl = CurlRayBetHttpClient(settings.raybet_info_base_url, settings.raybet_origin)
+    raybet_http = RayBetHttpPool(
+        tuple(
+            RayBetHttpClient(host, settings.raybet_origin)
+            for host in settings.raybet_http_hosts
+        )
+    )
+    raybet_curl = CurlRayBetHttpPool(
+        tuple(
+            CurlRayBetHttpClient(host, settings.raybet_origin)
+            for host in settings.raybet_http_hosts
+        )
+    )
     raybet_socket = RayBetSocketClient(settings.raybet_socket_url, settings.raybet_origin)
     dltv_http = DltvBootstrapClient(settings.dltv_base_url)
     dltv_socket = DltvSocketClient(settings.dltv_base_url)
@@ -484,7 +494,12 @@ async def run() -> None:
         )
 
     frontend_dist = ROOT / "frontend" / "dist"
-    app = create_app(session_factory, health, frontend_dist=frontend_dist)
+    app = create_app(
+        session_factory,
+        health,
+        frontend_dist=frontend_dist,
+        live_state_max_age_seconds=settings.live_state_max_age_seconds,
+    )
     workers.append(
         WebServerWorker(
             app,

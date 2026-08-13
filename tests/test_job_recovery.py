@@ -12,6 +12,9 @@ from app.events.dispatcher import DomainEventDispatcher
 from app.jobs.reconciliation import ReconciliationService
 from app.jobs.repository import JobRepository
 from app.models import (
+    CanonicalMap,
+    CanonicalSeries,
+    CanonicalTeam,
     DecisionSnapshotRecord,
     DltvLiveObservationRecord,
     DomainEventRecord,
@@ -131,6 +134,91 @@ async def test_reconciliation_enqueues_missing_settlement_idempotently() -> None
             .where(DurableJobRecord.job_type == JobType.SETTLE_MAP.value)
         )
         assert count == 1
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_rechecks_stale_live_map_in_time_buckets() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    jobs = JobRepository()
+    now = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
+
+    async with factory() as session, session.begin():
+        team_a = CanonicalTeam(name="Radiant")
+        team_b = CanonicalTeam(name="Dire")
+        session.add_all((team_a, team_b))
+        await session.flush()
+        series = CanonicalSeries(team_a_id=team_a.id, team_b_id=team_b.id)
+        session.add(series)
+        await session.flush()
+        canonical_map = CanonicalMap(
+            series_id=series.id,
+            map_number=1,
+            valve_match_id=8940000001,
+        )
+        session.add(canonical_map)
+        await session.flush()
+        session.add_all(
+            (
+                ProviderMatchMapping(
+                    provider="raybet",
+                    provider_match_id="38420001",
+                    canonical_series_id=series.id,
+                    resolved_by="PROVIDER_DISCOVERY",
+                    confidence=1.0,
+                ),
+                DltvLiveObservationRecord(
+                    canonical_map_id=canonical_map.id,
+                    valve_match_id=8940000001,
+                    game_time_seconds=2400,
+                    radiant_kills=20,
+                    dire_kills=15,
+                    radiant_nw_lead=5000,
+                    source_game_time=2400,
+                    received_at=now - timedelta(minutes=4),
+                    payload_hash="stale-live",
+                    last_message_received_at=now - timedelta(minutes=4),
+                    last_state_change_received_at=now - timedelta(minutes=4),
+                    raw_event_id=uuid4(),
+                ),
+            )
+        )
+        map_id = canonical_map.id
+
+    reconciliation = ReconciliationService(
+        jobs,
+        lease_seconds=120,
+        ai_experiments=(),
+        future_odds_horizons=(),
+    )
+    async with factory() as session, session.begin():
+        first = await reconciliation.run(session, now=now)
+        assert first.postmatch_jobs == 1
+    async with factory() as session, session.begin():
+        duplicate = await reconciliation.run(session, now=now + timedelta(minutes=1))
+        assert duplicate.postmatch_jobs == 0
+    async with factory() as session, session.begin():
+        next_bucket = await reconciliation.run(session, now=now + timedelta(minutes=16))
+        assert next_bucket.postmatch_jobs == 1
+
+    async with factory() as session:
+        records = list(
+            (
+                await session.scalars(
+                    select(DurableJobRecord).where(
+                        DurableJobRecord.job_type == JobType.RESOLVE_POSTMATCH.value
+                    )
+                )
+            ).all()
+        )
+        assert len(records) == 2
+        assert all(record.dedupe_key.startswith("reconcile-postmatch-v2:") for record in records)
+        assert all(record.payload["canonical_map_id"] == str(map_id) for record in records)
+        assert all(record.payload["valve_match_id"] == 8940000001 for record in records)
 
     await engine.dispose()
 

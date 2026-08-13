@@ -15,7 +15,7 @@ export const DraftAdvantageCard: React.FC<DraftAdvantageCardProps> = ({ match, o
   const minutes = curve?.map((point) => point.minute) || [];
   const curveData = curve?.map((point) => {
     const edge = point.adjusted_radiant_edge ?? point.pure_radiant_edge;
-    return edge == null ? null : Math.round(edge * 100);
+    return edge == null ? null : edge;
   }) || [];
 
   const currentMinute = match.live?.game_time_seconds
@@ -114,13 +114,13 @@ export const DraftAdvantageCard: React.FC<DraftAdvantageCardProps> = ({ match, o
         <div className="rosh-metric-item">
           <span className="lbl">Current Edge</span>
           <span className="val highlight-green">
-            {currentValue == null ? "—" : `${currentValue >= 0 ? "+" : ""}${(currentValue * 100).toFixed(1)}%`}
+            {currentValue == null ? "—" : `${currentValue >= 0 ? "+" : ""}${currentValue.toFixed(1)}%`}
           </span>
         </div>
         <div className="rosh-metric-item">
           <span className="lbl">Peak Advantage</span>
           <span className="val">
-            {peakValue == null ? "—" : `${peakValue >= 0 ? "+" : ""}${(peakValue * 100).toFixed(1)}% @ ${peak?.minute}m`}
+            {peakValue == null ? "—" : `${peakValue >= 0 ? "+" : ""}${peakValue.toFixed(1)}% @ ${peak?.minute}m`}
           </span>
         </div>
         <div className="rosh-metric-item">

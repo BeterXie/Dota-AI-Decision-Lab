@@ -109,6 +109,7 @@ export interface AiDecision {
 export interface MapSummary {
   entity_type: "MAP" | "SERIES";
   identity_status: "RESOLVED" | "PENDING_MAP_IDENTITY";
+  phase: "PREMATCH" | "LIVE" | "AWAITING_RESULT" | "POSTMATCH" | "UNKNOWN";
   id: string;
   series_id: string;
   canonical_map_id: string | null;
@@ -179,7 +180,7 @@ export interface MapSummary {
     player_form_ready_count: number;
     player_hero_ready_count: number;
     latest_knowledge_cutoff: string | null;
-  };
+  } | null;
 }
 
 export interface MapDetail extends MapSummary {

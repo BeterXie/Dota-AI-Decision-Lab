@@ -172,7 +172,17 @@ const messages = {
     heroUnknown: "Hero not selected",
     playerUnknown: "Player unknown",
     playerFormReady: "Player form ready",
-    playerHeroHistoryReady: "Player-hero history ready"
+    playerHeroHistoryReady: "Player-hero history ready",
+    allCategory: "All",
+    prematchCategory: "Prematch",
+    liveCategory: "Live",
+    awaitingResultCategory: "Awaiting result",
+    postmatchCategory: "Post-match",
+    unknownCategory: "Unknown",
+    matchCount: "{count} matches",
+    backToMatches: "Back to match list",
+    filterMatches: "Filter matches",
+    selectMatchPrompt: "Select a match from the directory to inspect AI decisions, odds telemetry, and draft intelligence."
   },
   "zh-CN": {
     language: "语言",
@@ -341,7 +351,17 @@ const messages = {
     heroUnknown: "英雄尚未选择",
     playerUnknown: "选手未知",
     playerFormReady: "选手状态就绪",
-    playerHeroHistoryReady: "选手英雄历史就绪"
+    playerHeroHistoryReady: "选手英雄历史就绪",
+    allCategory: "全部",
+    prematchCategory: "赛前",
+    liveCategory: "正在比赛",
+    awaitingResultCategory: "等待赛果",
+    postmatchCategory: "赛后",
+    unknownCategory: "状态未知",
+    matchCount: "{count} 场比赛",
+    backToMatches: "返回比赛列表",
+    filterMatches: "筛选比赛",
+    selectMatchPrompt: "从比赛列表中选择一场比赛，以查看 AI 决策快照、赔率走势与选人情报。"
   }
 } as const;
 
@@ -387,6 +407,7 @@ export function translate(key: MessageKey, locale: Locale): string {
 
 const statusMessages: Record<string, Record<Locale, string>> = {
   ACTION_REQUIRED: { en: "ACTION REQUIRED", "zh-CN": "需要处理" },
+  AWAITING_RESULT: { en: "AWAITING RESULT", "zh-CN": "等待赛果" },
   BUY_A: { en: "BUY A", "zh-CN": "买入 A" },
   BUY_B: { en: "BUY B", "zh-CN": "买入 B" },
   CAUTION: { en: "CAUTION", "zh-CN": "注意" },
@@ -402,6 +423,7 @@ const statusMessages: Record<string, Record<Locale, string>> = {
   IDENTITY_AMBIGUOUS: { en: "IDENTITY AMBIGUOUS", "zh-CN": "身份映射有歧义" },
   INSUFFICIENT_DATA: { en: "INSUFFICIENT DATA", "zh-CN": "数据不足" },
   LIVE_BASIC: { en: "LIVE BASIC", "zh-CN": "基础实时" },
+  LIVE: { en: "LIVE", "zh-CN": "进行中" },
   LIVE_DATA_DESYNC: { en: "LIVE DATA DESYNC", "zh-CN": "实时数据不同步" },
   LIVE_FULL: { en: "LIVE FULL", "zh-CN": "完整实时" },
   LIVE_STALE: { en: "LIVE STALE", "zh-CN": "实时数据过期" },
@@ -416,6 +438,7 @@ const statusMessages: Record<string, Record<Locale, string>> = {
   PENDING: { en: "PENDING", "zh-CN": "待处理" },
   PENDING_MAP_IDENTITY: { en: "PENDING MAP IDENTITY", "zh-CN": "等待地图身份" },
   POST_DRAFT: { en: "POST DRAFT", "zh-CN": "选人后" },
+  POSTMATCH: { en: "POST-MATCH", "zh-CN": "已结束" },
   PREMATCH: { en: "PREMATCH", "zh-CN": "赛前" },
   READY: { en: "READY", "zh-CN": "就绪" },
   RESTARTING: { en: "RESTARTING", "zh-CN": "重启中" },

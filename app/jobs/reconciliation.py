@@ -11,6 +11,7 @@ from app.draft.engine import MODEL_VERSION
 from app.jobs.repository import JobRepository
 from app.models import (
     AiDecisionRecord,
+    CanonicalMap,
     DecisionEvaluationRecord,
     DecisionFutureOdds,
     DecisionSnapshotRecord,
@@ -34,6 +35,7 @@ class ReconciliationResult:
     snapshot_jobs: int
     ai_jobs: int
     future_odds_jobs: int
+    postmatch_jobs: int
     settlement_jobs: int
     evaluation_jobs: int
 
@@ -62,6 +64,7 @@ class ReconciliationService:
         snapshot_jobs = await self._reconcile_snapshots(session, now=now)
         ai_jobs = await self._reconcile_ai(session)
         future_jobs = await self._reconcile_future_odds(session)
+        postmatch_jobs = await self._reconcile_postmatch(session, now=now)
         settlement_jobs = await self._reconcile_settlements(session)
         evaluation_jobs = await self._reconcile_evaluations(session)
         return ReconciliationResult(
@@ -70,6 +73,7 @@ class ReconciliationService:
             snapshot_jobs=snapshot_jobs,
             ai_jobs=ai_jobs,
             future_odds_jobs=future_jobs,
+            postmatch_jobs=postmatch_jobs,
             settlement_jobs=settlement_jobs,
             evaluation_jobs=evaluation_jobs,
         )
@@ -100,6 +104,73 @@ class ReconciliationService:
                     "canonical_map_id": str(draft.canonical_map_id),
                     "draft_snapshot_id": str(draft.id),
                 },
+            )
+            created += 1
+        return created
+
+    async def _reconcile_postmatch(self, session: AsyncSession, *, now: datetime) -> int:
+        latest_live = (
+            select(
+                DltvLiveObservationRecord.canonical_map_id,
+                func.max(DltvLiveObservationRecord.received_at).label("latest_received_at"),
+            )
+            .where(DltvLiveObservationRecord.canonical_map_id.is_not(None))
+            .group_by(DltvLiveObservationRecord.canonical_map_id)
+            .subquery()
+        )
+        candidates = list(
+            (
+                await session.execute(
+                    select(
+                        CanonicalMap.id,
+                        CanonicalMap.valve_match_id,
+                        latest_live.c.latest_received_at,
+                    )
+                    .select_from(CanonicalMap)
+                    .join(
+                        latest_live,
+                        latest_live.c.canonical_map_id == CanonicalMap.id,
+                    )
+                    .where(
+                        CanonicalMap.valve_match_id.is_not(None),
+                        select(ProviderMatchMapping.id)
+                        .where(
+                            ProviderMatchMapping.provider == "raybet",
+                            ProviderMatchMapping.canonical_series_id == CanonicalMap.series_id,
+                        )
+                        .exists(),
+                        latest_live.c.latest_received_at < now - timedelta(minutes=3),
+                        ~select(MapResultRecord.id)
+                        .where(
+                            MapResultRecord.canonical_map_id == CanonicalMap.id
+                        )
+                        .exists(),
+                    )
+                )
+            ).all()
+        )
+        bucket = int(now.timestamp()) // 900
+        created = 0
+        for canonical_map_id, valve_match_id, _latest_received_at in candidates:
+            dedupe_key = f"reconcile-postmatch-v2:{canonical_map_id}:{bucket}"
+            existing = await session.scalar(
+                select(DurableJobRecord.id).where(
+                    DurableJobRecord.job_type == JobType.RESOLVE_POSTMATCH.value,
+                    DurableJobRecord.dedupe_key == dedupe_key,
+                )
+            )
+            if existing is not None:
+                continue
+            await self._jobs.enqueue(
+                session,
+                job_type=JobType.RESOLVE_POSTMATCH,
+                dedupe_key=dedupe_key,
+                payload={
+                    "canonical_map_id": str(canonical_map_id),
+                    "valve_match_id": valve_match_id,
+                },
+                priority=80,
+                max_attempts=10,
             )
             created += 1
         return created

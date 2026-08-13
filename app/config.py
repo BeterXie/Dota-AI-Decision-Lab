@@ -9,7 +9,11 @@ class Settings(BaseSettings):
 
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/dota_ai_decision_lab"
 
-    raybet_info_base_url: str = "https://cfinfo.365raylines.com/v2"
+    raybet_info_base_urls: str = (
+        "https://cfinfo.365raylinks.com/v2,"
+        "https://iminfo.esportsworldlink.com/v2,"
+        "https://cfinfo.365raylines.com/v2"
+    )
     raybet_socket_url: str = "wss://cfsocket.365raylinks.com/socketcluster/"
     raybet_origin: str = "https://www.ray086.com"
     raybet_dota_game_id: int = 151
@@ -98,6 +102,14 @@ class Settings(BaseSettings):
     @property
     def raybet_discovery_match_types(self) -> tuple[int, ...]:
         return tuple(int(value.strip()) for value in self.raybet_match_types.split(","))
+
+    @property
+    def raybet_http_hosts(self) -> tuple[str, ...]:
+        return tuple(
+            value.strip().rstrip("/")
+            for value in self.raybet_info_base_urls.split(",")
+            if value.strip()
+        )
 
     @property
     def future_odds_horizons(self) -> tuple[int, ...]:

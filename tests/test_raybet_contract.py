@@ -18,7 +18,8 @@ from app.models import (
     ProviderRawEvent,
     RayBetOddsRegistry,
 )
-from app.providers.raybet.http import RayBetHttpClient
+from app.providers.common import TimedPayload
+from app.providers.raybet.http import RayBetHttpClient, RayBetHttpPool
 from app.providers.raybet.parser import (
     parse_matches,
     parse_odds_bootstrap,
@@ -70,6 +71,35 @@ async def test_http_odds_retries_protection_response(monkeypatch) -> None:
 
     assert calls == 2
     assert payload.payload == {"result": []}
+
+
+@pytest.mark.asyncio
+async def test_http_pool_rotates_to_healthy_raybet_host() -> None:
+    now = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
+
+    class Client:
+        def __init__(self, failure: Exception | None = None) -> None:
+            self.failure = failure
+            self.calls = 0
+
+        async def get_matches(self, _match_type: int, _page: int) -> TimedPayload:
+            self.calls += 1
+            if self.failure is not None:
+                raise self.failure
+            return TimedPayload(payload={"result": []}, request_started_at=now, received_at=now)
+
+        async def close(self) -> None:
+            return None
+
+    blocked = Client(RuntimeError("403 Forbidden"))
+    healthy = Client()
+    pool = RayBetHttpPool((blocked, healthy))  # type: ignore[arg-type]
+
+    await pool.get_matches(1, 1)
+    await pool.get_matches(1, 2)
+
+    assert blocked.calls == 1
+    assert healthy.calls == 2
 
 
 def test_recorded_match_and_odds_payloads_preserve_provider_contract() -> None:

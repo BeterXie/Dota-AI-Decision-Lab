@@ -37,7 +37,7 @@ from app.models import (
     RayBetMatch,
 )
 from app.runtime.health import HealthRegistry
-from app.time import elapsed_seconds
+from app.time import elapsed_seconds, ensure_utc
 
 
 def create_app(
@@ -45,6 +45,7 @@ def create_app(
     health: HealthRegistry,
     *,
     frontend_dist: Path | None = None,
+    live_state_max_age_seconds: float = 45.0,
 ) -> FastAPI:
     app = FastAPI(title="Dota AI Decision Lab", version="0.1.0")
     app.add_middleware(
@@ -89,7 +90,7 @@ def create_app(
                             .exists()
                         )
                         .order_by(CanonicalMap.scheduled_at.desc())
-                        .limit(24)
+                        .limit(60)
                     )
                 ).all()
             )
@@ -100,14 +101,24 @@ def create_app(
                         .where(
                             ~select(CanonicalMap.id)
                             .where(CanonicalMap.series_id == CanonicalSeries.id)
-                            .exists()
+                            .exists(),
+                            select(ProviderMatchMapping.id)
+                            .where(
+                                ProviderMatchMapping.provider == "raybet",
+                                ProviderMatchMapping.canonical_series_id == CanonicalSeries.id,
+                            )
+                            .exists(),
                         )
                         .order_by(CanonicalSeries.scheduled_at.desc())
-                        .limit(24)
+                        .limit(60)
                     )
                 ).all()
             )
-            payloads = [await _map_payload(session, record) for record in map_records]
+            payloads = await _map_summary_payloads(
+                session,
+                map_records,
+                live_state_max_age_seconds=live_state_max_age_seconds,
+            )
             for series in pending_series:
                 payload = await _pending_series_payload(session, series)
                 if payload is not None:
@@ -118,7 +129,7 @@ def create_app(
                     item["scheduled_at"] or datetime.max.replace(tzinfo=UTC),
                 )
             )
-            return payloads[:24]
+            return payloads[:60]
 
     @app.get("/api/maps/{canonical_map_id}")
     async def map_detail(canonical_map_id: UUID) -> dict:
@@ -126,7 +137,12 @@ def create_app(
             record = await session.get(CanonicalMap, canonical_map_id)
             if record is None:
                 raise HTTPException(status_code=404, detail="map not found")
-            return await _map_payload(session, record, detailed=True)
+            return await _map_payload(
+                session,
+                record,
+                detailed=True,
+                live_state_max_age_seconds=live_state_max_age_seconds,
+            )
 
     @app.get("/api/snapshots/{snapshot_id}")
     async def snapshot_detail(snapshot_id: UUID) -> dict:
@@ -239,8 +255,312 @@ def create_app(
     return app
 
 
+async def _map_summary_payloads(
+    session: AsyncSession,
+    maps: list[CanonicalMap],
+    *,
+    live_state_max_age_seconds: float,
+) -> list[dict]:
+    if not maps:
+        return []
+    map_ids = [item.id for item in maps]
+    series_ids = list({item.series_id for item in maps if item.series_id is not None})
+    series_rows = list(
+        (
+            await session.scalars(
+                select(CanonicalSeries).where(CanonicalSeries.id.in_(series_ids))
+            )
+        ).all()
+    )
+    series_by_id = {item.id: item for item in series_rows}
+    team_ids = list(
+        {
+            team_id
+            for series in series_rows
+            for team_id in (series.team_a_id, series.team_b_id)
+        }
+    )
+    teams = list(
+        (await session.scalars(select(CanonicalTeam).where(CanonicalTeam.id.in_(team_ids)))).all()
+    )
+    team_by_id = {item.id: item for item in teams}
+
+    mappings = list(
+        (
+            await session.scalars(
+                select(ProviderMatchMapping).where(
+                    ProviderMatchMapping.provider == "raybet",
+                    ProviderMatchMapping.canonical_series_id.in_(series_ids),
+                )
+            )
+        ).all()
+    )
+    provider_match_by_series = {
+        item.canonical_series_id: int(item.provider_match_id)
+        for item in mappings
+        if item.canonical_series_id is not None
+    }
+    provider_match_ids = list(set(provider_match_by_series.values()))
+    latest_raybet_times = (
+        select(
+            RayBetMatch.provider_match_id,
+            func.max(RayBetMatch.observed_at).label("latest_observed_at"),
+        )
+        .where(RayBetMatch.provider_match_id.in_(provider_match_ids))
+        .group_by(RayBetMatch.provider_match_id)
+        .subquery()
+    )
+    raybet_matches = list(
+        (
+            await session.scalars(
+                select(RayBetMatch).join(
+                    latest_raybet_times,
+                    and_(
+                        RayBetMatch.provider_match_id
+                        == latest_raybet_times.c.provider_match_id,
+                        RayBetMatch.observed_at == latest_raybet_times.c.latest_observed_at,
+                    ),
+                )
+            )
+        ).all()
+    )
+    raybet_by_id = {item.provider_match_id: item for item in raybet_matches}
+
+    latest_market_times = (
+        select(
+            OddsObservationRecord.odds_id,
+            func.max(OddsObservationRecord.received_at).label("latest_received_at"),
+        )
+        .where(
+            OddsObservationRecord.market_type == "Winner",
+            or_(
+                OddsObservationRecord.canonical_map_id.in_(map_ids),
+                OddsObservationRecord.canonical_series_id.in_(series_ids),
+            ),
+        )
+        .group_by(OddsObservationRecord.odds_id)
+        .subquery()
+    )
+    market_rows = list(
+        (
+            await session.scalars(
+                select(OddsObservationRecord).join(
+                    latest_market_times,
+                    and_(
+                        OddsObservationRecord.odds_id == latest_market_times.c.odds_id,
+                        OddsObservationRecord.received_at
+                        == latest_market_times.c.latest_received_at,
+                    ),
+                )
+            )
+        ).all()
+    )
+    latest_live_times = (
+        select(
+            DltvLiveObservationRecord.canonical_map_id,
+            func.max(DltvLiveObservationRecord.received_at).label("latest_received_at"),
+        )
+        .where(DltvLiveObservationRecord.canonical_map_id.in_(map_ids))
+        .group_by(DltvLiveObservationRecord.canonical_map_id)
+        .subquery()
+    )
+    live_rows = list(
+        (
+            await session.scalars(
+                select(DltvLiveObservationRecord).join(
+                    latest_live_times,
+                    and_(
+                        DltvLiveObservationRecord.canonical_map_id
+                        == latest_live_times.c.canonical_map_id,
+                        DltvLiveObservationRecord.received_at
+                        == latest_live_times.c.latest_received_at,
+                    ),
+                )
+            )
+        ).all()
+    )
+    live_by_map = {item.canonical_map_id: item for item in live_rows}
+    latest_snapshot_times = (
+        select(
+            DecisionSnapshotRecord.canonical_map_id,
+            func.max(DecisionSnapshotRecord.decision_at).label("latest_decision_at"),
+        )
+        .where(DecisionSnapshotRecord.canonical_map_id.in_(map_ids))
+        .group_by(DecisionSnapshotRecord.canonical_map_id)
+        .subquery()
+    )
+    snapshots = list(
+        (
+            await session.scalars(
+                select(DecisionSnapshotRecord).join(
+                    latest_snapshot_times,
+                    and_(
+                        DecisionSnapshotRecord.canonical_map_id
+                        == latest_snapshot_times.c.canonical_map_id,
+                        DecisionSnapshotRecord.decision_at
+                        == latest_snapshot_times.c.latest_decision_at,
+                    ),
+                )
+            )
+        ).all()
+    )
+    snapshot_by_map = {item.canonical_map_id: item for item in snapshots}
+    results = list(
+        (
+            await session.scalars(
+                select(MapResultRecord).where(MapResultRecord.canonical_map_id.in_(map_ids))
+            )
+        ).all()
+    )
+    result_by_map = {item.canonical_map_id: item for item in results}
+    observed_at = datetime.now(UTC)
+    payloads: list[dict] = []
+    for canonical_map in maps:
+        series = series_by_id.get(canonical_map.series_id)
+        team_a = team_by_id.get(series.team_a_id) if series is not None else None
+        team_b = team_by_id.get(series.team_b_id) if series is not None else None
+        provider_match_id = provider_match_by_series.get(canonical_map.series_id)
+        raybet_match = raybet_by_id.get(provider_match_id)
+        stages = set(_map_market_stages(canonical_map.map_number))
+        current_market = [
+            item
+            for item in market_rows
+            if item.match_stage in stages
+            and (
+                item.canonical_map_id == canonical_map.id
+                or item.canonical_series_id == canonical_map.series_id
+            )
+        ]
+        team_order = {
+            team_id: index
+            for index, team_id in enumerate(
+                (series.team_a_id, series.team_b_id) if series is not None else ()
+            )
+        }
+        current_market.sort(
+            key=lambda item: (team_order.get(item.selection_team_id, 2), item.odds_id)
+        )
+        live = live_by_map.get(canonical_map.id)
+        snapshot = snapshot_by_map.get(canonical_map.id)
+        result = result_by_map.get(canonical_map.id)
+        scheduled_at = (
+            canonical_map.scheduled_at
+            or (series.scheduled_at if series is not None else None)
+            or (raybet_match.scheduled_at if raybet_match is not None else None)
+        )
+        snapshot_market = snapshot.canonical_payload.get("market", {}) if snapshot else {}
+        snapshot_quality = snapshot.canonical_payload.get("quality", {}) if snapshot else {}
+        payloads.append(
+            {
+                "entity_type": "MAP",
+                "identity_status": "RESOLVED",
+                "id": canonical_map.id,
+                "series_id": canonical_map.series_id,
+                "canonical_map_id": canonical_map.id,
+                "map_number": canonical_map.map_number,
+                "valve_match_id": canonical_map.valve_match_id,
+                "scheduled_at": scheduled_at,
+                "phase": _match_phase(
+                    scheduled_at=scheduled_at,
+                    live=live,
+                    result=result,
+                    observed_at=observed_at,
+                    live_state_max_age_seconds=live_state_max_age_seconds,
+                ),
+                "provider_match_id": provider_match_id,
+                "tournament_name": raybet_match.tournament_name if raybet_match else None,
+                "round": raybet_match.round if raybet_match else None,
+                "raw_status": raybet_match.raw_status if raybet_match else None,
+                "provider_observed_at": raybet_match.observed_at if raybet_match else None,
+                "team_a": {"id": team_a.id, "name": team_a.name} if team_a else None,
+                "team_b": {"id": team_b.id, "name": team_b.name} if team_b else None,
+                "market": [
+                    _market_payload(item, observed_at=observed_at) for item in current_market
+                ],
+                "market_quality": (
+                    snapshot_market.get("quality")
+                    if isinstance(snapshot_market, dict)
+                    else None
+                ),
+                "draft": None,
+                "live": _live_payload(live, observed_at=observed_at),
+                "sync": None,
+                "latest_snapshot": _snapshot_payload(snapshot, snapshot_quality, snapshot_market),
+                "decisions": [],
+                "historical_prewarm": None,
+            }
+        )
+    return payloads
+
+
+def _market_payload(item: OddsObservationRecord, *, observed_at: datetime) -> dict:
+    return {
+        "odds_id": item.odds_id,
+        "selection_team_id": item.selection_team_id,
+        "price": item.price,
+        "fair_probability": item.fair_probability,
+        "raw_status": item.raw_status,
+        "received_at": item.received_at,
+        "normalized_status": item.normalized_status,
+        "metadata_version": item.metadata_version,
+        "provider_updated_at": item.provider_updated_at,
+        "age_seconds": elapsed_seconds(observed_at, item.received_at),
+        "market_type": item.market_type,
+        "match_stage": item.match_stage,
+    }
+
+
+def _live_payload(
+    live: DltvLiveObservationRecord | None,
+    *,
+    observed_at: datetime,
+) -> dict | None:
+    if live is None:
+        return None
+    return {
+        "game_time_seconds": live.game_time_seconds,
+        "radiant_kills": live.radiant_kills,
+        "dire_kills": live.dire_kills,
+        "radiant_nw_lead": live.radiant_nw_lead,
+        "first_blood": live.first_blood,
+        "received_at": live.received_at,
+        "last_message_received_at": live.last_message_received_at,
+        "last_state_change_received_at": live.last_state_change_received_at,
+        "message_age_seconds": elapsed_seconds(observed_at, live.last_message_received_at),
+        "effective_state_age_seconds": elapsed_seconds(
+            observed_at, live.last_state_change_received_at
+        ),
+        "connection_id": live.connection_id,
+        "reconnect_generation": live.reconnect_generation,
+    }
+
+
+def _snapshot_payload(
+    snapshot: DecisionSnapshotRecord | None,
+    quality: dict,
+    market: dict,
+) -> dict | None:
+    if snapshot is None:
+        return None
+    history = snapshot.canonical_payload.get("history", {})
+    return {
+        "id": snapshot.id,
+        "decision_at": snapshot.decision_at,
+        "created_at": snapshot.created_at,
+        "mode": snapshot.mode,
+        "snapshot_hash": snapshot.snapshot_hash,
+        "quality": quality,
+        "market_quality": market.get("quality") if isinstance(market, dict) else None,
+        "history_coverage": history.get("coverage") if isinstance(history, dict) else None,
+    }
+
+
 async def _map_payload(
-    session: AsyncSession, canonical_map: CanonicalMap, *, detailed: bool = False
+    session: AsyncSession,
+    canonical_map: CanonicalMap,
+    *,
+    detailed: bool = False,
+    live_state_max_age_seconds: float = 45.0,
 ) -> dict:
     series = (
         await session.get(CanonicalSeries, canonical_map.series_id)
@@ -295,11 +615,13 @@ async def _map_payload(
         latest_odds.values(),
         key=lambda item: (team_order.get(item.selection_team_id, 2), item.odds_id),
     )
-    draft = await session.scalar(
-        select(DraftSnapshotRecord)
-        .where(DraftSnapshotRecord.canonical_map_id == canonical_map.id)
-        .order_by(DraftSnapshotRecord.observed_at.desc())
-        .limit(1)
+    draft = (
+        await session.scalar(
+            select(DraftSnapshotRecord)
+            .where(DraftSnapshotRecord.canonical_map_id == canonical_map.id)
+            .order_by(DraftSnapshotRecord.observed_at.desc())
+            .limit(1)
+        )
     )
     draft_slots = (
         list(
@@ -381,11 +703,13 @@ async def _map_payload(
         ).all()
     )
     live = live_rows[0] if live_rows else None
-    sync = await session.scalar(
-        select(LiveSyncEstimateRecord)
-        .where(LiveSyncEstimateRecord.canonical_map_id == canonical_map.id)
-        .order_by(LiveSyncEstimateRecord.calculated_at.desc())
-        .limit(1)
+    sync = (
+        await session.scalar(
+            select(LiveSyncEstimateRecord)
+            .where(LiveSyncEstimateRecord.canonical_map_id == canonical_map.id)
+            .order_by(LiveSyncEstimateRecord.calculated_at.desc())
+            .limit(1)
+        )
     )
     snapshot = await session.scalar(
         select(DecisionSnapshotRecord)
@@ -405,7 +729,9 @@ async def _map_payload(
         else []
     )
     future_odds = []
-    result = None
+    result = await session.scalar(
+        select(MapResultRecord).where(MapResultRecord.canonical_map_id == canonical_map.id)
+    )
     result_evidence = []
     if detailed:
         if snapshot is not None:
@@ -418,9 +744,6 @@ async def _map_payload(
                     )
                 ).all()
             )
-        result = await session.scalar(
-            select(MapResultRecord).where(MapResultRecord.canonical_map_id == canonical_map.id)
-        )
         result_evidence = list(
             (
                 await session.scalars(
@@ -433,6 +756,18 @@ async def _map_payload(
     observed_at = datetime.now(UTC)
     snapshot_market = snapshot.canonical_payload.get("market", {}) if snapshot is not None else {}
     snapshot_quality = snapshot.canonical_payload.get("quality", {}) if snapshot is not None else {}
+    scheduled_at = (
+        canonical_map.scheduled_at
+        or (series.scheduled_at if series is not None else None)
+        or (raybet_match.scheduled_at if raybet_match is not None else None)
+    )
+    phase = _match_phase(
+        scheduled_at=scheduled_at,
+        live=live,
+        result=result,
+        observed_at=observed_at,
+        live_state_max_age_seconds=live_state_max_age_seconds,
+    )
     payload = {
         "entity_type": "MAP",
         "identity_status": "RESOLVED",
@@ -441,7 +776,8 @@ async def _map_payload(
         "canonical_map_id": canonical_map.id,
         "map_number": canonical_map.map_number,
         "valve_match_id": canonical_map.valve_match_id,
-        "scheduled_at": canonical_map.scheduled_at,
+        "scheduled_at": scheduled_at,
+        "phase": phase,
         "provider_match_id": raybet_match.provider_match_id if raybet_match else None,
         "tournament_name": raybet_match.tournament_name if raybet_match else None,
         "round": raybet_match.round if raybet_match else None,
@@ -619,6 +955,26 @@ async def _map_payload(
     return payload
 
 
+def _match_phase(
+    *,
+    scheduled_at: datetime | None,
+    live: DltvLiveObservationRecord | None,
+    result: MapResultRecord | None,
+    observed_at: datetime,
+    live_state_max_age_seconds: float,
+) -> str:
+    if result is not None:
+        return "POSTMATCH"
+    if live is not None:
+        message_age = elapsed_seconds(observed_at, live.last_message_received_at)
+        if 0 <= message_age <= live_state_max_age_seconds:
+            return "LIVE"
+        return "AWAITING_RESULT"
+    if scheduled_at is not None and ensure_utc(scheduled_at) >= ensure_utc(observed_at):
+        return "PREMATCH"
+    return "UNKNOWN"
+
+
 async def _draft_slot_payload(session: AsyncSession, slot: DraftSlotRecord) -> dict:
     player = (
         await session.get(CanonicalPlayer, slot.canonical_player_id)
@@ -692,6 +1048,7 @@ async def _pending_series_payload(session: AsyncSession, series: CanonicalSeries
         if item["knowledge_cutoff"] is not None
     ]
     observed_at = datetime.now(UTC)
+    scheduled_at = series.scheduled_at or raybet_match.scheduled_at
     return {
         "entity_type": "SERIES",
         "identity_status": "PENDING_MAP_IDENTITY",
@@ -700,7 +1057,13 @@ async def _pending_series_payload(session: AsyncSession, series: CanonicalSeries
         "canonical_map_id": None,
         "map_number": None,
         "valve_match_id": None,
-        "scheduled_at": series.scheduled_at,
+        "scheduled_at": scheduled_at,
+        "phase": (
+            "PREMATCH"
+            if scheduled_at is not None
+            and ensure_utc(scheduled_at) >= ensure_utc(observed_at)
+            else "UNKNOWN"
+        ),
         "provider_match_id": raybet_match.provider_match_id,
         "tournament_name": raybet_match.tournament_name,
         "round": raybet_match.round,
