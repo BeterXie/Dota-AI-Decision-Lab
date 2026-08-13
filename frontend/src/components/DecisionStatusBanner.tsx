@@ -1,6 +1,6 @@
 import React from "react";
 import type { MapDetail, MapSummary } from "../api";
-import { translateStatus, useI18n } from "../i18n";
+import { translateStatus, useI18n, type Locale } from "../i18n";
 import { getMatchDisplayPhase } from "../utils/presentation";
 
 export function DecisionStatusBanner({ match }: { match: MapSummary | MapDetail }) {
@@ -25,7 +25,7 @@ export function DecisionStatusBanner({ match }: { match: MapSummary | MapDetail 
     ? (locale === "zh-CN" ? "赛后数据不会改写历史决策；可在评估页查看收盘赔率与赛果证据。" : "Postmatch data does not rewrite historical decisions; closing odds and result evidence are available in Evaluation.")
     : awaiting
       ? (locale === "zh-CN" ? "当前决策记录保持不变，赛果确认后继续结算与评估。" : "Current decision records remain unchanged while result confirmation, settlement and evaluation continue.")
-      : [...blockers, ...warnings].map((value) => translateStatus(value, locale)).join(" · ")
+      : [...blockers, ...warnings].map((value) => translateDecisionQuality(value, locale)).join(" · ")
         || (locale === "zh-CN" ? "市场、身份与数据质量检查通过" : "Market, identity and data-quality checks passed");
   const pill = postmatch ? (locale === "zh-CN" ? "赛后" : "POSTMATCH") : awaiting ? (locale === "zh-CN" ? "等待赛果" : "AWAITING RESULT") : mode ? translateStatus(mode, locale) : t("noSnapshot");
 
@@ -36,4 +36,20 @@ export function DecisionStatusBanner({ match }: { match: MapSummary | MapDetail 
       <div className="trust-pill-group"><span className={`trust-pill ${state}`}>{pill}</span></div>
     </div>
   );
+}
+
+const sideQualityMessages: Record<string, Record<Locale, string>> = {
+  SIDE_IDENTITY_VALVE_MATCH_MISSING: { en: "Valve match identity is missing", "zh-CN": "缺少 Valve 比赛身份" },
+  SIDE_IDENTITY_EVIDENCE_MISSING: { en: "Map-side evidence has not been observed yet", "zh-CN": "尚未观测到本局阵营证据" },
+  SIDE_IDENTITY_UNRESOLVED: { en: "Radiant / Dire sides are not verified", "zh-CN": "本局天辉 / 夜魇阵营尚未验证" },
+  SIDE_IDENTITY_TEAM_MAPPING_MISSING: { en: "DLTV team mapping is incomplete for map sides", "zh-CN": "本局阵营所需的 DLTV 队伍映射不完整" },
+  SIDE_IDENTITY_SERIES_CONFLICT: { en: "Map-side identity conflicts with the canonical series teams", "zh-CN": "本局阵营身份与规范化系列赛队伍冲突" },
+  SIDE_IDENTITY_PROVIDER_CONFLICT: { en: "Provider map-side evidence is contradictory", "zh-CN": "Provider 本局阵营证据互相冲突" },
+  SIDE_IDENTITY_PARTIAL: { en: "Only part of the map-side identity is available", "zh-CN": "本局阵营身份仅部分可用" },
+  ROSTER_SIDE_IDENTITY_UNRESOLVED: { en: "Current roster is not assigned to Team A / B until map sides are verified", "zh-CN": "本局阵营验证前，当前阵容不会绑定到规范化 Team A / B" }
+};
+
+function translateDecisionQuality(status: string, locale: Locale): string {
+  const normalized = status.replaceAll(" ", "_");
+  return sideQualityMessages[normalized]?.[locale] ?? translateStatus(status, locale);
 }
