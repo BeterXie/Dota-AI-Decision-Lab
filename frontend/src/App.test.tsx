@@ -52,6 +52,7 @@ test("renders player-first match intelligence and explicit R.O.S.H. side advanta
   const match = {
     entity_type: "MAP",
     identity_status: "RESOLVED",
+    phase: "LIVE",
     id: "11111111-1111-1111-1111-111111111111",
     series_id: "22222222-2222-2222-2222-222222222222",
     canonical_map_id: "11111111-1111-1111-1111-111111111111",
@@ -77,7 +78,8 @@ test("renders player-first match intelligence and explicit R.O.S.H. side advanta
       curve: [
         { minute: 20, pure_radiant_edge: 2.2, adjusted_radiant_edge: 3.0, support: 100, confidence: 0.8 },
         { minute: 31, pure_radiant_edge: 6.8, adjusted_radiant_edge: 8.4, support: 100, confidence: 0.8 },
-        { minute: 46, pure_radiant_edge: -0.5, adjusted_radiant_edge: -0.8, support: 80, confidence: 0.7 }
+        { minute: 46, pure_radiant_edge: -0.5, adjusted_radiant_edge: -0.8, support: 80, confidence: 0.7 },
+        { minute: 47, pure_radiant_edge: -1.0, adjusted_radiant_edge: -1.2, support: 80, confidence: 0.7 }
       ],
       model_version: "rosh-v1", data_version: "stratz-v1", roster_ready_count: 10, hero_ready_count: 10,
       slots: [
@@ -112,8 +114,10 @@ test("renders player-first match intelligence and explicit R.O.S.H. side advanta
   expect(screen.getByText("Independent AI decisions")).toBeInTheDocument();
   expect(screen.getAllByText("BUY A").length).toBeGreaterThan(0);
   expect(screen.getByText("R.O.S.H. Draft Advantage")).toBeInTheDocument();
-  expect(screen.getByText("Team Spirit advantage")).toBeInTheDocument();
-  expect(screen.getByText("Team Spirit +5.2pp")).toBeInTheDocument();
+  expect(screen.getByText("Radiant advantage")).toBeInTheDocument();
+  expect(screen.getByText("Radiant +5.2pp")).toBeInTheDocument();
+  expect(screen.getByText("46m → Dire")).toBeInTheDocument();
+  expect(screen.queryByText("Team Spirit advantage")).not.toBeInTheDocument();
   expect(screen.getByText("DRAFT LINEUP")).toBeInTheDocument();
   expect(screen.getAllByText("Yatoro").length).toBeGreaterThan(0);
 
