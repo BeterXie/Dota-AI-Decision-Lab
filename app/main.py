@@ -678,7 +678,7 @@ def _ai_providers(settings: Settings):
                 timeout_seconds=settings.ai_timeout_seconds,
             )
         )
-    if settings.kimi_api_key:
+    if settings.kimi_api_key and settings.kimi_decisions_enabled:
         providers.append(
             KimiDecisionProvider(
                 api_key=settings.kimi_api_key.get_secret_value(),

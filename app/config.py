@@ -58,6 +58,9 @@ class Settings(BaseSettings):
     kimi_api_key: SecretStr | None = None
     kimi_base_url: str = "https://api.moonshot.cn/v1"
     kimi_model: str = "kimi-k2.5"
+    # Kimi votes in decisions only while enabled; the key stays configured so
+    # it can be re-enabled without touching credentials.
+    kimi_decisions_enabled: bool = True
     ai_timeout_seconds: float = 240.0
     # Delayed DLTV broadcast data beyond this lag is excluded from the AI input
     # (the decision then uses only freeze-time consistent information).

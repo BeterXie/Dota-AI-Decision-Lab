@@ -48,6 +48,24 @@ async def test_configured_openai_deepseek_and_kimi_are_registered() -> None:
 
 
 @pytest.mark.asyncio
+async def test_kimi_is_excluded_when_decisions_are_disabled() -> None:
+    from app.config import Settings
+    from app.main import _ai_providers
+
+    settings = Settings(
+        _env_file=None,
+        openai_api_key="openai-test",
+        kimi_api_key="kimi-test",
+        kimi_decisions_enabled=False,
+    )
+    providers = _ai_providers(settings)
+
+    assert {provider.name for provider in providers} == {"openai"}
+    for provider in providers:
+        await provider.close()
+
+
+@pytest.mark.asyncio
 async def test_email_readiness_distinguishes_disabled_missing_and_configured() -> None:
     from app.config import Settings
     from app.main import _initialize_dependency_health
