@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from uuid import UUID
 
 from sqlalchemy import select
@@ -81,9 +81,59 @@ class DltvBootstrapCoordinator:
             received_at=response.received_at,
             parser_version=PARSER_VERSION,
         )
-        bootstrap_identity = parse_bootstrap_identity(
-            response.payload, valve_match_id=valve_match_id
+        return await self._process_payload(
+            session,
+            valve_match_id=valve_match_id,
+            payload=response.payload,
+            received_at=response.received_at,
+            raw_event_id=raw_event_id,
+            dltv_series_id=dltv_series_id,
         )
+
+    async def rebuild_draft_from_stored_payload(
+        self,
+        session: AsyncSession,
+        *,
+        valve_match_id: int,
+        payload: dict,
+        raw_event_id: UUID,
+    ) -> DltvBootstrapResult:
+        """Re-resolve a legacy draft from an already-archived raw bootstrap payload.
+
+        Legacy drafts stored the provider ``team_slot`` ordering as Dota positions.
+        Replaying the original raw payload through the current position resolver
+        appends a corrected, verified draft snapshot without touching the original
+        rows (append-only).  The live fast state is not re-derived because it was
+        already persisted from this payload.
+
+        The repaired artifact is stamped with the repair time (not the original
+        observation time) so it becomes the latest draft and only feeds decisions
+        made after the repair.  The original observation time remains on the
+        archived raw event for provenance.
+        """
+        repair_at = datetime.now(UTC)
+        return await self._process_payload(
+            session,
+            valve_match_id=valve_match_id,
+            payload=payload,
+            received_at=repair_at,
+            raw_event_id=raw_event_id,
+            dltv_series_id=None,
+            append_fast_state=False,
+        )
+
+    async def _process_payload(
+        self,
+        session: AsyncSession,
+        *,
+        valve_match_id: int,
+        payload: dict,
+        received_at: datetime,
+        raw_event_id: UUID,
+        dltv_series_id: int | None,
+        append_fast_state: bool = True,
+    ) -> DltvBootstrapResult:
+        bootstrap_identity = parse_bootstrap_identity(payload, valve_match_id=valve_match_id)
         if bootstrap_identity.series_id is None and dltv_series_id is not None:
             bootstrap_identity = bootstrap_identity.model_copy(update={"series_id": dltv_series_id})
         resolved = await self._identities.resolve_dltv_bootstrap(session, bootstrap_identity)
@@ -98,20 +148,20 @@ class DltvBootstrapCoordinator:
                     "canonical_map_id": str(resolved.canonical_map_id),
                     "valve_match_id": valve_match_id,
                 },
-                occurred_at=response.received_at,
+                occurred_at=received_at,
             ),
         )
 
-        provider_picks = parse_dltv_provider_picks(response.payload)
+        provider_picks = parse_dltv_provider_picks(payload)
         resolution = await self._role_assignment.resolve(
             session,
             valve_match_id=valve_match_id,
             picks=provider_picks,
-            observed_at=response.received_at,
+            observed_at=received_at,
         )
         draft = resolution.draft
-        draft_observed_at = max(response.received_at, resolution.evidence_cutoff)
-        player_names, hero_names = parse_draft_labels(response.payload)
+        draft_observed_at = max(received_at, resolution.evidence_cutoff)
+        player_names, hero_names = parse_draft_labels(payload)
         draft_hash = content_digest(
             {
                 "complete": draft.complete,
@@ -138,14 +188,15 @@ class DltvBootstrapCoordinator:
         if latest is not None and latest.complete and not draft.complete:
             latest_slots = await self._stored_slots(session, latest.id)
             if _positions_are_verified(latest_slots):
-                await self._append_bootstrap_fast_state(
-                    session,
-                    canonical_map_id=resolved.canonical_map_id,
-                    valve_match_id=valve_match_id,
-                    payload=response.payload,
-                    received_at=response.received_at,
-                    raw_event_id=raw_event_id,
-                )
+                if append_fast_state:
+                    await self._append_bootstrap_fast_state(
+                        session,
+                        canonical_map_id=resolved.canonical_map_id,
+                        valve_match_id=valve_match_id,
+                        payload=payload,
+                        received_at=received_at,
+                        raw_event_id=raw_event_id,
+                    )
                 return DltvBootstrapResult(
                     resolved=resolved,
                     draft=DraftValidation(
@@ -158,20 +209,49 @@ class DltvBootstrapCoordinator:
                     appended=False,
                 )
         if existing is not None:
-            await self._append_bootstrap_fast_state(
-                session,
-                canonical_map_id=resolved.canonical_map_id,
-                valve_match_id=valve_match_id,
-                payload=response.payload,
-                received_at=response.received_at,
-                raw_event_id=raw_event_id,
+            if append_fast_state:
+                await self._append_bootstrap_fast_state(
+                    session,
+                    canonical_map_id=resolved.canonical_map_id,
+                    valve_match_id=valve_match_id,
+                    payload=payload,
+                    received_at=received_at,
+                    raw_event_id=raw_event_id,
+                )
+                return DltvBootstrapResult(
+                    resolved=resolved,
+                    draft=draft,
+                    draft_snapshot_id=existing.id,
+                    appended=False,
+                )
+            if latest is None or latest.id == existing.id:
+                return DltvBootstrapResult(
+                    resolved=resolved,
+                    draft=draft,
+                    draft_snapshot_id=existing.id,
+                    appended=False,
+                )
+            latest_is_legacy = bool(
+                await session.scalar(
+                    select(DraftSlotRecord.id)
+                    .where(
+                        DraftSlotRecord.draft_snapshot_id == latest.id,
+                        DraftSlotRecord.source == "DLTV_SLOT",
+                    )
+                    .limit(1)
+                )
             )
-            return DltvBootstrapResult(
-                resolved=resolved,
-                draft=draft,
-                draft_snapshot_id=existing.id,
-                appended=False,
-            )
+            if not latest_is_legacy:
+                return DltvBootstrapResult(
+                    resolved=resolved,
+                    draft=draft,
+                    draft_snapshot_id=existing.id,
+                    appended=False,
+                )
+            # Rebuild corner: an identical-content repair row exists but carries an
+            # older timestamp, so the legacy snapshot is still the latest.  Fall
+            # through and append a fresh row stamped with the repair time so it
+            # displaces the legacy draft.
 
         snapshot = DraftSnapshotRecord(
             canonical_map_id=resolved.canonical_map_id,
@@ -229,14 +309,15 @@ class DltvBootstrapCoordinator:
                     occurred_at=draft_observed_at,
                 ),
             )
-        await self._append_bootstrap_fast_state(
-            session,
-            canonical_map_id=resolved.canonical_map_id,
-            valve_match_id=valve_match_id,
-            payload=response.payload,
-            received_at=response.received_at,
-            raw_event_id=raw_event_id,
-        )
+        if append_fast_state:
+            await self._append_bootstrap_fast_state(
+                session,
+                canonical_map_id=resolved.canonical_map_id,
+                valve_match_id=valve_match_id,
+                payload=payload,
+                received_at=received_at,
+                raw_event_id=raw_event_id,
+            )
         return DltvBootstrapResult(
             resolved=resolved,
             draft=draft,
@@ -311,6 +392,8 @@ class DltvBootstrapCoordinator:
                 dire_kills=state.dire_kills,
                 radiant_nw_lead=state.radiant_nw_lead,
                 first_blood=state.first_blood,
+                canvas=state.canvas,
+                charts=state.charts,
                 source_game_time=state.source_game_time,
                 received_at=received_at,
                 payload_hash=state.state_hash,

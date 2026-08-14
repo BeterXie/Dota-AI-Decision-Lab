@@ -13,6 +13,7 @@ from app.models import (
     CanonicalSeries,
     CanonicalTeam,
     DltvLiveObservationRecord,
+    DraftSlotRecord,
     DraftSnapshotRecord,
     DurableJobRecord,
 )
@@ -119,6 +120,133 @@ async def test_draft_refresh_recovers_recent_incomplete_map_without_fresh_socket
 
     assert result.active_maps == 0
     assert result.enqueued == 1
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_draft_refresh_repairs_legacy_slots_beyond_recovery_window() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    now = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
+    async with factory() as session, session.begin():
+        team_a = CanonicalTeam(name="A")
+        team_b = CanonicalTeam(name="B")
+        session.add_all((team_a, team_b))
+        await session.flush()
+        series = CanonicalSeries(team_a_id=team_a.id, team_b_id=team_b.id)
+        session.add(series)
+        await session.flush()
+        canonical_map = CanonicalMap(series_id=series.id, valve_match_id=8941656461)
+        session.add(canonical_map)
+        await session.flush()
+        legacy = DraftSnapshotRecord(
+            canonical_map_id=canonical_map.id,
+            valve_match_id=8941656461,
+            complete=True,
+            blockers=[],
+            warnings=[],
+            payload_hash="legacy",
+            statistics_cutoff=now - timedelta(days=2),
+            observed_at=now - timedelta(days=2),
+            raw_event_id=canonical_map.id,
+        )
+        session.add(legacy)
+        await session.flush()
+        session.add(
+            DraftSlotRecord(
+                draft_snapshot_id=legacy.id,
+                side="radiant",
+                position=1,
+                account_id=None,
+                hero_id=None,
+                source="DLTV_SLOT",
+                confidence=1.0,
+            )
+        )
+
+    async with factory() as session, session.begin():
+        result = await schedule_incomplete_draft_refreshes(
+            session,
+            JobRepository(),
+            interval_seconds=30,
+            now=now,
+        )
+
+    async with factory() as session:
+        jobs = list((await session.scalars(select(DurableJobRecord))).all())
+
+    assert result.active_maps == 0
+    assert result.enqueued == 0
+    assert result.legacy_repairs_enqueued == 1
+    assert len(jobs) == 1
+    assert jobs[0].job_type == JobType.REPAIR_LEGACY_DRAFT.value
+    bucket = int(now.timestamp() // 30)
+    assert jobs[0].dedupe_key == f"repair-legacy-draft:8941656461:{bucket}"
+    assert jobs[0].payload == {"valve_match_id": 8941656461}
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_draft_refresh_keeps_live_bootstrap_for_active_legacy_map() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    now = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
+    async with factory() as session, session.begin():
+        team_a = CanonicalTeam(name="A")
+        team_b = CanonicalTeam(name="B")
+        session.add_all((team_a, team_b))
+        await session.flush()
+        series = CanonicalSeries(team_a_id=team_a.id, team_b_id=team_b.id)
+        session.add(series)
+        await session.flush()
+        canonical_map = CanonicalMap(series_id=series.id, valve_match_id=8941656462)
+        session.add(canonical_map)
+        await session.flush()
+        session.add(_live(canonical_map.id, 8941656462, now))
+        legacy = DraftSnapshotRecord(
+            canonical_map_id=canonical_map.id,
+            valve_match_id=8941656462,
+            complete=True,
+            blockers=[],
+            warnings=[],
+            payload_hash="legacy",
+            statistics_cutoff=now - timedelta(days=2),
+            observed_at=now - timedelta(days=2),
+            raw_event_id=canonical_map.id,
+        )
+        session.add(legacy)
+        await session.flush()
+        session.add(
+            DraftSlotRecord(
+                draft_snapshot_id=legacy.id,
+                side="radiant",
+                position=1,
+                account_id=None,
+                hero_id=None,
+                source="DLTV_SLOT",
+                confidence=1.0,
+            )
+        )
+
+    async with factory() as session, session.begin():
+        result = await schedule_incomplete_draft_refreshes(
+            session,
+            JobRepository(),
+            interval_seconds=30,
+            now=now,
+        )
+
+    async with factory() as session:
+        jobs = list((await session.scalars(select(DurableJobRecord))).all())
+
+    assert result.active_maps == 1
+    assert result.legacy_repairs_enqueued == 0
+    assert len(jobs) == 1
+    assert jobs[0].job_type == JobType.BOOTSTRAP_DLTV_MATCH.value
     await engine.dispose()
 
 
