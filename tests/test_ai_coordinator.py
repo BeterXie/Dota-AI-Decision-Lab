@@ -1,4 +1,5 @@
 import asyncio
+import json
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from uuid import uuid4
@@ -151,8 +152,8 @@ async def test_ai_view_version_bump_reruns_and_records_input_hash() -> None:
             live=None,
             quality={"eligible": True},
         )
-        # A legacy decision produced by the old ai-view-v1 semantics with the
-        # SAME provider/model/prompt/policy must not block the v2 run.
+        # A legacy decision produced by the old ai-view-v2 semantics with the
+        # SAME provider/model/prompt/policy must not block the v3 run.
         session.add(
             AiDecisionRecord(
                 id=uuid4(),
@@ -163,7 +164,7 @@ async def test_ai_view_version_bump_reruns_and_records_input_hash() -> None:
                 model_version="fixture-model",
                 prompt_version=PROMPT_VERSION,
                 decision_policy_version=DECISION_POLICY_VERSION,
-                ai_view_version="ai-view-v1",
+                ai_view_version="ai-view-v2",
                 request_started_at=datetime(2026, 1, 1, tzinfo=UTC),
                 parse_status="SUCCESS",
             )
@@ -176,13 +177,63 @@ async def test_ai_view_version_bump_reruns_and_records_input_hash() -> None:
     assert len(records) == 1
     record = records[0]
     assert record.ai_view_version == AI_VIEW_VERSION
-    assert record.ai_view_version == "ai-view-v2"
+    assert record.ai_view_version == "ai-view-v3"
     assert record.ai_input_hash is not None and len(record.ai_input_hash) == 64
 
-    # The fresh v2 record now dedupes the same experiment.
     async with factory() as session, session.begin():
         again = await AiCoordinator(
             [FakeProvider("openai", model="fixture-model")], timeout_seconds=1
         ).run_all(session, snapshot)
     assert again[0].id == record.id
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_provider_receives_versioned_context_summary() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    provider = FakeProvider("openai")
+
+    async with factory() as session, session.begin():
+        snapshot = await SnapshotRepository().persist(
+            session,
+            canonical_map_id=None,
+            decision_at=datetime(2026, 1, 1, tzinfo=UTC),
+            mode="PREMATCH",
+            identity={
+                "team_a": {"id": "team-a", "name": "A"},
+                "team_b": {"id": "team-b", "name": "B"},
+            },
+            market={
+                "observations": [
+                    {
+                        "selection_team_id": "team-a",
+                        "price": "1.70",
+                        "fair_probability": 0.6,
+                        "implied_probability": 0.588,
+                    },
+                    {
+                        "selection_team_id": "team-b",
+                        "price": "2.30",
+                        "fair_probability": 0.4,
+                        "implied_probability": 0.435,
+                    },
+                ],
+                "quality": {"eligible": True},
+            },
+            draft=None,
+            history={},
+            live=None,
+            quality={"eligible": True, "blockers": [], "warnings": []},
+        )
+        records = await AiCoordinator([provider], timeout_seconds=1).run_all(session, snapshot)
+
+    payload = json.loads(provider.inputs[0])
+    assert payload["base_ai_view_version"] == "ai-view-v2"
+    assert payload["ai_view_version"] == "ai-view-v3"
+    assert payload["ai_context_summary"]["context_summary_version"] == "ai-context-summary-v1"
+    assert payload["ai_context_summary"]["market_signal"]["favorite"] == "A"
+    assert records[0].ai_view_version == "ai-view-v3"
     await engine.dispose()
