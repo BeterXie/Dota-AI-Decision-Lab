@@ -23,6 +23,8 @@ def test_backtest_summary_keeps_experiment_versions_isolated() -> None:
         "actual_winner": "A",
         "brier_score": 0.09,
         "log_loss": 0.357,
+        "market_brier_score": 0.16,
+        "market_log_loss": 0.51,
         "clv": 0.05,
     }
     rows = [
@@ -85,6 +87,15 @@ def test_backtest_summary_keeps_experiment_versions_isolated() -> None:
     assert first["wins"] == 1
     assert first["decision_level_roi"] == 0.0
     assert first["calibration"]["sample_count"] == 2
+    assert first["market_comparison"] == {
+        "sample_count": 2,
+        "ai_average_brier_score": 0.09,
+        "market_average_brier_score": 0.16,
+        "brier_improvement_vs_market": 0.07,
+        "ai_average_log_loss": 0.357,
+        "market_average_log_loss": 0.51,
+        "log_loss_improvement_vs_market": 0.153,
+    }
     assert second["bet_count"] == 0
     assert second["decision_level_roi"] is None
     assert second["action_counts"] == {"NO_BUY": 1}
@@ -200,6 +211,8 @@ async def test_backtest_replays_snapshot_action_result_roi_calibration_and_clv()
     assert row["market_price_mapping"] == "TEAM_ID"
     assert row["market_odds_a"] == 2.0
     assert row["market_odds_b"] == 2.2
+    assert row["market_fair_probability_a"] == pytest.approx(0.5238095238)
+    assert row["market_brier_score"] == pytest.approx((1.0 - 0.5238095238) ** 2)
     assert row["actual_winner"] == "A"
     assert row["unit_return"] == 1.0
     assert row["brier_score"] == pytest.approx(0.09)
@@ -212,4 +225,7 @@ async def test_backtest_replays_snapshot_action_result_roi_calibration_and_clv()
     assert experiment["decision_level_roi"] == 1.0
     assert experiment["calibration"]["sample_count"] == 1
     assert experiment["calibration"]["expected_calibration_error"] == pytest.approx(0.3)
+    assert experiment["market_comparison"]["sample_count"] == 1
+    assert experiment["market_comparison"]["brier_improvement_vs_market"] > 0
+    assert experiment["market_comparison"]["log_loss_improvement_vs_market"] > 0
     await engine.dispose()
