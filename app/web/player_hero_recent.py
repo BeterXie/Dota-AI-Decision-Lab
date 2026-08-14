@@ -41,7 +41,9 @@ def register_player_hero_recent_routes(
                     await session.scalars(
                         sqlalchemy.select(app.models.DraftSlotRecord)
                         .where(app.models.DraftSlotRecord.draft_snapshot_id == draft.id)
-                        .order_by(app.models.DraftSlotRecord.side, app.models.DraftSlotRecord.position)
+                        .order_by(
+                            app.models.DraftSlotRecord.side, app.models.DraftSlotRecord.position
+                        )
                     )
                 ).all()
             )
