@@ -43,7 +43,7 @@ class Settings(BaseSettings):
     openai_api_key: SecretStr | None = None
     openai_base_url: str = "https://api.openai.com/v1"
     openai_model: str = "gpt-5.6-terra"
-    openai_reasoning_effort: str = "xhigh"
+    openai_reasoning_effort: str = "high"
     anthropic_api_key: SecretStr | None = None
     anthropic_base_url: str = "https://api.anthropic.com/v1"
     anthropic_model: str = "claude-sonnet-4-6"
@@ -58,16 +58,17 @@ class Settings(BaseSettings):
     kimi_api_key: SecretStr | None = None
     kimi_base_url: str = "https://api.moonshot.cn/v1"
     kimi_model: str = "kimi-k2.5"
-    # Kimi votes in decisions only while enabled; the key stays configured so
-    # it can be re-enabled without touching credentials.
-    kimi_decisions_enabled: bool = True
-    ai_timeout_seconds: float = 240.0
+    # Kimi votes in decisions only while enabled; disabled by default for low latency.
+    # The key stays configured so it can be re-enabled without touching credentials.
+    kimi_decisions_enabled: bool = False
+    ai_timeout_seconds: float = 50.0
     # Delayed DLTV broadcast data beyond this lag is excluded from the AI input
     # (the decision then uses only freeze-time consistent information).
     ai_max_live_data_lag_seconds: float = 120.0
     # The deepseek flash model still powers email translation; this flag only
     # controls whether it also produces decision votes (off by default).
     deepseek_flash_decisions_enabled: bool = False
+    email_translation_reasoning_effort: str = "low"
 
     email_notifications_enabled: bool = False
     email_recipients: str = ""

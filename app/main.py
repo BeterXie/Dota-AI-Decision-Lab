@@ -705,7 +705,7 @@ def _email_notifications(settings: Settings, *, session_factory, jobs):
             api_key=settings.deepseek_api_key.get_secret_value(),
             model=settings.deepseek_model,
             base_url=settings.deepseek_base_url,
-            reasoning_effort=settings.deepseek_reasoning_effort,
+            reasoning_effort=settings.email_translation_reasoning_effort,
             timeout_seconds=settings.ai_timeout_seconds,
         )
         if settings.deepseek_api_key

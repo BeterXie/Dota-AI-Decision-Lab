@@ -27,6 +27,7 @@ async def test_configured_openai_deepseek_and_kimi_are_registered() -> None:
         openai_api_key="openai-test",
         deepseek_api_key="deepseek-test",
         kimi_api_key="kimi-test",
+        kimi_decisions_enabled=True,
     )
     providers = _ai_providers(settings)
 
@@ -42,7 +43,7 @@ async def test_configured_openai_deepseek_and_kimi_are_registered() -> None:
         provider.reasoning_effort
         for provider in providers
         if provider.name in {"openai", "deepseek"}
-    ] == ["xhigh", "high"]
+    ] == ["high", "high"]
     for provider in providers:
         await provider.close()
 
