@@ -505,6 +505,8 @@ class SnapshotBuilder:
             "dire_kills": record.dire_kills,
             "radiant_nw_lead": record.radiant_nw_lead,
             "first_blood": record.first_blood,
+            "canvas": record.canvas,
+            "charts": record.charts,
             "source_game_time": record.source_game_time,
             "received_at": record.received_at,
             "last_message_received_at": message_received_at,

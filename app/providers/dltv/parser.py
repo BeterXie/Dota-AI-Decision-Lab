@@ -6,7 +6,7 @@ from app.domain.draft import DraftSlot, DraftValidation
 from app.domain.live import DltvFastPatch
 from app.providers.dltv.models import DltvBootstrapIdentity, DltvSeries, DltvSeriesFrame
 
-PARSER_VERSION = "dltv-v2"
+PARSER_VERSION = "dltv-v3"
 
 
 def parse_series_frame(payload: dict[str, Any]) -> DltvSeriesFrame:
@@ -214,6 +214,12 @@ def parse_fast_patch(
         value = payload["first_blood"]
         if value is None or isinstance(value, str):
             updates["first_blood"] = value
+    canvas = _parse_canvas(payload.get("canvas"))
+    if canvas is not None:
+        updates["canvas"] = canvas
+    charts = _parse_charts(payload.get("charts"))
+    if charts is not None:
+        updates["charts"] = charts
     game_time = updates.get("game_time_seconds")
     return DltvFastPatch(
         valve_match_id=valve_match_id,
@@ -224,6 +230,142 @@ def parse_fast_patch(
         connection_id=connection_id,
         reconnect_generation=reconnect_generation,
     )
+
+
+def parse_live_enrichment(payload: dict[str, Any]) -> dict[str, Any]:
+    """Extract bootstrap-only live enrichment (per-player stats, bans).
+
+    The DLTV HTTP bootstrap (``/live/{match_id}.json``) carries richer data than
+    the fast socket: per-player level/KDA/items/gold/last-hits/GPM/net-worth and
+    the final draft bans.  These are parsed deterministically from the archived
+    raw payload at snapshot build time (Raw First, no extra collection).
+    """
+    enrichment: dict[str, Any] = {}
+    full_stats = payload.get("full_stats")
+    if isinstance(full_stats, dict):
+        players: list[dict[str, Any]] = []
+        for side in ("radiant", "dire"):
+            team = full_stats.get(side)
+            if not isinstance(team, dict):
+                continue
+            for item in team.get("players") if isinstance(team.get("players"), list) else []:
+                if not isinstance(item, dict):
+                    continue
+                player = item.get("player")
+                entry = {
+                    "side": side,
+                    "account_id": (
+                        _optional_int(player.get("steam_id")) if isinstance(player, dict) else None
+                    ),
+                    "level": _optional_nonnegative_int(item.get("level")),
+                    "kda": _parse_kda(item.get("kda")),
+                    "items": _parse_items(item.get("items")),
+                    "gold": _optional_int(item.get("gold")),
+                    "lh": _parse_pair(item.get("lh")),
+                    "gpm": _parse_pair(item.get("gpm")),
+                    "net_worth": _optional_int(item.get("net_worth")),
+                }
+                if entry["account_id"] is not None:
+                    players.append(entry)
+        if players:
+            enrichment["full_stats"] = players
+    database = payload.get("db")
+    if isinstance(database, dict):
+        bans: dict[str, list[int]] = {}
+        for side, key in (("radiant", "first_team"), ("dire", "second_team")):
+            team = database.get(key)
+            if not isinstance(team, dict):
+                continue
+            raw_bans = team.get("bans")
+            ban_ids: list[int] = []
+            for ban in raw_bans if isinstance(raw_bans, list) else []:
+                if not isinstance(ban, dict):
+                    continue
+                hero_id = _optional_int(ban.get("hero_id"))
+                if hero_id is None and isinstance(ban.get("hero"), dict):
+                    hero_id = _optional_int(ban["hero"].get("steam_id"))
+                if hero_id is not None and hero_id > 0:
+                    ban_ids.append(hero_id)
+            bans[side] = ban_ids
+        if bans:
+            enrichment["bans"] = bans
+    return enrichment
+
+
+def _parse_canvas(value: object) -> dict[str, list[str]] | None:
+    if not isinstance(value, dict):
+        return None
+    result: dict[str, list[str]] = {}
+    for side in ("radiant", "dire"):
+        raw = value.get(side)
+        if isinstance(raw, list):
+            result[side] = [str(token) for token in raw if isinstance(token, str) and token]
+        elif raw is None:
+            result[side] = []
+        else:
+            return None
+    return result
+
+
+def _parse_charts(value: object) -> dict[str, list] | None:
+    if not isinstance(value, dict):
+        return None
+    result: dict[str, list] = {}
+    for key in (
+        "game_times",
+        "net_worth",
+        "radiant_scores",
+        "dire_scores",
+        "radiant_kills",
+        "dire_kills",
+    ):
+        raw = value.get(key)
+        if not isinstance(raw, list):
+            return None
+        result[key] = [
+            item for item in raw if isinstance(item, (int, float)) and not isinstance(item, bool)
+        ]
+    return result
+
+
+def _parse_kda(value: object) -> dict[str, int] | None:
+    if not isinstance(value, str):
+        return None
+    parts = value.split("/")
+    if len(parts) != 3:
+        return None
+    parsed = [_parse_int_token(part) for part in parts]
+    if any(part is None for part in parsed):
+        return None
+    return {"kills": parsed[0], "deaths": parsed[1], "assists": parsed[2]}
+
+
+def _parse_items(value: object) -> list[int]:
+    if not isinstance(value, list):
+        return []
+    return [
+        item for item in value if isinstance(item, int) and not isinstance(item, bool) and item >= 0
+    ]
+
+
+def _parse_pair(value: object) -> dict[str, int] | None:
+    if not isinstance(value, str):
+        return None
+    parts = value.split("/")
+    if len(parts) != 2:
+        return None
+    parsed = [_parse_int_token(part) for part in parts]
+    if any(part is None for part in parsed):
+        return None
+    return {"first": parsed[0], "second": parsed[1]}
+
+
+def _parse_int_token(value: str) -> int | None:
+    try:
+        parsed = int(value.strip())
+    except ValueError:
+        return None
+    return parsed if parsed >= 0 else None
 
 
 def delayed_detail_is_fresh(payload: dict[str, Any], *, max_delay_seconds: float) -> bool:

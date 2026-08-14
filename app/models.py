@@ -576,6 +576,8 @@ class DltvLiveObservationRecord(Base):
     dire_kills: Mapped[int | None] = mapped_column(Integer)
     radiant_nw_lead: Mapped[int | None] = mapped_column(Integer)
     first_blood: Mapped[str | None] = mapped_column(String(32))
+    canvas: Mapped[dict | None] = mapped_column(JSON_DOCUMENT)
+    charts: Mapped[dict | None] = mapped_column(JSON_DOCUMENT)
     source_game_time: Mapped[int | None] = mapped_column(Integer)
     received_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), primary_key=True, nullable=False
