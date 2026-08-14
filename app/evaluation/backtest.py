@@ -246,9 +246,11 @@ def _report(
         "assumptions": {
             "stake_policy": "1 unit per BUY decision",
             "return_price": "decimal odds frozen in the immutable decision snapshot",
-            "market_baseline": (
-                "vig-removed two-way probability derived from the same frozen "
-                "snapshot odds"
+            "market_baseline": "".join(
+                (
+                    "vig-removed two-way probability derived from the same frozen ",
+                    "snapshot odds",
+                )
             ),
             "repeated_snapshots": "each BUY decision is a separate paper bet",
             "costs_and_limits": "fees, slippage, rejection, liquidity and stake limits are ignored",
