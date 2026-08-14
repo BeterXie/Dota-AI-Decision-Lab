@@ -17,6 +17,35 @@ def test_ai_checkpoints_start_at_ten_minutes_by_default() -> None:
     assert 5 not in settings.checkpoint_minutes
 
 
+@pytest.mark.parametrize("host", ["127.0.0.1", "localhost", "::1"])
+def test_loopback_dashboard_hosts_are_allowed(host: str) -> None:
+    from app.config import Settings
+
+    settings = Settings(_env_file=None, host=host, api_token="unused-future-token")
+
+    assert settings.host == host
+
+
+def test_api_token_does_not_unlock_non_loopback_binding() -> None:
+    from app.config import Settings
+
+    with pytest.raises(ValueError, match="HOST must be loopback"):
+        Settings(
+            _env_file=None,
+            host="0.0.0.0",
+            api_token="this-is-not-authentication",
+        )
+
+
+def test_runtime_host_cannot_be_reassigned_to_non_loopback() -> None:
+    from app.config import Settings
+
+    settings = Settings(_env_file=None, host="127.0.0.1")
+
+    with pytest.raises(ValueError, match="HOST must be loopback"):
+        settings.host = "0.0.0.0"
+
+
 @pytest.mark.asyncio
 async def test_configured_openai_deepseek_and_kimi_are_registered() -> None:
     from app.config import Settings
