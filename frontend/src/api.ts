@@ -149,6 +149,18 @@ export interface DecisionSnapshotIdentity {
   side_identity?: MapSideIdentity | null;
 }
 
+export interface SeriesSiblingMap {
+  canonical_map_id: string;
+  map_number: number | null;
+  valve_match_id: number | null;
+  winner_team_id: string | null;
+}
+
+export interface SeriesScore {
+  team_a: number;
+  team_b: number;
+}
+
 export interface MapSummary {
   entity_type: "MAP" | "SERIES";
   identity_status: "RESOLVED" | "PENDING_MAP_IDENTITY";
@@ -158,6 +170,9 @@ export interface MapSummary {
   canonical_map_id: string | null;
   map_number: number | null;
   valve_match_id: number | null;
+  best_of?: number | null;
+  series_score?: SeriesScore | null;
+  series_maps?: SeriesSiblingMap[];
   scheduled_at: string | null;
   provider_match_id: number | null;
   tournament_name: string | null;

@@ -52,7 +52,7 @@ export const AppShell: React.FC<AppShellProps> = ({ runtime, jobs, matches, sele
         <main ref={mainRef} className="main-workspace">
           {activeMatch ? (
             <div key={selectedMatch?.id ?? "none"} className="match-workspace-content">
-              <PlayerMatchHeader match={activeMatch} />
+              <PlayerMatchHeader match={activeMatch} onSelectMap={onSelectMatch} />
 
               {pendingIdentity ? (
                 <PendingIdentityView match={activeMatch} locale={locale} />

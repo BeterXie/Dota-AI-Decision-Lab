@@ -7,12 +7,13 @@ import { formatOdds, getMatchDisplayPhase, median, primaryMarketPair } from "../
 
 interface PlayerMatchHeaderProps {
   match: MapSummary | MapDetail;
+  onSelectMap?: (id: string) => void;
 }
 
 const teamAStyle: React.CSSProperties = { background: "rgba(124,156,255,.12)", color: "#7C9CFF", border: "1px solid rgba(124,156,255,.30)" };
 const teamBStyle: React.CSSProperties = { background: "rgba(156,130,255,.12)", color: "#9C82FF", border: "1px solid rgba(156,130,255,.30)" };
 
-export const PlayerMatchHeader: React.FC<PlayerMatchHeaderProps> = ({ match }) => {
+export const PlayerMatchHeader: React.FC<PlayerMatchHeaderProps> = ({ match, onSelectMap }) => {
   const { locale, t } = useI18n();
   const teamA = match.team_a?.name || t("unknownTeam");
   const teamB = match.team_b?.name || t("unknownTeam");
@@ -37,12 +38,18 @@ export const PlayerMatchHeader: React.FC<PlayerMatchHeaderProps> = ({ match }) =
     : null;
   const modelMarketGap = aiMedian != null && marketA != null ? (aiMedian - marketA) * 100 : null;
 
+  const seriesMaps = match.series_maps || [];
+  const bestOf = match.best_of || (match.round?.toUpperCase().startsWith("BO") ? parseInt(match.round.slice(2), 10) : null);
+  const scoreA = match.series_score?.team_a ?? 0;
+  const scoreB = match.series_score?.team_b ?? 0;
+
   return (
     <section className="match-hero-header player-match-header">
       <div className="header-meta-row">
         <span className="meta-league">
           {match.tournament_name || t("unknownTournament")}
-          {match.round ? ` · ${match.round.toUpperCase()}` : ""}
+          {bestOf ? ` · BO${bestOf}` : match.round ? ` · ${match.round.toUpperCase()}` : ""}
+          {match.series_score ? ` · (系列赛 ${scoreA} - ${scoreB})` : ""}
           {match.map_number ? ` · ${t("map")} ${match.map_number}` : ""}
         </span>
         <span className={`meta-live-badge ${phase === "LIVE" ? "live" : ""}`}>
@@ -52,6 +59,36 @@ export const PlayerMatchHeader: React.FC<PlayerMatchHeaderProps> = ({ match }) =
           {t("dataQuality")}: <strong className="quality-val">{match.latest_snapshot?.mode || t("noSnapshot")}</strong>
         </span>
       </div>
+
+      {seriesMaps.length > 1 && (
+        <div className="map-selector-bar" role="tablist" aria-label="地图选择">
+          <span className="map-selector-title">{locale === "zh-CN" ? "单局切换" : "Maps"}:</span>
+          {seriesMaps.map((sm, index) => {
+            const mapNum = sm.map_number || index + 1;
+            const isCurrent = sm.canonical_map_id === match.canonical_map_id || sm.canonical_map_id === match.id;
+            let statusText = "";
+            if (sm.winner_team_id) {
+              const winnerName = sm.winner_team_id === match.team_a?.id ? teamA : sm.winner_team_id === match.team_b?.id ? teamB : "胜";
+              statusText = `${winnerName} 胜`;
+            } else if (isCurrent && phase === "LIVE") {
+              statusText = "● 进行中";
+            }
+            return (
+              <button
+                type="button"
+                key={sm.canonical_map_id}
+                role="tab"
+                aria-selected={isCurrent}
+                className={`map-selector-pill ${isCurrent ? "active" : ""}`}
+                onClick={() => onSelectMap && onSelectMap(sm.canonical_map_id)}
+              >
+                <b>{t("map")} {mapNum}</b>
+                {statusText ? <small>{statusText}</small> : null}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       <div className="header-scoreboard player-scoreboard">
         <div className="team-cell team-radiant">

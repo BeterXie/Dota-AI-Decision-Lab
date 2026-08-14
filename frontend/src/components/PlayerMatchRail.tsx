@@ -189,12 +189,20 @@ export const PlayerMatchRail: React.FC<PlayerMatchRailProps> = ({ matches, selec
                 const teamB = match.team_b?.name ?? t("unknownTeam");
                 const teamALogo = getTeamLogoUrl(teamA);
                 const teamBLogo = getTeamLogoUrl(teamB);
+                const bestOf = match.best_of || (match.round?.toUpperCase().startsWith("BO") ? parseInt(match.round.slice(2), 10) : null);
+                const scoreA = match.series_score?.team_a ?? 0;
+                const scoreB = match.series_score?.team_b ?? 0;
+                const hasSeriesScore = match.series_score != null && (scoreA > 0 || scoreB > 0 || phase === "POSTMATCH");
 
                 return (
                   <button type="button" key={match.id} data-match-id={match.id} className={`rail-match-card player-rail-card ${match.id === selectedId ? "selected" : ""}`} onClick={() => handleSelect(match.id)}>
                     <div className="rail-card-top">
                       <span className={`phase-badge ${phase === "LIVE" ? "badge-live" : "badge-upcoming"}`}>{headline}</span>
-                      <span className="league-info">{match.tournament_name || t("unknownTournament")}{match.map_number ? ` · ${t("map")} ${match.map_number}` : ""}</span>
+                      <span className="league-info">
+                        {match.tournament_name || t("unknownTournament")}
+                        {bestOf ? ` · BO${bestOf}` : match.round ? ` · ${match.round.toUpperCase()}` : ""}
+                        {match.map_number ? ` · M${match.map_number}` : ""}
+                      </span>
                     </div>
                     <div className="rail-card-teams">
                       <div className="team-row">
@@ -204,6 +212,7 @@ export const PlayerMatchRail: React.FC<PlayerMatchRailProps> = ({ matches, selec
                           <span className="team-dot team-a-order" style={teamADotStyle} />
                         )}
                         <span className="team-name">{teamA}</span>
+                        {hasSeriesScore && <span className="rail-series-score">{scoreA}</span>}
                         <span className="team-odds">{formatOdds(pair?.teamA.price)}</span>
                       </div>
                       <div className="team-row">
@@ -213,6 +222,7 @@ export const PlayerMatchRail: React.FC<PlayerMatchRailProps> = ({ matches, selec
                           <span className="team-dot team-b-order" style={teamBDotStyle} />
                         )}
                         <span className="team-name">{teamB}</span>
+                        {hasSeriesScore && <span className="rail-series-score">{scoreB}</span>}
                         <span className="team-odds">{formatOdds(pair?.teamB.price)}</span>
                       </div>
                     </div>
