@@ -194,6 +194,10 @@ export interface MapSummary {
       eligible?: boolean;
       blockers?: string[];
       warnings?: string[];
+      live_anchors?: {
+        raybet_live_anchor: string | null;
+        data_lag_seconds: number | null;
+      };
     } | null;
   } | null;
   decisions: AiDecision[];

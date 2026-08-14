@@ -23,6 +23,9 @@ export const LiveStateCard: React.FC<LiveStateCardProps> = ({ match }) => {
   const isStale = freshness.complete === false || (effectiveAge != null && effectiveAge > 45);
   const syncStatus = isStale ? "LIVE_STALE" : match.sync?.status || "UNKNOWN";
   const syncIsSafe = syncStatus === "SAFE";
+  const dataLagSeconds = match.latest_snapshot?.quality?.live_anchors?.data_lag_seconds ?? null;
+  const lagMinutes = dataLagSeconds != null ? Math.round(dataLagSeconds / 60) : null;
+  const showBroadcastLag = lagMinutes != null && lagMinutes >= 1;
 
   return (
     <div className="analytics-card live-state-card">
@@ -37,6 +40,13 @@ export const LiveStateCard: React.FC<LiveStateCardProps> = ({ match }) => {
             <div className="stale-warning-banner">
               {translateStatus("LIVE_STALE", locale)}
               {effectiveAge != null ? ` · ${Math.round(effectiveAge)}s` : ""}
+            </div>
+          )}
+          {showBroadcastLag && (
+            <div className="broadcast-lag-banner">
+              {locale === "zh-CN"
+                ? `直播画面状态 · 落后实时赔率约 ${lagMinutes} 分钟`
+                : `Broadcast state · lags real-time odds by ~${lagMinutes} min`}
             </div>
           )}
           <div className="live-state-grid">

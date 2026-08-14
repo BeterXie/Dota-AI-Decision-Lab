@@ -11,22 +11,29 @@ export function DecisionStatusBanner({ match }: { match: MapSummary | MapDetail 
   const phase = getMatchDisplayPhase(match);
   const awaiting = phase === "AWAITING_RESULT";
   const postmatch = phase === "POSTMATCH";
-  const state = postmatch ? "healthy" : awaiting ? "degraded" : blockers.length ? "blocked" : warnings.length || !mode ? "degraded" : "healthy";
+  const noSnapshot = !mode;
+  const state = postmatch ? "healthy" : awaiting ? "degraded" : blockers.length ? "blocked" : warnings.length || noSnapshot ? "degraded" : "healthy";
   const title = postmatch
     ? (locale === "zh-CN" ? "赛果已确认，可查看决策评估" : "Result confirmed — evaluation available")
     : awaiting
-      ? (locale === "zh-CN" ? "比赛已结束，等待赛果确认" : "Map finished — awaiting result confirmation")
+      // AWAITING_RESULT covers both a stalled live feed and a finished match
+      // whose result has not landed yet; never claim the map has ended.
+      ? (locale === "zh-CN" ? "直播数据已停止更新，等待赛果确认" : "Live data stopped — awaiting result confirmation")
       : state === "blocked"
         ? (locale === "zh-CN" ? "当前无法生成可靠决策" : "Decision unavailable")
-        : state === "degraded"
-          ? (locale === "zh-CN" ? "决策可用，但存在限制" : "Decision available with limitations")
-          : (locale === "zh-CN" ? "决策数据已就绪" : "Decision data ready");
+        : noSnapshot
+          ? (locale === "zh-CN" ? "决策尚未生成" : "No decision snapshot yet")
+          : state === "degraded"
+            ? (locale === "zh-CN" ? "决策可用，但存在限制" : "Decision available with limitations")
+            : (locale === "zh-CN" ? "决策数据已就绪" : "Decision data ready");
   const detail = postmatch
     ? (locale === "zh-CN" ? "赛后数据不会改写历史决策；可在评估页查看收盘赔率与赛果证据。" : "Postmatch data does not rewrite historical decisions; closing odds and result evidence are available in Evaluation.")
     : awaiting
-      ? (locale === "zh-CN" ? "当前决策记录保持不变，赛果确认后继续结算与评估。" : "Current decision records remain unchanged while result confirmation, settlement and evaluation continue.")
-      : [...blockers, ...warnings].map((value) => translateDecisionQuality(value, locale)).join(" · ")
-        || (locale === "zh-CN" ? "市场、身份与数据质量检查通过" : "Market, identity and data-quality checks passed");
+      ? (locale === "zh-CN" ? "直播数据已停止更新（可能暂停、断流或比赛已结束）。赛果确认前决策记录保持不变，确认后继续结算与评估。" : "Live data has stopped updating (pause, feed drop, or match end). Decisions remain unchanged until the result is confirmed; settlement and evaluation then continue.")
+      : noSnapshot
+        ? (locale === "zh-CN" ? "等待首个决策快照生成（需身份、市场与质量检查通过）。" : "Waiting for the first decision snapshot (identity, market and quality checks must pass first).")
+        : [...blockers, ...warnings].map((value) => translateDecisionQuality(value, locale)).join(" · ")
+          || (locale === "zh-CN" ? "市场、身份与数据质量检查通过" : "Market, identity and data-quality checks passed");
   const pill = postmatch ? (locale === "zh-CN" ? "赛后" : "POSTMATCH") : awaiting ? (locale === "zh-CN" ? "等待赛果" : "AWAITING RESULT") : mode ? translateStatus(mode, locale) : t("noSnapshot");
 
   return (

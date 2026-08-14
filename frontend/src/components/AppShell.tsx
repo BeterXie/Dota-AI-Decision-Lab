@@ -31,18 +31,27 @@ export const AppShell: React.FC<AppShellProps> = ({ runtime, jobs, matches, sele
   const { locale, t } = useI18n();
   const [activeTab, setActiveTab] = useState<NavTab>("OVERVIEW");
   const [isDiagnosticsOpen, setIsDiagnosticsOpen] = useState(false);
+  const mainRef = React.useRef<HTMLElement | null>(null);
   const activeMatch = detail || selectedMatch;
   const pendingIdentity = activeMatch?.identity_status === "PENDING_MAP_IDENTITY";
   const waitingForDetail = Boolean(selectedMatch?.canonical_map_id && !detail);
+
+  // Switching matches resets the detail scroll position so the next match
+  // always opens at its header instead of mid-content.
+  React.useEffect(() => {
+    if (selectedMapId != null && typeof mainRef.current?.scrollTo === "function") {
+      mainRef.current.scrollTo({ top: 0 });
+    }
+  }, [selectedMapId]);
 
   return (
     <div className="dota-app-shell">
       <TopBar runtime={runtime} onOpenDiagnostics={() => setIsDiagnosticsOpen(true)} onRefresh={onRefresh} />
       <div className="shell-body">
         <PlayerMatchRail matches={matches} selectedId={selectedMapId} onSelectMatch={(id) => { onSelectMatch(id); setActiveTab("OVERVIEW"); }} />
-        <main className="main-workspace">
+        <main ref={mainRef} className="main-workspace">
           {activeMatch ? (
-            <div className="match-workspace-content">
+            <div key={selectedMatch?.id ?? "none"} className="match-workspace-content">
               <PlayerMatchHeader match={activeMatch} />
 
               {pendingIdentity ? (
