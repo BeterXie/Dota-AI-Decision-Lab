@@ -15,7 +15,7 @@ from app.ai.base import (
     AiProviderFailure,
     ai_experiment_key,
 )
-from app.ai.view import build_ai_view
+from app.ai.input import build_ai_input
 from app.canonical import canonical_bytes
 from app.domain.snapshot import DecisionSnapshot
 from app.models import AiDecisionRecord
@@ -37,7 +37,7 @@ class AiCoordinator:
         self, session: AsyncSession, snapshot: DecisionSnapshot
     ) -> list[AiDecisionRecord]:
         snapshot_input_bytes = canonical_bytes(
-            build_ai_view(
+            build_ai_input(
                 snapshot,
                 max_live_data_lag_seconds=self._max_live_data_lag_seconds,
             )
