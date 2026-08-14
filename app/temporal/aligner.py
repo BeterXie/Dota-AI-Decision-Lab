@@ -5,17 +5,20 @@ from math import ceil
 from statistics import median, pstdev
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.domain.live import CalibrationPair, LiveSynchronizationEstimate
 from app.models import (
+    CanonicalMap,
+    CanonicalSeries,
     DltvLiveObservationRecord,
     LiveCalibrationPairRecord,
     LiveSyncEstimateRecord,
     OddsObservationRecord,
 )
+from app.snapshots.builder import _map_market_stages
 from app.time import ensure_utc
 
 
@@ -212,13 +215,38 @@ class TemporalAligner:
         )
         if existing is not None:
             return _estimate_from_record(existing)
+        canonical_map = await session.get(CanonicalMap, canonical_map_id)
+        series = (
+            await session.get(CanonicalSeries, canonical_map.series_id)
+            if canonical_map and canonical_map.series_id
+            else None
+        )
+        stages = (
+            _map_market_stages(
+                canonical_map.map_number,
+                best_of=series.best_of if series else None,
+            )
+            if canonical_map
+            else ()
+        )
+        market_criteria = (
+            or_(
+                OddsObservationRecord.canonical_map_id == canonical_map_id,
+                and_(
+                    OddsObservationRecord.canonical_series_id == canonical_map.series_id,
+                    OddsObservationRecord.match_stage.in_(stages),
+                ),
+            )
+            if canonical_map and canonical_map.series_id and stages
+            else (OddsObservationRecord.canonical_map_id == canonical_map_id)
+        )
         odds = list(
             reversed(
                 (
                     await session.scalars(
                         select(OddsObservationRecord)
                         .where(
-                            OddsObservationRecord.canonical_map_id == canonical_map_id,
+                            market_criteria,
                             OddsObservationRecord.received_at <= as_of,
                         )
                         .order_by(OddsObservationRecord.received_at.desc())
