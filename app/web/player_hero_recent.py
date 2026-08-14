@@ -4,8 +4,8 @@ import fastapi
 import sqlalchemy
 import sqlalchemy.ext.asyncio
 
-from app import models
 from app.history import service as history_service
+from app import models
 
 
 HERO_RECENT_WINDOW = 10
