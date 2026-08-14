@@ -1,7 +1,7 @@
 import React from "react";
 import type { MapDetail, MapSummary } from "../api";
 import { useI18n } from "../i18n";
-import { getTeamAbbreviation } from "../utils/dotaAssets";
+import { getTeamAbbreviation, getTeamLogoUrl } from "../utils/dotaAssets";
 import { resolveVerifiedMapSides } from "../utils/mapSides";
 import { formatOdds, getMatchDisplayPhase, median, primaryMarketPair } from "../utils/presentation";
 
@@ -16,6 +16,8 @@ export const PlayerMatchHeader: React.FC<PlayerMatchHeaderProps> = ({ match }) =
   const { locale, t } = useI18n();
   const teamA = match.team_a?.name || t("unknownTeam");
   const teamB = match.team_b?.name || t("unknownTeam");
+  const teamALogo = getTeamLogoUrl(teamA);
+  const teamBLogo = getTeamLogoUrl(teamB);
   const pair = primaryMarketPair(match.market, match.team_a?.id, match.team_b?.id);
   const phase = getMatchDisplayPhase(match);
   const gameTime = match.live?.game_time_seconds;
@@ -53,7 +55,17 @@ export const PlayerMatchHeader: React.FC<PlayerMatchHeaderProps> = ({ match }) =
 
       <div className="header-scoreboard player-scoreboard">
         <div className="team-cell team-radiant">
-          <div className="team-logo-avatar team-a-order" style={teamAStyle}>{getTeamAbbreviation(teamA)}</div>
+          <div className="team-logo-avatar team-a-order" style={teamAStyle}>
+            {teamALogo ? (
+              <img
+                src={teamALogo}
+                alt={teamA}
+                className="team-logo-img"
+                onError={(e) => { (e.currentTarget as HTMLElement).style.display = "none"; }}
+              />
+            ) : null}
+            <span className="team-logo-fallback">{getTeamAbbreviation(teamA)}</span>
+          </div>
           <div className="team-info">
             <span className="team-side-label">TEAM A{teamASide ? ` · ${mapSideName(teamASide, locale)}` : ""}</span>
             <h2 className="team-name">{teamA}</h2>
@@ -89,7 +101,17 @@ export const PlayerMatchHeader: React.FC<PlayerMatchHeaderProps> = ({ match }) =
             <h2 className="team-name">{teamB}</h2>
             <div className="team-odds-pill">{formatOdds(pair?.teamB.price)}</div>
           </div>
-          <div className="team-logo-avatar team-b-order" style={teamBStyle}>{getTeamAbbreviation(teamB)}</div>
+          <div className="team-logo-avatar team-b-order" style={teamBStyle}>
+            {teamBLogo ? (
+              <img
+                src={teamBLogo}
+                alt={teamB}
+                className="team-logo-img"
+                onError={(e) => { (e.currentTarget as HTMLElement).style.display = "none"; }}
+              />
+            ) : null}
+            <span className="team-logo-fallback">{getTeamAbbreviation(teamB)}</span>
+          </div>
         </div>
       </div>
 

@@ -34,11 +34,41 @@ function DashboardApp() {
     if (selectedMapId && maps.data?.some((match) => match.id === selectedMapId)) {
       return selectedMapId;
     }
-    // Prefer the live match over the first row so the dashboard opens on the
-    // active game instead of an arbitrary pre-match entry.
-    const live = maps.data?.find((match) => match.phase === "LIVE");
-    if (live) return live.id;
-    return maps.data?.[0]?.id ?? null;
+    if (!maps.data || maps.data.length === 0) return null;
+
+    // 1. Prioritize LIVE matches (especially those with BUY decisions)
+    const liveMatches = maps.data.filter((match) => match.phase === "LIVE");
+    if (liveMatches.length > 0) {
+      const liveWithBuy = liveMatches.find((m) =>
+        m.decisions?.some((d) => d.decision?.action === "BUY_A" || d.decision?.action === "BUY_B")
+      );
+      if (liveWithBuy) return liveWithBuy.id;
+      return liveMatches[0].id;
+    }
+
+    // 2. Prioritize closest UPCOMING / PREMATCH match
+    const upcomingMatches = maps.data.filter((match) => match.phase === "PREMATCH" || match.phase === "UNKNOWN");
+    if (upcomingMatches.length > 0) {
+      const sortedUpcoming = [...upcomingMatches].sort((a, b) => {
+        const timeA = a.scheduled_at ? Date.parse(a.scheduled_at) : Infinity;
+        const timeB = b.scheduled_at ? Date.parse(b.scheduled_at) : Infinity;
+        return timeA - timeB;
+      });
+      return sortedUpcoming[0].id;
+    }
+
+    // 3. Fallback to newest finished POSTMATCH match
+    const finishedMatches = maps.data.filter((match) => match.phase === "POSTMATCH" || match.phase === "AWAITING_RESULT");
+    if (finishedMatches.length > 0) {
+      const sortedFinished = [...finishedMatches].sort((a, b) => {
+        const timeA = a.scheduled_at ? Date.parse(a.scheduled_at) : 0;
+        const timeB = b.scheduled_at ? Date.parse(b.scheduled_at) : 0;
+        return timeB - timeA;
+      });
+      return sortedFinished[0].id;
+    }
+
+    return maps.data[0].id;
   }, [selectedMapId, maps.data]);
 
   const selectedMatch = useMemo(() => {

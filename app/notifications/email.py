@@ -4,6 +4,7 @@ from decimal import Decimal
 from html import escape
 from typing import Protocol
 from uuid import UUID, uuid4
+from zoneinfo import ZoneInfo
 
 import httpx
 from sqlalchemy import select
@@ -597,8 +598,11 @@ def _list_text(value: object) -> str:
     return "；".join(str(item) for item in value)
 
 
+BEIJING_TZ = ZoneInfo("Asia/Shanghai")
+
+
 def _format_datetime(value: datetime) -> str:
-    return value.astimezone(UTC).strftime("%Y-%m-%d %H:%M:%S UTC")
+    return value.astimezone(BEIJING_TZ).strftime("%Y-%m-%d %H:%M:%S (北京时间)")
 
 
 def _mode_label(value: str) -> str:
