@@ -106,11 +106,7 @@ class BacktestService:
             if snapshot is None or snapshot.canonical_map_id is None:
                 continue
             result = results_by_map_id.get(snapshot.canonical_map_id)
-            if (
-                result is None
-                or result.provider_conflict
-                or result.winner_team_id is None
-            ):
+            if result is None or result.provider_conflict or result.winner_team_id is None:
                 continue
             actual_winner = _actual_winner(snapshot.canonical_payload, result.winner_team_id)
             if actual_winner is None:
