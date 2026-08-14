@@ -86,6 +86,14 @@ function liveMatchFixture() {
   };
 }
 
+function summaryFromDetail(detail: ReturnType<typeof liveMatchFixture>) {
+  const summary: Record<string, unknown> = { ...detail };
+  for (const key of ["market_timeline", "live_timeline", "snapshot_payload", "future_odds", "result", "result_evidence"]) {
+    delete summary[key];
+  }
+  return summary;
+}
+
 test("renders operational empty state and persists locale", async () => {
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
@@ -163,4 +171,45 @@ test("default-selects the LIVE match instead of the first list row", async () =>
   expect(await screen.findByText("Decision data ready")).toBeInTheDocument();
   expect(requestedDetails.some((url) => url.includes(`/api/maps/${live.canonical_map_id}`))).toBe(true);
   expect(requestedDetails.some((url) => url.includes(`/api/maps/${prematch.canonical_map_id}`))).toBe(false);
+});
+
+test("enriches LIVE summary decisions and shows probability for the selected BUY side", async () => {
+  const detail = liveMatchFixture();
+  detail.decisions[0].decision.action = "BUY_B";
+  detail.decisions[0].decision.fair_probability_a = 0.25;
+  const summary = summaryFromDetail(detail);
+  summary.decisions = [];
+
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/api/matches")) return response([summary]);
+    if (url.includes("/api/maps/")) return response(detail);
+    if (url.endsWith("/api/jobs/summary")) return response(jobs);
+    return response(runtime);
+  }));
+
+  renderApp();
+  expect(await screen.findByText("BUY B 75%")).toBeInTheDocument();
+});
+
+test("renders a detail error instead of leaving a failed request in loading state", async () => {
+  const summary = summaryFromDetail(liveMatchFixture());
+  summary.decisions = [];
+
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/api/matches")) return response([summary]);
+    if (url.includes("/api/maps/")) {
+      return new Response(JSON.stringify({ detail: "fixture failure" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+    if (url.endsWith("/api/jobs/summary")) return response(jobs);
+    return response(runtime);
+  }));
+
+  renderApp();
+  expect(await screen.findByText("Failed to load match intelligence")).toBeInTheDocument();
+  expect(screen.queryByText("Loading match intelligence")).not.toBeInTheDocument();
 });
