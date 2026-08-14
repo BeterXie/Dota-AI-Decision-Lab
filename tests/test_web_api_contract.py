@@ -10,6 +10,7 @@ from starlette.testclient import TestClient
 from app.db import Base
 from app.market.fair_probability import remove_vig
 from app.models import (
+    AiDecisionRecord,
     CanonicalHero,
     CanonicalMap,
     CanonicalPlayer,
@@ -715,3 +716,92 @@ def test_status_websocket_serializes_runtime_timestamps(tmp_path: Path) -> None:
             payload = websocket.receive_json()
 
     assert isinstance(payload["observed_at"], str)
+
+
+@pytest.mark.asyncio
+async def test_map_detail_exposes_checkpoint_decisions_beyond_the_latest_snapshot() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    now = datetime.now(UTC)
+    async with factory.begin() as session:
+        team_a = CanonicalTeam(name="A")
+        team_b = CanonicalTeam(name="B")
+        session.add_all((team_a, team_b))
+        await session.flush()
+        series = CanonicalSeries(team_a_id=team_a.id, team_b_id=team_b.id)
+        session.add(series)
+        await session.flush()
+        canonical_map = CanonicalMap(series_id=series.id, map_number=1)
+        session.add(canonical_map)
+        await session.flush()
+        first = DecisionSnapshotRecord(
+            id=uuid4(),
+            canonical_map_id=canonical_map.id,
+            decision_at=now - timedelta(minutes=10),
+            created_at=now - timedelta(minutes=10),
+            mode="LIVE_BASIC",
+            canonical_payload={},
+            snapshot_hash="fixture-checkpoint-1",
+        )
+        second = DecisionSnapshotRecord(
+            id=uuid4(),
+            canonical_map_id=canonical_map.id,
+            decision_at=now - timedelta(minutes=5),
+            created_at=now - timedelta(minutes=5),
+            mode="LIVE_BASIC",
+            canonical_payload={},
+            snapshot_hash="fixture-checkpoint-2",
+        )
+        session.add_all((first, second))
+        await session.flush()
+        session.add_all(
+            (
+                AiDecisionRecord(
+                    id=uuid4(),
+                    snapshot_id=first.id,
+                    snapshot_hash="fixture-checkpoint-1",
+                    provider="openai",
+                    model="m",
+                    model_version="m",
+                    prompt_version="p",
+                    decision_policy_version="d",
+                    ai_view_version="ai-view-v2",
+                    request_started_at=now,
+                    parse_status="SUCCESS",
+                ),
+                AiDecisionRecord(
+                    id=uuid4(),
+                    snapshot_id=second.id,
+                    snapshot_hash="fixture-checkpoint-2",
+                    provider="kimi",
+                    model="m",
+                    model_version="m",
+                    prompt_version="p",
+                    decision_policy_version="d",
+                    ai_view_version="ai-view-v2",
+                    request_started_at=now,
+                    parse_status="SUCCESS",
+                ),
+            )
+        )
+
+    app = create_app(factory, HealthRegistry())
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        payload = (await client.get(f"/api/maps/{canonical_map.id}")).json()
+
+    # The legacy `decisions` key stays scoped to the LATEST snapshot (header
+    # median semantics), while checkpoint_decisions carries the full history.
+    assert len(payload["decisions"]) == 1
+    assert payload["decisions"][0]["provider"] == "kimi"
+    by_provider = {item["provider"]: item for item in payload["checkpoint_decisions"]}
+    assert set(by_provider) == {"openai", "kimi"}
+    assert all(item["snapshot_mode"] == "LIVE_BASIC" for item in by_provider.values())
+    assert by_provider["kimi"]["snapshot_decision_at"].startswith(
+        second.decision_at.isoformat()[:16]
+    )
+    assert by_provider["openai"]["snapshot_decision_at"].startswith(
+        first.decision_at.isoformat()[:16]
+    )
+    await engine.dispose()

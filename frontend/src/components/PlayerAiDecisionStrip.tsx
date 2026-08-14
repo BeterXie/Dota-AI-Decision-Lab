@@ -29,6 +29,7 @@ export function PlayerAiDecisionStrip({ decisions }: { decisions: AiDecision[] }
           {cards.map(({ item, action, fair, confidence }) => (
             <button key={item.id} type="button" className={`player-ai-card ${actionTone(action)}`} onClick={() => setSelected(item)}>
               <div className="player-ai-model"><strong>{providerLabel(item.provider)}</strong><span>{item.model}</span></div>
+              {item.snapshot_decision_at && <div className="player-ai-checkpoint">{formatCheckpoint(item.snapshot_decision_at, item.snapshot_mode, locale)}</div>}
               <div className={`player-ai-action ${actionTone(action)}`} style={actionStyle(action)}>{displayAction(action, locale)}</div>
               <div className="player-ai-metrics">
                 <div><span>{locale === "zh-CN" ? "A 公平概率" : "Fair A"}</span><strong>{formatPercent(fair, locale)}</strong></div>
@@ -103,6 +104,14 @@ function providerLabel(value: string): string {
   if (normalized.includes("deepseek")) return "DeepSeek";
   if (normalized.includes("kimi")) return "Kimi";
   return value;
+}
+
+function formatCheckpoint(value: string, mode: string | undefined, locale: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return mode ?? "";
+  const time = date.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
+  const suffix = mode ? ` · ${mode}` : "";
+  return locale === "zh-CN" ? `决策时点 · ${time}${suffix}` : `Checkpoint · ${time}${suffix}`;
 }
 
 function formatPercent(value: number | null, locale: string): string {

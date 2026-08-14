@@ -882,6 +882,16 @@ async def _map_payload(
         .order_by(DecisionSnapshotRecord.decision_at.desc())
         .limit(1)
     )
+    checkpoint_snapshots = list(
+        (
+            await session.scalars(
+                select(DecisionSnapshotRecord)
+                .where(DecisionSnapshotRecord.canonical_map_id == canonical_map.id)
+                .order_by(DecisionSnapshotRecord.decision_at.desc())
+                .limit(5)
+            )
+        ).all()
+    )
     decisions = (
         list(
             (
@@ -893,6 +903,16 @@ async def _map_payload(
         if snapshot is not None
         else []
     )
+    checkpoint_decisions: list[AiDecisionRecord] = []
+    snapshot_by_id = {item.id: item for item in checkpoint_snapshots}
+    if detailed and snapshot_by_id:
+        checkpoint_decisions = list(
+            (
+                await session.scalars(
+                    select(AiDecisionRecord).where(AiDecisionRecord.snapshot_id.in_(snapshot_by_id))
+                )
+            ).all()
+        )
     future_odds = []
     result = await session.scalar(
         select(MapResultRecord).where(MapResultRecord.canonical_map_id == canonical_map.id)
@@ -1053,6 +1073,21 @@ async def _map_payload(
     elif detailed:
         payload["future_odds"] = []
     if detailed:
+        payload["checkpoint_decisions"] = [
+            _decision_payload(item)
+            | {
+                "snapshot_decision_at": snapshot_by_id[item.snapshot_id].decision_at,
+                "snapshot_mode": snapshot_by_id[item.snapshot_id].mode,
+            }
+            for item in sorted(
+                checkpoint_decisions,
+                key=lambda record: (
+                    snapshot_by_id[record.snapshot_id].decision_at,
+                    record.provider,
+                ),
+                reverse=True,
+            )
+        ]
         payload["market_timeline"] = [
             _market_payload(item, observed_at=observed_at)
             for item in reversed(market_timeline_rows)

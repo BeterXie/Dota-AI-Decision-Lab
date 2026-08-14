@@ -122,6 +122,9 @@ export interface AiDecision {
     blockers?: string[];
   } | null;
   error: string | null;
+  /** Checkpoint annotation on checkpoint_decisions entries. */
+  snapshot_decision_at?: string;
+  snapshot_mode?: string;
 }
 
 export interface MapSideIdentity {
@@ -235,6 +238,8 @@ export interface MapSummary {
 export interface MapDetail extends MapSummary {
   market_timeline: MarketObservation[];
   live_timeline: LiveObservation[];
+  /** Decisions across the recent checkpoints (annotated with snapshot_decision_at). */
+  checkpoint_decisions?: AiDecision[];
   snapshot_payload?: {
     identity?: DecisionSnapshotIdentity;
     history?: Record<string, unknown>;

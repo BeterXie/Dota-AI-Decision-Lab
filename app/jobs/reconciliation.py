@@ -6,6 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.eligibility import ai_record_is_game_time_eligible
+from app.ai.view import AI_VIEW_VERSION
 from app.domain.jobs import JobType
 from app.draft.engine import MODEL_VERSION
 from app.jobs.repository import JobRepository
@@ -306,8 +307,12 @@ class ReconciliationService:
             await self._jobs.enqueue(
                 session,
                 job_type=JobType.RUN_AI_PROVIDER,
-                dedupe_key=f"reconcile-ai:{snapshot.id}",
+                # The dedupe key is version-scoped: a succeeded v1-era job with
+                # the same snapshot must not block the v2 experiment re-run
+                # (and vice versa), and backfill jobs yield to live decisions.
+                dedupe_key=f"reconcile-ai:{AI_VIEW_VERSION}:{snapshot.id}",
                 payload={"snapshot_id": str(snapshot.id)},
+                priority=150,
             )
             created += 1
         return created

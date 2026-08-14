@@ -61,7 +61,7 @@ export const AppShell: React.FC<AppShellProps> = ({ runtime, jobs, matches, sele
               ) : (
                 <>
                   <DecisionStatusBanner match={activeMatch} />
-                  <PlayerAiDecisionStrip decisions={activeMatch.decisions || []} />
+                  <PlayerAiDecisionStrip decisions={(activeMatch as MapDetail).checkpoint_decisions ?? activeMatch.decisions ?? []} />
 
                   <div className="secondary-nav-bar" aria-label={t("mapIntelligenceViews")}>
                     <button className={`nav-tab-btn ${activeTab === "OVERVIEW" ? "active" : ""}`} onClick={() => setActiveTab("OVERVIEW")}>{t("matchOverview")}</button>

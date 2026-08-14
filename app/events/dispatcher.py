@@ -59,11 +59,16 @@ class DomainEventDispatcher:
         for record in records:
             event_type = DomainEventType(record.event_type)
             job_type = EVENT_JOB_MAP[event_type]
+            # Live decision requests must jump ahead of reconciliation
+            # backfills (priority 150) so fresh snapshots get AI results
+            # before the re-run backlog is drained.
+            priority = 50 if job_type is JobType.RUN_AI_PROVIDER else 100
             await self._jobs.enqueue(
                 session,
                 job_type=job_type,
                 dedupe_key=f"event:{record.id}",
                 payload={**record.payload, "domain_event_id": str(record.id)},
+                priority=priority,
             )
             for additional_job_type in EVENT_ADDITIONAL_JOBS.get(event_type, ()):
                 await self._jobs.enqueue(

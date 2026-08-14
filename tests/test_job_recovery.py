@@ -322,6 +322,10 @@ async def test_reconciliation_only_enqueues_ai_after_ten_minutes() -> None:
         assert len(records) == 1
         assert records[0].payload["snapshot_id"] == str(eligible.snapshot_id)
         assert records[0].payload["snapshot_id"] != str(early.snapshot_id)
+        # Version-scoped dedupe so an ai-view bump always re-runs, and the
+        # backfill yields to live event jobs (priority 50).
+        assert records[0].dedupe_key == f"reconcile-ai:ai-view-v2:{eligible.snapshot_id}"
+        assert records[0].priority == 150
         assert await session.scalar(select(func.count()).select_from(DecisionSnapshotRecord)) == 2
 
     await engine.dispose()
