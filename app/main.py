@@ -58,7 +58,6 @@ from app.models import (
     ProviderMatchMapping,
 )
 from app.notifications import DecisionEmailNotificationService, ResendEmailSender
-from app.notifications.translation import DeepSeekEmailTranslator
 from app.observability import Metrics, configure_logging, configure_tracing
 from app.providers.dltv.bootstrap import DltvBootstrapClient
 from app.providers.dltv.socket import DltvSocketClient
@@ -700,17 +699,6 @@ def _email_notifications(settings: Settings, *, session_factory, jobs):
         base_url=settings.resend_base_url,
         timeout_seconds=settings.resend_timeout_seconds,
     )
-    translator = (
-        DeepSeekEmailTranslator(
-            api_key=settings.deepseek_api_key.get_secret_value(),
-            model=settings.deepseek_model,
-            base_url=settings.deepseek_base_url,
-            reasoning_effort=settings.email_translation_reasoning_effort,
-            timeout_seconds=settings.ai_timeout_seconds,
-        )
-        if settings.deepseek_api_key
-        else None
-    )
     return DecisionEmailNotificationService(
         session_factory=session_factory,
         jobs=jobs,
@@ -718,7 +706,6 @@ def _email_notifications(settings: Settings, *, session_factory, jobs):
         sender_from=settings.resend_from,
         recipients=settings.decision_email_recipients,
         subject_prefix=settings.email_subject_prefix,
-        translator=translator,
     )
 
 

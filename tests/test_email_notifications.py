@@ -91,8 +91,9 @@ class BuyProvider(SuccessfulProvider):
         )
 
 
-async def _snapshot_and_decisions(session):
-    decision_at = datetime(2026, 8, 13, 1, 2, 3, tzinfo=UTC)
+async def _snapshot_and_decisions(session, decision_at: datetime | None = None):
+    if decision_at is None:
+        decision_at = datetime.now(UTC)
     snapshot = await SnapshotRepository().persist(
         session,
         canonical_map_id=None,
@@ -545,11 +546,12 @@ async def test_ai_handler_atomically_enqueues_one_email_batch() -> None:
     )
     snapshots = SnapshotRepository()
     provider = BuyProvider()
+    now = datetime.now(UTC)
     async with factory() as session, session.begin():
         snapshot = await snapshots.persist(
             session,
             canonical_map_id=None,
-            decision_at=datetime(2026, 8, 13, tzinfo=UTC),
+            decision_at=now,
             mode="LIVE_BASIC",
             identity={
                 "team_a": {"id": "team-a", "name": "A"},
@@ -578,11 +580,11 @@ async def test_ai_handler_atomically_enqueues_one_email_batch() -> None:
         payload={"snapshot_id": str(snapshot.snapshot_id)},
         status=JobStatus.RUNNING,
         priority=100,
-        not_before=datetime(2026, 8, 13, tzinfo=UTC),
+        not_before=now,
         attempt_count=1,
         max_attempts=8,
         locked_by="fixture",
-        locked_at=datetime(2026, 8, 13, tzinfo=UTC),
+        locked_at=now,
     )
 
     await handler.run_ai(job)
@@ -623,11 +625,12 @@ async def test_ai_handler_skips_email_when_no_buy_decision() -> None:
     )
     snapshots = SnapshotRepository()
     provider = SuccessfulProvider()
+    now = datetime.now(UTC)
     async with factory() as session, session.begin():
         snapshot = await snapshots.persist(
             session,
             canonical_map_id=None,
-            decision_at=datetime(2026, 8, 13, tzinfo=UTC),
+            decision_at=now,
             mode="LIVE_BASIC",
             identity={
                 "team_a": {"id": "team-a", "name": "A"},
@@ -656,11 +659,11 @@ async def test_ai_handler_skips_email_when_no_buy_decision() -> None:
         payload={"snapshot_id": str(snapshot.snapshot_id)},
         status=JobStatus.RUNNING,
         priority=100,
-        not_before=datetime(2026, 8, 13, tzinfo=UTC),
+        not_before=now,
         attempt_count=1,
         max_attempts=8,
         locked_by="fixture",
-        locked_at=datetime(2026, 8, 13, tzinfo=UTC),
+        locked_at=now,
     )
 
     await handler.run_ai(job)
@@ -690,11 +693,12 @@ async def test_ai_handler_does_not_call_providers_before_ten_minutes() -> None:
     factory = async_sessionmaker(engine, expire_on_commit=False)
     snapshots = SnapshotRepository()
     provider = SuccessfulProvider()
+    now = datetime.now(UTC)
     async with factory() as session, session.begin():
         snapshot = await snapshots.persist(
             session,
             canonical_map_id=None,
-            decision_at=datetime(2026, 8, 13, tzinfo=UTC),
+            decision_at=now,
             mode="LIVE_BASIC",
             identity={
                 "team_a": {"id": "team-a", "name": "A"},
@@ -723,11 +727,11 @@ async def test_ai_handler_does_not_call_providers_before_ten_minutes() -> None:
         payload={"snapshot_id": str(snapshot.snapshot_id)},
         status=JobStatus.RUNNING,
         priority=100,
-        not_before=datetime(2026, 8, 13, tzinfo=UTC),
+        not_before=now,
         attempt_count=1,
         max_attempts=8,
         locked_by="fixture",
-        locked_at=datetime(2026, 8, 13, tzinfo=UTC),
+        locked_at=now,
     )
 
     await handler.run_ai(job)
@@ -739,4 +743,76 @@ async def test_ai_handler_does_not_call_providers_before_ten_minutes() -> None:
             == 0
         )
     assert provider.calls == 0
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_stale_decision_email_is_skipped_and_marked_expired() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    jobs = JobRepository()
+    sender = RecordingSender()
+    email_service = DecisionEmailNotificationService(
+        session_factory=factory,
+        jobs=jobs,
+        sender=sender,
+        sender_from="Decision Lab <alerts@example.com>",
+        recipients=("owner@example.com",),
+        subject_prefix="[Decision]",
+        max_decision_age_seconds=60.0,
+    )
+    snapshots = SnapshotRepository()
+    # 2 hours old snapshot
+    stale_time = datetime(2026, 8, 1, 0, 0, 0, tzinfo=UTC)
+    async with factory() as session, session.begin():
+        snapshot = await snapshots.persist(
+            session,
+            canonical_map_id=None,
+            decision_at=stale_time,
+            mode="LIVE_BASIC",
+            identity={
+                "team_a": {"id": "team-a", "name": "A"},
+                "team_b": {"id": "team-b", "name": "B"},
+            },
+            market={},
+            draft=None,
+            history={},
+            live={"game_time_seconds": 600},
+            quality={"eligible": True, "blockers": [], "warnings": []},
+        )
+        decisions = [
+            AiDecisionRecord(
+                id=uuid4(),
+                snapshot_id=snapshot.snapshot_id,
+                snapshot_hash=snapshot.snapshot_hash,
+                provider="openai",
+                model="gpt-test",
+                model_version="gpt-test",
+                prompt_version="prompt-v1",
+                decision_policy_version="policy-v1",
+                ai_view_version="ai-view-v2",
+                request_started_at=stale_time,
+                response_received_at=stale_time,
+                latency_seconds=1.2,
+                raw_response={},
+                normalized_response={
+                    "action": "BUY_A",
+                    "fair_probability_a": 0.65,
+                    "confidence": 0.8,
+                    "market_assessment": "UNDERPRICED",
+                    "primary_reasons": ["赔率划算"],
+                    "counter_arguments": [],
+                    "data_quality_concerns": [],
+                    "blockers": [],
+                },
+                parse_status="SUCCESS",
+            )
+        ]
+        # Prepare should skip stale snapshot
+        notification_id = await email_service.prepare(session, snapshot=snapshot, decisions=decisions)
+        assert notification_id is None
+
+    assert len(sender.messages) == 0
     await engine.dispose()

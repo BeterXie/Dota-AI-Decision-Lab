@@ -14,7 +14,6 @@ from app.domain.jobs import JobType
 from app.domain.snapshot import DecisionSnapshot
 from app.jobs.repository import JobRepository
 from app.models import AiDecisionRecord, DecisionEmailNotificationRecord
-from app.notifications.translation import DeepSeekEmailTranslator
 from app.providers.common import create_system_ssl_context
 from app.snapshots.repository import SnapshotRepository
 
@@ -85,6 +84,12 @@ class ResendEmailSender:
             await self._client.aclose()
 
 
+def _as_utc(value: datetime) -> datetime:
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
 class DecisionEmailNotificationService:
     def __init__(
         self,
@@ -95,7 +100,7 @@ class DecisionEmailNotificationService:
         sender_from: str,
         recipients: tuple[str, ...],
         subject_prefix: str,
-        translator: DeepSeekEmailTranslator | None = None,
+        max_decision_age_seconds: float = 600.0,
     ) -> None:
         self._session_factory = session_factory
         self._jobs = jobs
@@ -103,7 +108,7 @@ class DecisionEmailNotificationService:
         self._sender_from = sender_from
         self._recipients = recipients
         self._subject_prefix = subject_prefix
-        self._translator = translator
+        self._max_decision_age_seconds = max_decision_age_seconds
 
     async def prepare(
         self,
@@ -111,7 +116,11 @@ class DecisionEmailNotificationService:
         *,
         snapshot: DecisionSnapshot,
         decisions: list[AiDecisionRecord],
-    ) -> UUID:
+    ) -> UUID | None:
+        age = (datetime.now(UTC) - _as_utc(snapshot.decision_at)).total_seconds()
+        if age > self._max_decision_age_seconds:
+            return None
+
         decision_batch_key = _decision_batch_key(decisions)
         existing = await session.scalar(
             select(DecisionEmailNotificationRecord).where(
@@ -140,12 +149,12 @@ class DecisionEmailNotificationService:
                 html_body=html_body,
                 template_version=EMAIL_TEMPLATE_VERSION,
                 idempotency_key=f"decision-email/{notification_id}",
-                translation_status="PENDING" if self._translator is not None else "DISABLED",
+                translation_status="DISABLED",
                 status="PENDING",
             )
             session.add(notification)
             await session.flush()
-        if notification.status != "SENT":
+        if notification.status != "SENT" and notification.status != "EXPIRED":
             await self._jobs.enqueue(
                 session,
                 job_type=JobType.SEND_DECISION_EMAIL,
@@ -155,12 +164,28 @@ class DecisionEmailNotificationService:
         return notification.id
 
     async def deliver(self, notification_id: UUID) -> DecisionEmailNotificationRecord:
-        await self._prepare_translation(notification_id)
+        async with self._session_factory() as session:
+            notification = await session.get(DecisionEmailNotificationRecord, notification_id)
+            if notification is None:
+                raise ValueError("decision email notification does not exist")
+            if notification.status in {"SENT", "EXPIRED"}:
+                return notification
+            snapshot = await SnapshotRepository().get(session, notification.snapshot_id)
+            if snapshot is not None:
+                age = (datetime.now(UTC) - _as_utc(snapshot.decision_at)).total_seconds()
+                if age > self._max_decision_age_seconds:
+                    async with self._session_factory() as update_session, update_session.begin():
+                        record = await update_session.get(DecisionEmailNotificationRecord, notification_id)
+                        if record is not None:
+                            record.status = "EXPIRED"
+                            record.last_error = f"Decision snapshot is stale ({age:.0f}s > {self._max_decision_age_seconds:.0f}s)"
+                            return record
+
         async with self._session_factory() as session, session.begin():
             notification = await session.get(DecisionEmailNotificationRecord, notification_id)
             if notification is None:
                 raise ValueError("decision email notification does not exist")
-            if notification.status == "SENT":
+            if notification.status in {"SENT", "EXPIRED"}:
                 return notification
             notification.status = "SENDING"
             notification.attempt_count += 1
@@ -195,66 +220,6 @@ class DecisionEmailNotificationService:
 
     async def close(self) -> None:
         await self._sender.close()
-        if self._translator is not None:
-            await self._translator.close()
-
-    async def _prepare_translation(self, notification_id: UUID) -> None:
-        if self._translator is None:
-            return
-        async with self._session_factory() as session:
-            notification = await session.get(DecisionEmailNotificationRecord, notification_id)
-            if notification is None:
-                raise ValueError("decision email notification does not exist")
-            if notification.translation_status != "PENDING":
-                return
-            snapshot = await SnapshotRepository().get(session, notification.snapshot_id)
-            decisions = list(
-                (
-                    await session.scalars(
-                        select(AiDecisionRecord).where(
-                            AiDecisionRecord.snapshot_id == notification.snapshot_id
-                        )
-                    )
-                ).all()
-            )
-        if snapshot is None:
-            raise ValueError("decision email snapshot does not exist")
-        try:
-            result = await self._translator.translate(decisions)
-        except Exception as exc:
-            async with self._session_factory() as session, session.begin():
-                notification = await session.get(DecisionEmailNotificationRecord, notification_id)
-                if notification is not None:
-                    notification.translation_status = "FAILED"
-                    notification.translation_error = f"{type(exc).__name__}: {exc}"
-                    subject, text_body, html_body = render_decision_email(
-                        snapshot,
-                        decisions,
-                        subject_prefix=self._subject_prefix,
-                        translation_status="FAILED",
-                    )
-                    notification.subject = subject
-                    notification.text_body = text_body
-                    notification.html_body = html_body
-            return
-        subject, text_body, html_body = render_decision_email(
-            snapshot,
-            decisions,
-            subject_prefix=self._subject_prefix,
-            translations=result.translations,
-            translation_status="SUCCESS",
-        )
-        async with self._session_factory() as session, session.begin():
-            notification = await session.get(DecisionEmailNotificationRecord, notification_id)
-            if notification is None:
-                raise ValueError("decision email notification disappeared after translation")
-            notification.subject = subject
-            notification.text_body = text_body
-            notification.html_body = html_body
-            notification.translation_status = "SUCCESS"
-            notification.translation_model = result.model_version
-            notification.translation_raw_response = result.raw_response
-            notification.translation_error = None
 
 
 def render_decision_email(
