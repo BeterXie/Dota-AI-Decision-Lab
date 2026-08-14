@@ -225,14 +225,10 @@ def summarize_backtest_rows(
                     "sample_count": len(comparable),
                     "ai_average_brier_score": ai_brier_comparable,
                     "market_average_brier_score": market_brier,
-                    "brier_improvement_vs_market": _difference(
-                        market_brier, ai_brier_comparable
-                    ),
+                    "brier_improvement_vs_market": _difference(market_brier, ai_brier_comparable),
                     "ai_average_log_loss": ai_loss_comparable,
                     "market_average_log_loss": market_loss,
-                    "log_loss_improvement_vs_market": _difference(
-                        market_loss, ai_loss_comparable
-                    ),
+                    "log_loss_improvement_vs_market": _difference(market_loss, ai_loss_comparable),
                 },
                 "average_clv": _average(clvs),
                 "clv_sample_count": len(clvs),
