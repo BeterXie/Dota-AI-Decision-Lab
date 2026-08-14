@@ -92,6 +92,7 @@ def create_app(
                 (
                     await session.scalars(
                         select(CanonicalMap)
+                        .outerjoin(CanonicalSeries, CanonicalSeries.id == CanonicalMap.series_id)
                         .where(
                             select(ProviderMatchMapping.id)
                             .where(
@@ -104,7 +105,15 @@ def create_app(
                             )
                             .exists()
                         )
-                        .order_by(CanonicalMap.scheduled_at.desc())
+                        # Maps resolved from DLTV identity usually carry no
+                        # scheduled_at of their own; fall back to the series
+                        # schedule so the newest matches sort first and live
+                        # maps are not pushed past the 60-entry cap.
+                        .order_by(
+                            func.coalesce(CanonicalMap.scheduled_at, CanonicalSeries.scheduled_at)
+                            .desc()
+                            .nulls_last()
+                        )
                         .limit(60)
                     )
                 ).all()
@@ -124,7 +133,7 @@ def create_app(
                             )
                             .exists(),
                         )
-                        .order_by(CanonicalSeries.scheduled_at.desc())
+                        .order_by(CanonicalSeries.scheduled_at.desc().nulls_last())
                         .limit(60)
                     )
                 ).all()
@@ -147,9 +156,11 @@ def create_app(
                     payloads.append(payload)
             payloads.sort(
                 key=lambda item: (
-                    item["scheduled_at"] is None,
-                    item["scheduled_at"] or datetime.max.replace(tzinfo=UTC),
-                )
+                    ensure_utc(item["scheduled_at"])
+                    if item["scheduled_at"] is not None
+                    else ensure_utc(datetime.min)
+                ),
+                reverse=True,
             )
             return payloads[:60]
 

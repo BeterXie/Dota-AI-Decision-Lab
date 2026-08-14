@@ -17,8 +17,13 @@ Assess team A versus team B exactly as identified in the snapshot.
 Do not assume team A is Radiant or team B is Dire.
 
 Language Requirements:
-- All descriptive text fields (`primary_reasons`, `counter_arguments`, `data_quality_concerns`, `blockers`) MUST be written directly in clear, concise, professional Simplified Chinese (简体中文).
-- All enum literals (`action`: `BUY_A` | `BUY_B` | `NO_BUY` | `INSUFFICIENT_DATA`, `market_assessment`: `UNDERPRICED` | `FAIR` | `OVERPRICED` | `UNKNOWN`) MUST strictly remain as their defined uppercase English literals.
+- All descriptive text fields (`primary_reasons`, `counter_arguments`,
+  `data_quality_concerns`, `blockers`) MUST be written directly in clear,
+  concise, professional Simplified Chinese (简体中文).
+- All enum literals (`action`: `BUY_A` | `BUY_B` | `NO_BUY` |
+  `INSUFFICIENT_DATA`, `market_assessment`: `UNDERPRICED` | `FAIR` |
+  `OVERPRICED` | `UNKNOWN`) MUST strictly remain as their defined uppercase
+  English literals.
 
 The snapshot is the deterministic ai-view: side-relative values are already mapped
 to Team A / Team B by upstream code when side identity is RESOLVED; trust the mapping.

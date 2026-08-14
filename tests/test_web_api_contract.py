@@ -511,7 +511,7 @@ async def test_match_feed_includes_raybet_series_pending_map_identity() -> None:
 
 
 @pytest.mark.asyncio
-async def test_match_feed_orders_earliest_scheduled_match_first() -> None:
+async def test_match_feed_orders_newest_scheduled_match_first() -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
@@ -564,7 +564,7 @@ async def test_match_feed_orders_earliest_scheduled_match_first() -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         payload = (await client.get("/api/matches")).json()
 
-    assert [item["team_a"]["name"] for item in payload] == ["Level Up", "Spirit"]
+    assert [item["team_a"]["name"] for item in payload] == ["Spirit", "Level Up"]
     await engine.dispose()
 
 
@@ -919,4 +919,55 @@ async def test_deciding_map_prefers_live_final_winner_market_over_delisted_r3() 
     # The non-deciding map never falls back to the series winner market.
     assert [item["odds_id"] for item in other["market"]] == [300, 301]
     assert {item["match_stage"] for item in other["market"]} == {"r2"}
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_match_feed_orders_by_coalesced_schedule_newest_first() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    now = datetime.now(UTC)
+
+    counter = 0
+
+    async def make_series(name: str, scheduled_at):
+        nonlocal counter
+        counter += 1
+        async with factory.begin() as session:
+            team_a = CanonicalTeam(name=f"{name}-A")
+            team_b = CanonicalTeam(name=f"{name}-B")
+            session.add_all((team_a, team_b))
+            await session.flush()
+            series = CanonicalSeries(
+                team_a_id=team_a.id, team_b_id=team_b.id, scheduled_at=scheduled_at
+            )
+            session.add(series)
+            await session.flush()
+            # Maps resolved from DLTV identity carry no scheduled_at of their
+            # own; ordering must fall back to the series schedule.
+            canonical_map = CanonicalMap(series_id=series.id, map_number=1)
+            session.add(canonical_map)
+            await session.flush()
+            session.add(
+                ProviderMatchMapping(
+                    provider="raybet",
+                    provider_match_id=str(900000000 + counter),
+                    canonical_series_id=series.id,
+                    resolved_by="PROVIDER_DISCOVERY",
+                    confidence=1.0,
+                )
+            )
+            return series.id
+
+    earlier_series = await make_series("Earlier", now - timedelta(hours=2))
+    later_series = await make_series("Later", now - timedelta(hours=1))
+
+    app = create_app(factory, HealthRegistry())
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        payload = (await client.get("/api/matches")).json()
+
+    series_ids = [item["series_id"] for item in payload]
+    assert series_ids.index(str(later_series)) < series_ids.index(str(earlier_series))
     await engine.dispose()
