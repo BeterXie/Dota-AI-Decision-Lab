@@ -22,22 +22,22 @@ interface AppShellProps {
   matches: MapSummary[];
   selectedMatch: MapSummary | undefined;
   detail: MapDetail | undefined;
+  detailLoading?: boolean;
+  detailError?: Error | null;
   selectedMapId: string | null;
   onSelectMatch: (id: string) => void;
   onRefresh: () => void;
 }
 
-export const AppShell: React.FC<AppShellProps> = ({ runtime, jobs, matches, selectedMatch, detail, selectedMapId, onSelectMatch, onRefresh }) => {
+export const AppShell: React.FC<AppShellProps> = ({ runtime, jobs, matches, selectedMatch, detail, detailLoading, detailError, selectedMapId, onSelectMatch, onRefresh }) => {
   const { locale, t } = useI18n();
   const [activeTab, setActiveTab] = useState<NavTab>("OVERVIEW");
   const [isDiagnosticsOpen, setIsDiagnosticsOpen] = useState(false);
   const mainRef = React.useRef<HTMLElement | null>(null);
   const activeMatch = detail || selectedMatch;
   const pendingIdentity = activeMatch?.identity_status === "PENDING_MAP_IDENTITY";
-  const waitingForDetail = Boolean(selectedMatch?.canonical_map_id && !detail);
+  const waitingForDetail = Boolean(selectedMatch?.canonical_map_id && detailLoading && !detail);
 
-  // Switching matches resets the detail scroll position so the next match
-  // always opens at its header instead of mid-content.
   React.useEffect(() => {
     if (selectedMapId != null && typeof mainRef.current?.scrollTo === "function") {
       mainRef.current.scrollTo({ top: 0 });
@@ -54,7 +54,9 @@ export const AppShell: React.FC<AppShellProps> = ({ runtime, jobs, matches, sele
             <div key={selectedMatch?.id ?? "none"} className="match-workspace-content">
               <PlayerMatchHeader match={activeMatch} onSelectMap={onSelectMatch} />
 
-              {pendingIdentity ? (
+              {detailError ? (
+                <DetailErrorView error={detailError} locale={locale} />
+              ) : pendingIdentity ? (
                 <PendingIdentityView match={activeMatch} locale={locale} />
               ) : waitingForDetail ? (
                 <LoadingIntelligence locale={locale} />
@@ -62,7 +64,6 @@ export const AppShell: React.FC<AppShellProps> = ({ runtime, jobs, matches, sele
                 <>
                   <DecisionStatusBanner match={activeMatch} />
                   <PlayerAiDecisionStrip decisions={(activeMatch as MapDetail).checkpoint_decisions ?? activeMatch.decisions ?? []} />
-
                   <div className="secondary-nav-bar" aria-label={t("mapIntelligenceViews")}>
                     <button className={`nav-tab-btn ${activeTab === "OVERVIEW" ? "active" : ""}`} onClick={() => setActiveTab("OVERVIEW")}>{t("matchOverview")}</button>
                     <button className={`nav-tab-btn ${activeTab === "DRAFT" ? "active" : ""}`} onClick={() => setActiveTab("DRAFT")}>{t("draftIntelligence")}</button>
@@ -70,7 +71,6 @@ export const AppShell: React.FC<AppShellProps> = ({ runtime, jobs, matches, sele
                     <button className={`nav-tab-btn ${activeTab === "EVALUATION" ? "active" : ""}`} onClick={() => setActiveTab("EVALUATION")}>{t("evaluation")}</button>
                     <button className="nav-tab-btn diagnostics-entry" onClick={() => setIsDiagnosticsOpen(true)}>Diagnostics</button>
                   </div>
-
                   {activeTab === "OVERVIEW" && (
                     <div className="tab-pane overview-pane player-overview">
                       <div className="primary-analysis-row">
@@ -84,7 +84,6 @@ export const AppShell: React.FC<AppShellProps> = ({ runtime, jobs, matches, sele
                       </div>
                     </div>
                   )}
-
                   {activeTab === "DRAFT" && <div className="tab-pane draft-pane player-detail-pane"><PlayerDraftAdvantageCard match={activeMatch} /><LineupCard match={activeMatch} /></div>}
                   {activeTab === "HISTORICAL" && <div className="tab-pane historical-pane player-detail-pane"><HistoricalSummaryCard match={activeMatch} /></div>}
                   {activeTab === "EVALUATION" && <div className="tab-pane evaluation-pane player-detail-pane"><EvaluationCard match={activeMatch} /></div>}
@@ -101,32 +100,14 @@ export const AppShell: React.FC<AppShellProps> = ({ runtime, jobs, matches, sele
   );
 };
 
+function DetailErrorView({ error, locale }: { error: Error; locale: string }) {
+  return <section className="analytics-card"><div className="empty-rail-msg"><strong>{locale === "zh-CN" ? "比赛情报加载失败" : "Failed to load match intelligence"}</strong><div>{error.message}</div></div></section>;
+}
+
 function LoadingIntelligence({ locale }: { locale: string }) {
-  return (
-    <section className="analytics-card">
-      <div className="empty-rail-msg">
-        <strong>{locale === "zh-CN" ? "正在加载比赛情报" : "Loading match intelligence"}</strong>
-        <div>{locale === "zh-CN" ? "已选择比赛，正在读取 Draft、AI、Live 与 Historical 详情。" : "Match selected; loading Draft, AI, Live and Historical detail."}</div>
-      </div>
-    </section>
-  );
+  return <section className="analytics-card"><div className="empty-rail-msg"><strong>{locale === "zh-CN" ? "正在加载比赛情报" : "Loading match intelligence"}</strong><div>{locale === "zh-CN" ? "已选择比赛，正在读取 Draft、AI、Live 与 Historical 详情。" : "Match selected; loading Draft, AI, Live and Historical detail."}</div></div></section>;
 }
 
 function PendingIdentityView({ match, locale }: { match: MapSummary | MapDetail; locale: string }) {
-  return (
-    <>
-      <div className="trust-banner player-trust-banner trust-degraded">
-        <div className="player-trust-icon degraded">!</div>
-        <div className="trust-content">
-          <span className="trust-title">{locale === "zh-CN" ? "等待本局身份确认" : "Waiting for map identity"}</span>
-          <span className="trust-details">{locale === "zh-CN" ? "市场与历史预热继续采集；在 Valve Match ID / Map Identity 确认前不伪造 Draft、Live 或 AI 状态。" : "Market and historical prewarm continue; Draft, Live and AI state are not fabricated before map identity is resolved."}</span>
-        </div>
-        <div className="trust-pill-group"><span className="trust-pill degraded">PENDING MAP ID</span></div>
-      </div>
-      <div className="primary-analysis-row">
-        <CanonicalMarketCard match={match} />
-        <HistoricalSummaryCard match={match} />
-      </div>
-    </>
-  );
+  return <><div className="trust-banner player-trust-banner trust-degraded"><div className="player-trust-icon degraded">!</div><div className="trust-content"><span className="trust-title">{locale === "zh-CN" ? "等待本局身份确认" : "Waiting for map identity"}</span><span className="trust-details">{locale === "zh-CN" ? "市场与历史预热继续采集；在 Valve Match ID / Map Identity 确认前不伪造 Draft、Live 或 AI 状态。" : "Market and historical prewarm continue; Draft, Live and AI state are not fabricated before identity is resolved."}</span></div><div className="trust-pill-group"><span className="trust-pill degraded">PENDING MAP ID</span></div></div><div className="primary-analysis-row"><CanonicalMarketCard match={match} /><HistoricalSummaryCard match={match} /></div></>;
 }
