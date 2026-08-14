@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Any, Protocol
 
+from app.ai.view import AI_VIEW_VERSION
 from app.domain.decision import AiDecision
 
 PROMPT_VERSION = "decision-analyst-v2"
@@ -74,6 +75,17 @@ class AiProvider(Protocol):
     async def close(self) -> None: ...
 
 
+def ai_experiment_key(provider: str, model: str) -> tuple[str, str, str, str, str]:
+    """The single source of the AI experiment identity.
+
+    The AI input is a function of the snapshot AND the ai-view projection
+    code, so the view version belongs in the identity next to prompt and
+    policy versions.  Coordinator dedupe, durable reconciliation, and the
+    database unique constraint must all use this key.
+    """
+    return (provider, model, PROMPT_VERSION, DECISION_POLICY_VERSION, AI_VIEW_VERSION)
+
+
 def decision_json_schema() -> dict[str, Any]:
     """Provider-facing structured-output schema derived from AiDecision.
 
@@ -86,10 +98,7 @@ def decision_json_schema() -> dict[str, Any]:
     """
     schema = AiDecision.model_json_schema()
     properties: dict[str, Any] = schema.get("properties", {})
-    normalized = {
-        name: _strict_schema_type(prop)
-        for name, prop in properties.items()
-    }
+    normalized = {name: _strict_schema_type(prop) for name, prop in properties.items()}
     return {
         "type": "object",
         "properties": normalized,

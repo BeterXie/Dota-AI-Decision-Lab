@@ -28,7 +28,11 @@ export const PlayerMatchHeader: React.FC<PlayerMatchHeaderProps> = ({ match }) =
       .map((decision) => decision.decision?.fair_probability_a)
       .filter((value): value is number => typeof value === "number" && Number.isFinite(value))
   );
-  const marketA = match.market_quality?.eligible ? pair?.teamA.fair_probability ?? null : null;
+  // Derived no-vig probability wins; the raw observation's fair_probability is
+  // a fallback for payloads that predate current_market_view.
+  const marketA = match.market_quality?.eligible
+    ? match.current_market_view?.team_a?.fair_probability ?? pair?.teamA.fair_probability ?? null
+    : null;
   const modelMarketGap = aiMedian != null && marketA != null ? (aiMedian - marketA) * 100 : null;
 
   return (

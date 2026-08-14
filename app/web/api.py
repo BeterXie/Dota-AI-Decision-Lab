@@ -15,6 +15,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.domain.market import MarketPairQuality
 from app.history.service import HistoricalIntelligenceService
+from app.market.fair_probability import remove_vig
 from app.market.pairing import MarketPairLeg, evaluate_market_pair
 from app.models import (
     AiDecisionRecord,
@@ -61,6 +62,7 @@ def create_app(
             "live_state_max_age_seconds": live_state_max_age_seconds,
             "live_market_max_age_seconds": live_market_max_age_seconds,
         }
+
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
@@ -467,6 +469,14 @@ async def _map_summary_payloads(
         )
         snapshot_market = snapshot.canonical_payload.get("market", {}) if snapshot else {}
         snapshot_quality = snapshot.canonical_payload.get("quality", {}) if snapshot else {}
+        current_market_view = _current_market_view(
+            current_market,
+            series=series,
+            canonical_map_id=canonical_map.id,
+            observed_at=observed_at,
+            live_market_max_age_seconds=live_market_max_age_seconds,
+            market_max_pair_skew_seconds=market_max_pair_skew_seconds,
+        )
         payloads.append(
             {
                 "entity_type": "MAP",
@@ -494,14 +504,10 @@ async def _map_summary_payloads(
                 "market": [
                     _market_payload(item, observed_at=observed_at) for item in current_market
                 ],
-                "market_quality": _current_market_quality(
-                    current_market,
-                    series=series,
-                    canonical_map_id=canonical_map.id,
-                    observed_at=observed_at,
-                    live_market_max_age_seconds=live_market_max_age_seconds,
-                    market_max_pair_skew_seconds=market_max_pair_skew_seconds,
+                "market_quality": (
+                    current_market_view.get("quality") if current_market_view is not None else None
                 ),
+                "current_market_view": current_market_view,
                 "snapshot_market_quality": (
                     snapshot_market.get("quality") if isinstance(snapshot_market, dict) else None
                 ),
@@ -532,7 +538,7 @@ def _market_pair_leg(record: OddsObservationRecord) -> MarketPairLeg:
     )
 
 
-def _current_market_quality(
+def _current_market_evaluation(
     rows: Sequence[OddsObservationRecord],
     *,
     series: CanonicalSeries | None,
@@ -540,12 +546,11 @@ def _current_market_quality(
     observed_at: datetime,
     live_market_max_age_seconds: float,
     market_max_pair_skew_seconds: float,
-) -> dict | None:
-    """Evaluate the CURRENT market pair quality from the live observations.
+) -> tuple[tuple[OddsObservationRecord, OddsObservationRecord], MarketPairQuality] | None:
+    """Pick and evaluate the freshest complete A/B market pair.
 
     Mirrors the snapshot builder's pairing rules: candidate legs are grouped
     by (provider match, market type, match stage) and the freshest pair wins.
-    The frozen quality at snapshot time stays separate (snapshot_market_quality).
     """
     if series is None or series.team_a_id is None or series.team_b_id is None:
         return None
@@ -562,15 +567,18 @@ def _current_market_quality(
         grouped.setdefault((row.provider_match_id, row.market_type, row.match_stage), {})[
             row.selection_team_id
         ] = row
-    evaluated: list[tuple[float, MarketPairQuality]] = []
+    evaluated: list[
+        tuple[float, tuple[OddsObservationRecord, OddsObservationRecord], MarketPairQuality]
+    ] = []
     for by_team in grouped.values():
         if set(by_team) != team_ids:
             continue
-        legs = tuple(
-            _market_pair_leg(by_team[team_id]) for team_id in (series.team_a_id, series.team_b_id)
+        legs = (
+            by_team[series.team_a_id],
+            by_team[series.team_b_id],
         )
         quality = evaluate_market_pair(
-            legs,
+            tuple(_market_pair_leg(record) for record in legs),
             expected_series_id=series.id,
             expected_map_id=canonical_map_id,
             expected_team_ids=team_ids,
@@ -578,14 +586,69 @@ def _current_market_quality(
             max_age_seconds=live_market_max_age_seconds,
             max_pair_skew_seconds=market_max_pair_skew_seconds,
         )
-        freshness = max(
-            by_team[series.team_a_id].received_at, by_team[series.team_b_id].received_at
-        )
-        evaluated.append((freshness, quality))
+        freshness = max(legs[0].received_at, legs[1].received_at)
+        evaluated.append((freshness, legs, quality))
     if not evaluated:
         return None
-    _, quality = max(evaluated, key=lambda item: item[0])
-    return quality.model_dump(mode="json")
+    _, legs, quality = max(evaluated, key=lambda item: item[0])
+    return legs, quality
+
+
+def _current_market_view(
+    rows: Sequence[OddsObservationRecord],
+    *,
+    series: CanonicalSeries | None,
+    canonical_map_id: UUID | None,
+    observed_at: datetime,
+    live_market_max_age_seconds: float,
+    market_max_pair_skew_seconds: float,
+) -> dict | None:
+    """Derived current-market view: raw observations plus vig-removed fair
+    probabilities, evaluated live at request time.
+
+    Raw Observation (market list) != Derived Current Market (this block) !=
+    Frozen Snapshot Market (snapshot_market_quality / latest_snapshot.market).
+    """
+    evaluated = _current_market_evaluation(
+        rows,
+        series=series,
+        canonical_map_id=canonical_map_id,
+        observed_at=observed_at,
+        live_market_max_age_seconds=live_market_max_age_seconds,
+        market_max_pair_skew_seconds=market_max_pair_skew_seconds,
+    )
+    if evaluated is None:
+        return None
+    legs, quality = evaluated
+    fair_a = fair_b = None
+    overround = None
+    if quality.eligible:
+        fair_a, fair_b, implied_total = remove_vig(float(legs[0].price), float(legs[1].price))
+        overround = implied_total - 1.0
+    return {
+        "team_a": _current_market_leg(legs[0], fair_a),
+        "team_b": _current_market_leg(legs[1], fair_b),
+        "overround": overround,
+        "quality": quality.model_dump(mode="json"),
+    }
+
+
+def _current_market_leg(record: OddsObservationRecord, fair_probability: float | None) -> dict:
+    implied = record.implied_probability
+    if implied is None:
+        try:
+            implied = 1.0 / float(record.price)
+        except TypeError, ValueError, ZeroDivisionError:
+            implied = None
+    return {
+        "odds_id": record.odds_id,
+        "selection_team_id": (
+            str(record.selection_team_id) if record.selection_team_id is not None else None
+        ),
+        "price": record.price,
+        "implied_probability": implied,
+        "fair_probability": fair_probability,
+    }
 
 
 def _market_payload(item: OddsObservationRecord, *, observed_at: datetime) -> dict:
@@ -870,6 +933,14 @@ async def _map_payload(
         observed_at=observed_at,
         live_state_max_age_seconds=live_state_max_age_seconds,
     )
+    current_market_view = _current_market_view(
+        current_market,
+        series=series,
+        canonical_map_id=canonical_map.id,
+        observed_at=observed_at,
+        live_market_max_age_seconds=live_market_max_age_seconds,
+        market_max_pair_skew_seconds=market_max_pair_skew_seconds,
+    )
     payload = {
         "entity_type": "MAP",
         "identity_status": "RESOLVED",
@@ -888,14 +959,10 @@ async def _map_payload(
         "team_a": {"id": team_a.id, "name": team_a.name} if team_a else None,
         "team_b": {"id": team_b.id, "name": team_b.name} if team_b else None,
         "market": [_market_payload(item, observed_at=observed_at) for item in current_market],
-        "market_quality": _current_market_quality(
-            current_market,
-            series=series,
-            canonical_map_id=canonical_map.id,
-            observed_at=observed_at,
-            live_market_max_age_seconds=live_market_max_age_seconds,
-            market_max_pair_skew_seconds=market_max_pair_skew_seconds,
+        "market_quality": (
+            current_market_view.get("quality") if current_market_view is not None else None
         ),
+        "current_market_view": current_market_view,
         "snapshot_market_quality": (
             snapshot_market.get("quality") if isinstance(snapshot_market, dict) else None
         ),
@@ -1136,6 +1203,14 @@ async def _pending_series_payload(
     ]
     observed_at = datetime.now(UTC)
     scheduled_at = series.scheduled_at or raybet_match.scheduled_at
+    current_market_view = _current_market_view(
+        current_market,
+        series=series,
+        canonical_map_id=None,
+        observed_at=observed_at,
+        live_market_max_age_seconds=live_market_max_age_seconds,
+        market_max_pair_skew_seconds=market_max_pair_skew_seconds,
+    )
     return {
         "entity_type": "SERIES",
         "identity_status": "PENDING_MAP_IDENTITY",
@@ -1174,14 +1249,10 @@ async def _pending_series_payload(
             }
             for item in current_market
         ],
-        "market_quality": _current_market_quality(
-            current_market,
-            series=series,
-            canonical_map_id=None,
-            observed_at=observed_at,
-            live_market_max_age_seconds=live_market_max_age_seconds,
-            market_max_pair_skew_seconds=market_max_pair_skew_seconds,
+        "market_quality": (
+            current_market_view.get("quality") if current_market_view is not None else None
         ),
+        "current_market_view": current_market_view,
         "snapshot_market_quality": (
             snapshot_market.get("quality") if isinstance(snapshot_market, dict) else None
         ),

@@ -13,6 +13,12 @@ export function CanonicalMarketCard({ match }: { match: MapSummary | MapDetail }
   const eligible = match.market_quality?.eligible === true;
   const teamA = match.team_a?.name ?? t("teamA");
   const teamB = match.team_b?.name ?? t("teamB");
+  const fairA = eligible
+    ? match.current_market_view?.team_a?.fair_probability ?? pair?.teamA.fair_probability ?? null
+    : null;
+  const fairB = eligible
+    ? match.current_market_view?.team_b?.fair_probability ?? pair?.teamB.fair_probability ?? null
+    : null;
   const timeline = "market_timeline" in match ? match.market_timeline : [];
   const dataA = pair ? timeline.filter((item) => item.odds_id === pair.teamA.odds_id).map((item) => [item.received_at, Number(item.price)]) : [];
   const dataB = pair ? timeline.filter((item) => item.odds_id === pair.teamB.odds_id).map((item) => [item.received_at, Number(item.price)]) : [];
@@ -34,9 +40,9 @@ export function CanonicalMarketCard({ match }: { match: MapSummary | MapDetail }
       <div className="player-section-heading compact"><div><span className="section-kicker">MARKET</span><h3>{t("primaryWinnerMarket")}</h3></div><span className={`player-status-pill ${eligible ? "ready" : "limited"}`}>{eligible ? "READY" : "LIMITED"}</span></div>
       {pair ? <>
         <div className="player-market-odds">
-          <div><span>{teamA}</span><strong style={{ color: teamAColor }}>{formatOdds(pair.teamA.price)}</strong><small>{t("fair")} {eligible && pair.teamA.fair_probability != null ? pct(pair.teamA.fair_probability, locale) : "—"}</small></div>
+          <div><span>{teamA}</span><strong style={{ color: teamAColor }}>{formatOdds(pair.teamA.price)}</strong><small>{t("fair")} {fairA != null ? pct(fairA, locale) : "—"}</small></div>
           <div className="market-vs">VS</div>
-          <div><span>{teamB}</span><strong style={{ color: teamBColor }}>{formatOdds(pair.teamB.price)}</strong><small>{t("fair")} {eligible && pair.teamB.fair_probability != null ? pct(pair.teamB.fair_probability, locale) : "—"}</small></div>
+          <div><span>{teamB}</span><strong style={{ color: teamBColor }}>{formatOdds(pair.teamB.price)}</strong><small>{t("fair")} {fairB != null ? pct(fairB, locale) : "—"}</small></div>
         </div>
         <div className="player-market-meta"><span>{t("freshness")} <b>{age == null ? "—" : `${age.toFixed(1)}s`}</b></span><span>{t("pairSkew")} <b>{match.market_quality?.pair_skew_seconds == null ? "—" : `${match.market_quality.pair_skew_seconds.toFixed(1)}s`}</b></span></div>
         <div className="player-market-chart">{dataA.length > 1 || dataB.length > 1 ? <IntelligenceChart option={option} /> : <span className="chart-empty">{t("waitingForOddsTrend")}</span>}</div>

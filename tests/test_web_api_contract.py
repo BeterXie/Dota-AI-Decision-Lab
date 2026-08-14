@@ -8,6 +8,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from starlette.testclient import TestClient
 
 from app.db import Base
+from app.market.fair_probability import remove_vig
 from app.models import (
     CanonicalHero,
     CanonicalMap,
@@ -301,6 +302,13 @@ async def test_map_detail_exposes_real_market_timeline_and_separated_market_qual
     assert current is not None
     assert current["eligible"] is True
     assert current["metadata_version"] == "live-v1"
+    # The derived current market carries vig-removed fair probabilities.
+    view = payload["current_market_view"]
+    assert view is not None
+    fair_a, fair_b, implied_total = remove_vig(1.72, 2.18)
+    assert view["team_a"]["fair_probability"] == pytest.approx(fair_a)
+    assert view["team_b"]["fair_probability"] == pytest.approx(fair_b)
+    assert view["overround"] == pytest.approx(implied_total - 1.0)
     assert payload["snapshot_market_quality"] == snapshot_market_quality
     assert payload["latest_snapshot"]["market_quality"] == snapshot_market_quality
     await engine.dispose()
@@ -396,6 +404,8 @@ async def test_match_feed_separates_current_and_snapshot_market_quality() -> Non
     payload = response.json()
     assert len(payload) == 1
     assert payload[0]["market_quality"]["metadata_version"] == "live-v1"
+    assert payload[0]["current_market_view"]["quality"]["metadata_version"] == "live-v1"
+    assert payload[0]["current_market_view"]["team_a"]["fair_probability"] is not None
     assert payload[0]["snapshot_market_quality"]["metadata_version"] == "frozen-v1"
     assert payload[0]["latest_snapshot"]["market_quality"]["metadata_version"] == "frozen-v1"
     await engine.dispose()

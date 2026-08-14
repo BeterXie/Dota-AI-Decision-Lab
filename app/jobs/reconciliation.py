@@ -46,7 +46,7 @@ class ReconciliationService:
         jobs: JobRepository,
         *,
         lease_seconds: float,
-        ai_experiments: tuple[tuple[str, str, str, str], ...],
+        ai_experiments: tuple[tuple[str, str, str, str, str], ...],
         future_odds_horizons: tuple[int, ...],
         ai_min_game_time_seconds: int = 600,
     ) -> None:
@@ -296,6 +296,7 @@ class ReconciliationService:
                             AiDecisionRecord.model,
                             AiDecisionRecord.prompt_version,
                             AiDecisionRecord.decision_policy_version,
+                            AiDecisionRecord.ai_view_version,
                         ).where(AiDecisionRecord.snapshot_id == snapshot.id)
                     )
                 ).all()

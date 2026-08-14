@@ -3,17 +3,22 @@ from functools import lru_cache
 from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+DEFAULT_RAYBET_INFO_BASE_URLS = (
+    "https://cfinfo.365raylinks.com/v2",
+    "https://iminfo.esportsworldlink.com/v2",
+    "https://cfinfo.365raylines.com/v2",
+)
+
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file=".env", extra="ignore")
 
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/dota_ai_decision_lab"
 
-    raybet_info_base_urls: str = (
-        "https://cfinfo.365raylinks.com/v2,"
-        "https://iminfo.esportsworldlink.com/v2,"
-        "https://cfinfo.365raylines.com/v2"
-    )
+    # Empty default so the legacy singular spelling below actually works as a
+    # fallback for existing .env files; the built-in hosts apply only when
+    # neither variable is configured.
+    raybet_info_base_urls: str = ""
     # Legacy singular spelling kept for backward compatibility with existing
     # .env files; used only when the plural list is empty.
     raybet_info_base_url: str | None = None
@@ -28,29 +33,29 @@ class Settings(BaseSettings):
     dltv_bootstrap_interval_seconds: float = 30.0
 
     stratz_graphql_url: str = "https://api.stratz.com/graphql"
-    stratz_token: str | None = None
+    stratz_token: SecretStr | None = None
     opendota_base_url: str = "https://api.opendota.com/api"
-    opendota_api_key: str | None = None
+    opendota_api_key: SecretStr | None = None
     historical_refresh_seconds: float = 1_200.0
     historical_prewarm_maps: int = 100
     historical_sync_batch_maps: int = 20
 
-    openai_api_key: str | None = None
+    openai_api_key: SecretStr | None = None
     openai_base_url: str = "https://api.openai.com/v1"
     openai_model: str = "gpt-5.6-terra"
     openai_reasoning_effort: str = "xhigh"
-    anthropic_api_key: str | None = None
+    anthropic_api_key: SecretStr | None = None
     anthropic_base_url: str = "https://api.anthropic.com/v1"
     anthropic_model: str = "claude-sonnet-4-6"
-    gemini_api_key: str | None = None
+    gemini_api_key: SecretStr | None = None
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
     gemini_model: str = "gemini-3.6-flash"
-    deepseek_api_key: str | None = None
+    deepseek_api_key: SecretStr | None = None
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-v4-flash"
     deepseek_pro_model: str = "deepseek-v4-pro"
     deepseek_reasoning_effort: str = "xhigh"
-    kimi_api_key: str | None = None
+    kimi_api_key: SecretStr | None = None
     kimi_base_url: str = "https://api.moonshot.cn/v1"
     kimi_model: str = "kimi-k2.5"
     ai_timeout_seconds: float = 240.0
@@ -106,6 +111,9 @@ class Settings(BaseSettings):
     metrics_enabled: bool = True
     otel_exporter_otlp_endpoint: str | None = None
     host: str = "127.0.0.1"
+    # Set when binding a non-loopback host; the runtime refuses to start on a
+    # non-loopback address without it. CORS is not an auth boundary.
+    api_token: SecretStr | None = None
     port: int = Field(default=8000, ge=1, le=65_535)
     log_level: str = "INFO"
 
@@ -120,9 +128,11 @@ class Settings(BaseSettings):
     @property
     def raybet_http_hosts(self) -> tuple[str, ...]:
         raw = self.raybet_info_base_urls.strip()
-        if not raw and self.raybet_info_base_url:
-            raw = self.raybet_info_base_url
-        return tuple(value.strip().rstrip("/") for value in raw.split(",") if value.strip())
+        if raw:
+            return tuple(value.strip().rstrip("/") for value in raw.split(",") if value.strip())
+        if self.raybet_info_base_url:
+            return (self.raybet_info_base_url.strip().rstrip("/"),)
+        return DEFAULT_RAYBET_INFO_BASE_URLS
 
     @property
     def future_odds_horizons(self) -> tuple[int, ...]:

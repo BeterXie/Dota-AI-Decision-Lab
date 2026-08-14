@@ -20,7 +20,7 @@ from app.ai import (
     KimiDecisionProvider,
     OpenAiDecisionProvider,
 )
-from app.ai.base import DECISION_POLICY_VERSION, PROMPT_VERSION
+from app.ai.base import ai_experiment_key
 from app.config import Settings, get_settings
 from app.db import create_engine, create_session_factory
 from app.db_partitions import ensure_weekly_partitions
@@ -85,6 +85,7 @@ async def run() -> None:
     settings = get_settings()
     configure_logging(settings.log_level)
     configure_tracing(settings.otel_exporter_otlp_endpoint)
+    _assert_bind_safety(settings)
     if settings.auto_migrate:
         await asyncio.to_thread(_upgrade_database)
 
@@ -112,9 +113,12 @@ async def run() -> None:
     raybet_socket = RayBetSocketClient(settings.raybet_socket_url, settings.raybet_origin)
     dltv_http = DltvBootstrapClient(settings.dltv_base_url)
     dltv_socket = DltvSocketClient(settings.dltv_base_url)
-    opendota = OpenDotaClient(settings.opendota_base_url, settings.opendota_api_key)
+    opendota = OpenDotaClient(
+        settings.opendota_base_url,
+        settings.opendota_api_key.get_secret_value() if settings.opendota_api_key else None,
+    )
     stratz_client = (
-        StratzClient(settings.stratz_graphql_url, settings.stratz_token)
+        StratzClient(settings.stratz_graphql_url, settings.stratz_token.get_secret_value())
         if settings.stratz_token
         else None
     )
@@ -239,10 +243,7 @@ async def run() -> None:
     reconciliation = ReconciliationService(
         jobs,
         lease_seconds=settings.job_lease_seconds,
-        ai_experiments=tuple(
-            (item.name, item.model, PROMPT_VERSION, DECISION_POLICY_VERSION)
-            for item in ai_providers
-        ),
+        ai_experiments=tuple(ai_experiment_key(item.name, item.model) for item in ai_providers),
         future_odds_horizons=settings.future_odds_horizons,
         ai_min_game_time_seconds=settings.ai_min_game_time_seconds,
     )
@@ -608,12 +609,28 @@ def _provider_socket_workers(
     ]
 
 
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def _assert_bind_safety(settings: Settings) -> None:
+    """Refuse to expose the unauthenticated API beyond loopback.
+
+    The dashboard has no auth layer (CORS is not a security boundary), so
+    binding a non-loopback address without an API token would publish match
+    intelligence and decision state to the network.
+    """
+    if settings.host not in _LOOPBACK_HOSTS and settings.api_token is None:
+        raise RuntimeError(
+            "refusing to start: HOST is non-loopback but API_TOKEN is not configured"
+        )
+
+
 def _ai_providers(settings: Settings):
     providers = []
     if settings.openai_api_key:
         providers.append(
             OpenAiDecisionProvider(
-                api_key=settings.openai_api_key,
+                api_key=settings.openai_api_key.get_secret_value(),
                 model=settings.openai_model,
                 base_url=settings.openai_base_url,
                 reasoning_effort=settings.openai_reasoning_effort,
@@ -623,7 +640,7 @@ def _ai_providers(settings: Settings):
     if settings.anthropic_api_key:
         providers.append(
             AnthropicDecisionProvider(
-                api_key=settings.anthropic_api_key,
+                api_key=settings.anthropic_api_key.get_secret_value(),
                 model=settings.anthropic_model,
                 base_url=settings.anthropic_base_url,
                 timeout_seconds=settings.ai_timeout_seconds,
@@ -632,7 +649,7 @@ def _ai_providers(settings: Settings):
     if settings.gemini_api_key:
         providers.append(
             GeminiDecisionProvider(
-                api_key=settings.gemini_api_key,
+                api_key=settings.gemini_api_key.get_secret_value(),
                 model=settings.gemini_model,
                 base_url=settings.gemini_base_url,
                 timeout_seconds=settings.ai_timeout_seconds,
@@ -642,7 +659,7 @@ def _ai_providers(settings: Settings):
         if settings.deepseek_flash_decisions_enabled:
             providers.append(
                 DeepSeekDecisionProvider(
-                    api_key=settings.deepseek_api_key,
+                    api_key=settings.deepseek_api_key.get_secret_value(),
                     model=settings.deepseek_model,
                     base_url=settings.deepseek_base_url,
                     reasoning_effort=settings.deepseek_reasoning_effort,
@@ -651,7 +668,7 @@ def _ai_providers(settings: Settings):
             )
         providers.append(
             DeepSeekDecisionProvider(
-                api_key=settings.deepseek_api_key,
+                api_key=settings.deepseek_api_key.get_secret_value(),
                 model=settings.deepseek_pro_model,
                 base_url=settings.deepseek_base_url,
                 reasoning_effort=settings.deepseek_reasoning_effort,
@@ -661,7 +678,7 @@ def _ai_providers(settings: Settings):
     if settings.kimi_api_key:
         providers.append(
             KimiDecisionProvider(
-                api_key=settings.kimi_api_key,
+                api_key=settings.kimi_api_key.get_secret_value(),
                 model=settings.kimi_model,
                 base_url=settings.kimi_base_url,
                 timeout_seconds=settings.ai_timeout_seconds,
@@ -682,7 +699,7 @@ def _email_notifications(settings: Settings, *, session_factory, jobs):
     )
     translator = (
         DeepSeekEmailTranslator(
-            api_key=settings.deepseek_api_key,
+            api_key=settings.deepseek_api_key.get_secret_value(),
             model=settings.deepseek_model,
             base_url=settings.deepseek_base_url,
             reasoning_effort=settings.deepseek_reasoning_effort,

@@ -1,5 +1,6 @@
 import asyncio
 from datetime import UTC, datetime, timedelta
+from time import perf_counter
 from uuid import uuid4
 
 import pytest
@@ -8,7 +9,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db import Base
 from app.domain.events import DomainEventType
-from app.domain.jobs import DurableJob, JobStatus, JobType, LeaseOwnershipLost
+from app.domain.jobs import DurableJob, JobStatus, JobType
 from app.events.dispatcher import DomainEventDispatcher
 from app.jobs.reconciliation import ReconciliationService
 from app.jobs.repository import JobRepository
@@ -300,7 +301,7 @@ async def test_reconciliation_only_enqueues_ai_after_ten_minutes() -> None:
     reconciliation = ReconciliationService(
         jobs,
         lease_seconds=120,
-        ai_experiments=(("openai", "fixture-model", "prompt-v1", "policy-v1"),),
+        ai_experiments=(("openai", "fixture-model", "prompt-v1", "policy-v1", "ai-view-v2"),),
         future_odds_horizons=(),
         ai_min_game_time_seconds=600,
     )
@@ -597,10 +598,13 @@ async def test_job_runner_stops_touching_job_when_lease_is_lost() -> None:
         job = claimed[0]
     assert job is not None
 
+    progress: dict[str, bool] = {"finished": False}
+
     async def _slow_handler(_job: DurableJob) -> None:
         # Outlive the renewal interval (lease_seconds/3 -> min 1s) so the
         # renewal task actually attempts to renew and discovers the lost lease.
         await asyncio.sleep(1.2)
+        progress["finished"] = True
 
     runner = JobRunner(
         worker_id="worker-1",
@@ -610,10 +614,16 @@ async def test_job_runner_stops_touching_job_when_lease_is_lost() -> None:
         poll_seconds=1.0,
         lease_seconds=0.01,
     )
+    started = perf_counter()
     await runner._execute(job)
+    elapsed = perf_counter() - started
 
     assert repository.fail_calls == []
     assert repository.succeed_calls == []
+    # The handler was cancelled as soon as the renewal failed, instead of
+    # running to completion while another worker already reclaimed the job.
+    assert progress["finished"] is False
+    assert elapsed < 1.5
     async with factory() as session:
         record = await session.get(DurableJobRecord, job.id)
         # The job stays RUNNING: the losing worker must not mutate it; the

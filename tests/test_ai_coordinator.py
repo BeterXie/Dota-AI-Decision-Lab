@@ -1,14 +1,22 @@
 import asyncio
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
+from uuid import uuid4
 
 import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.ai.base import AiProviderFailure, AiProviderResponse
+from app.ai.base import (
+    AI_VIEW_VERSION,
+    DECISION_POLICY_VERSION,
+    PROMPT_VERSION,
+    AiProviderFailure,
+    AiProviderResponse,
+)
 from app.ai.coordinator import AiCoordinator
 from app.db import Base
 from app.domain.decision import AiDecision
+from app.models import AiDecisionRecord
 from app.snapshots.repository import SnapshotRepository
 
 
@@ -121,4 +129,60 @@ async def test_new_model_version_can_rerun_same_snapshot() -> None:
     assert first[0].id != second[0].id
     assert first[0].model == "fixture-v1"
     assert second[0].model == "fixture-v2"
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_ai_view_version_bump_reruns_and_records_input_hash() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory() as session, session.begin():
+        snapshot = await SnapshotRepository().persist(
+            session,
+            canonical_map_id=None,
+            decision_at=datetime(2026, 1, 1, tzinfo=UTC),
+            mode="PREMATCH",
+            identity={},
+            market={},
+            draft=None,
+            history={},
+            live=None,
+            quality={"eligible": True},
+        )
+        # A legacy decision produced by the old ai-view-v1 semantics with the
+        # SAME provider/model/prompt/policy must not block the v2 run.
+        session.add(
+            AiDecisionRecord(
+                id=uuid4(),
+                snapshot_id=snapshot.snapshot_id,
+                snapshot_hash=snapshot.snapshot_hash,
+                provider="openai",
+                model="fixture-model",
+                model_version="fixture-model",
+                prompt_version=PROMPT_VERSION,
+                decision_policy_version=DECISION_POLICY_VERSION,
+                ai_view_version="ai-view-v1",
+                request_started_at=datetime(2026, 1, 1, tzinfo=UTC),
+                parse_status="SUCCESS",
+            )
+        )
+        await session.flush()
+        records = await AiCoordinator(
+            [FakeProvider("openai", model="fixture-model")], timeout_seconds=1
+        ).run_all(session, snapshot)
+
+    assert len(records) == 1
+    record = records[0]
+    assert record.ai_view_version == AI_VIEW_VERSION
+    assert record.ai_view_version == "ai-view-v2"
+    assert record.ai_input_hash is not None and len(record.ai_input_hash) == 64
+
+    # The fresh v2 record now dedupes the same experiment.
+    async with factory() as session, session.begin():
+        again = await AiCoordinator(
+            [FakeProvider("openai", model="fixture-model")], timeout_seconds=1
+        ).run_all(session, snapshot)
+    assert again[0].id == record.id
     await engine.dispose()

@@ -663,6 +663,7 @@ class AiDecisionRecord(Base):
             "model",
             "prompt_version",
             "decision_policy_version",
+            "ai_view_version",
             name="uq_ai_experiment",
         ),
         Index("ix_ai_snapshot_provider", "snapshot_hash", "provider"),
@@ -676,6 +677,12 @@ class AiDecisionRecord(Base):
     model_version: Mapped[str] = mapped_column(String(128), nullable=False)
     prompt_version: Mapped[str] = mapped_column(String(64), nullable=False)
     decision_policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
+    # The AI input is a function of the snapshot AND the ai-view projection
+    # code; a record without its view version cannot be re-run or compared.
+    ai_view_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    # Canonical-hash of the exact bytes sent to the provider (audit evidence,
+    # not part of the identity: the view version IS the semantic identity).
+    ai_input_hash: Mapped[str | None] = mapped_column(String(64))
     request_started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     response_received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     latency_seconds: Mapped[float | None] = mapped_column(Float)

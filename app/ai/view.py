@@ -22,7 +22,7 @@ from app.ai.dota_heroes import DOTA_HERO_NAMES
 from app.ai.dota_items import DOTA_ITEM_NAMES
 from app.domain.snapshot import DecisionSnapshot
 
-AI_VIEW_VERSION = "ai-view-v1"
+AI_VIEW_VERSION = "ai-view-v2"
 
 _MAJOR_ITEMS = {
     "Black King Bar",
@@ -189,7 +189,14 @@ def _market_view(market: dict[str, Any], team_a_id: str | None, decision_at: str
         "team_a_vig_adjustment_pp": vig_adjustment_pp,
         "eligible": quality.get("eligible"),
         "warnings": quality.get("warnings") or [],
-        "odds_drift": _odds_drift_view(market.get("odds_trajectory"), decision_at),
+        # v2: drift is computed at snapshot build time from the FULL odds
+        # history and frozen in the snapshot; the trajectory-derived
+        # derivation remains only for legacy snapshots without it.
+        "odds_drift": (
+            market.get("odds_drift")
+            if isinstance(market.get("odds_drift"), dict)
+            else _odds_drift_view(market.get("odds_trajectory"), decision_at)
+        ),
     }
 
 

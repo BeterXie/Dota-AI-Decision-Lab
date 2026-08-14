@@ -62,6 +62,21 @@ export interface MarketQuality {
   pair_skew_seconds: number | null;
 }
 
+export interface CurrentMarketLeg {
+  odds_id: number;
+  selection_team_id: string | null;
+  price: number | string;
+  implied_probability: number | null;
+  fair_probability: number | null;
+}
+
+export interface CurrentMarketView {
+  team_a: CurrentMarketLeg;
+  team_b: CurrentMarketLeg;
+  overround: number | null;
+  quality: MarketQuality;
+}
+
 export interface DraftPoint {
   minute: number;
   pure_radiant_edge: number | null;
@@ -151,6 +166,8 @@ export interface MapSummary {
   market: MarketObservation[];
   /** CURRENT market pair quality evaluated from the live observations. */
   market_quality: MarketQuality | null;
+  /** Derived current market (vig-removed fair probabilities) evaluated at request time. */
+  current_market_view?: CurrentMarketView | null;
   /** Market quality frozen inside the latest DecisionSnapshot. */
   snapshot_market_quality?: MarketQuality | null;
   draft: {

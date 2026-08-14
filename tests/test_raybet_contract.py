@@ -32,6 +32,27 @@ from app.repositories.raw import RawEventRepository
 FIXTURES = Path(__file__).parent / "fixtures"
 
 
+def test_raybet_hosts_prefer_list_then_legacy_singular_then_defaults() -> None:
+    from app.config import DEFAULT_RAYBET_INFO_BASE_URLS, Settings
+
+    defaults = Settings(_env_file=None, raybet_info_base_urls="")
+    assert defaults.raybet_http_hosts == DEFAULT_RAYBET_INFO_BASE_URLS
+
+    legacy = Settings(
+        _env_file=None,
+        raybet_info_base_urls="",
+        raybet_info_base_url="https://custom-host.example/v2",
+    )
+    assert legacy.raybet_http_hosts == ("https://custom-host.example/v2",)
+
+    plural = Settings(
+        _env_file=None,
+        raybet_info_base_urls="https://a.example/v2, https://b.example/v2",
+        raybet_info_base_url="https://ignored.example/v2",
+    )
+    assert plural.raybet_http_hosts == ("https://a.example/v2", "https://b.example/v2")
+
+
 def _fixture(name: str) -> dict:
     return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
 
