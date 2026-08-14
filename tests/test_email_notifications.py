@@ -811,7 +811,9 @@ async def test_stale_decision_email_is_skipped_and_marked_expired() -> None:
             )
         ]
         # Prepare should skip stale snapshot
-        notification_id = await email_service.prepare(session, snapshot=snapshot, decisions=decisions)
+        notification_id = await email_service.prepare(
+            session, snapshot=snapshot, decisions=decisions
+        )
         assert notification_id is None
 
     assert len(sender.messages) == 0

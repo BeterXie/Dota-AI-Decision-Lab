@@ -175,10 +175,15 @@ class DecisionEmailNotificationService:
                 age = (datetime.now(UTC) - _as_utc(snapshot.decision_at)).total_seconds()
                 if age > self._max_decision_age_seconds:
                     async with self._session_factory() as update_session, update_session.begin():
-                        record = await update_session.get(DecisionEmailNotificationRecord, notification_id)
+                        record = await update_session.get(
+                            DecisionEmailNotificationRecord, notification_id
+                        )
                         if record is not None:
                             record.status = "EXPIRED"
-                            record.last_error = f"Decision snapshot is stale ({age:.0f}s > {self._max_decision_age_seconds:.0f}s)"
+                            record.last_error = (
+                                f"Decision snapshot is stale "
+                                f"({age:.0f}s > {self._max_decision_age_seconds:.0f}s)"
+                            )
                             return record
 
         async with self._session_factory() as session, session.begin():
