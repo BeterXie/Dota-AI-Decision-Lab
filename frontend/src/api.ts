@@ -33,6 +33,9 @@ export interface RuntimeSnapshot {
   workers: Record<string, WorkerHealth>;
   dependencies: Record<string, DependencyHealth>;
   observed_at: string;
+  /** Backend live_state_max_age_seconds — the single source for live-stale thresholds. */
+  live_state_max_age_seconds?: number;
+  live_market_max_age_seconds?: number;
 }
 
 export interface MarketObservation {
@@ -57,6 +60,21 @@ export interface MarketQuality {
   metadata_version: string | null;
   paired_at: string;
   pair_skew_seconds: number | null;
+}
+
+export interface CurrentMarketLeg {
+  odds_id: number;
+  selection_team_id: string | null;
+  price: number | string;
+  implied_probability: number | null;
+  fair_probability: number | null;
+}
+
+export interface CurrentMarketView {
+  team_a: CurrentMarketLeg;
+  team_b: CurrentMarketLeg;
+  overround: number | null;
+  quality: MarketQuality;
 }
 
 export interface DraftPoint {
@@ -104,16 +122,57 @@ export interface AiDecision {
     blockers?: string[];
   } | null;
   error: string | null;
+  /** Checkpoint annotation on checkpoint_decisions entries. */
+  snapshot_decision_at?: string;
+  snapshot_mode?: string;
+}
+
+export interface MapSideIdentity {
+  status: "RESOLVED" | "UNRESOLVED" | "CONFLICT" | string;
+  radiant_team_id: string | null;
+  dire_team_id: string | null;
+  source: string | null;
+  confidence: number | null;
+  observed_at: string | null;
+  raw_event_id: string | null;
+  blocker: string | null;
+}
+
+export interface DecisionSnapshotIdentity {
+  event_id?: string | null;
+  series_id?: string | null;
+  map_id?: string | null;
+  map_number?: number | null;
+  valve_match_id?: number | null;
+  team_a?: { id: string; name: string | null } | null;
+  team_b?: { id: string; name: string | null } | null;
+  side_identity?: MapSideIdentity | null;
+}
+
+export interface SeriesSiblingMap {
+  canonical_map_id: string;
+  map_number: number | null;
+  valve_match_id: number | null;
+  winner_team_id: string | null;
+}
+
+export interface SeriesScore {
+  team_a: number;
+  team_b: number;
 }
 
 export interface MapSummary {
   entity_type: "MAP" | "SERIES";
   identity_status: "RESOLVED" | "PENDING_MAP_IDENTITY";
+  phase: "PREMATCH" | "LIVE" | "AWAITING_RESULT" | "POSTMATCH" | "UNKNOWN";
   id: string;
   series_id: string;
   canonical_map_id: string | null;
   map_number: number | null;
   valve_match_id: number | null;
+  best_of?: number | null;
+  series_score?: SeriesScore | null;
+  series_maps?: SeriesSiblingMap[];
   scheduled_at: string | null;
   provider_match_id: number | null;
   tournament_name: string | null;
@@ -123,7 +182,12 @@ export interface MapSummary {
   team_a: { id: string; name: string } | null;
   team_b: { id: string; name: string } | null;
   market: MarketObservation[];
+  /** CURRENT market pair quality evaluated from the live observations. */
   market_quality: MarketQuality | null;
+  /** Derived current market (vig-removed fair probabilities) evaluated at request time. */
+  current_market_view?: CurrentMarketView | null;
+  /** Market quality frozen inside the latest DecisionSnapshot. */
+  snapshot_market_quality?: MarketQuality | null;
   draft: {
     complete: boolean;
     blockers: string[];
@@ -171,6 +235,10 @@ export interface MapSummary {
       eligible?: boolean;
       blockers?: string[];
       warnings?: string[];
+      live_anchors?: {
+        raybet_live_anchor: string | null;
+        data_lag_seconds: number | null;
+      };
     } | null;
   } | null;
   decisions: AiDecision[];
@@ -179,13 +247,16 @@ export interface MapSummary {
     player_form_ready_count: number;
     player_hero_ready_count: number;
     latest_knowledge_cutoff: string | null;
-  };
+  } | null;
 }
 
 export interface MapDetail extends MapSummary {
   market_timeline: MarketObservation[];
   live_timeline: LiveObservation[];
+  /** Decisions across the recent checkpoints (annotated with snapshot_decision_at). */
+  checkpoint_decisions?: AiDecision[];
   snapshot_payload?: {
+    identity?: DecisionSnapshotIdentity;
     history?: Record<string, unknown>;
     quality?: Record<string, unknown>;
   };

@@ -221,11 +221,52 @@ class HistoricalTeamResolver:
                 resolved += 1
         return resolved
 
+    async def resolve_observed_match_teams(
+        self,
+        session: AsyncSession,
+        *,
+        provider: str,
+        observed_teams: tuple[tuple[str, str | None], ...],
+        expected_team_ids: set[UUID],
+    ) -> int:
+        resolved = 0
+        expected_teams = {
+            team_id: await session.get(CanonicalTeam, team_id) for team_id in expected_team_ids
+        }
+        for provider_team_id, observed_name in observed_teams:
+            existing = await session.scalar(
+                select(ProviderTeamMapping).where(
+                    ProviderTeamMapping.provider == provider,
+                    ProviderTeamMapping.provider_team_id == provider_team_id,
+                )
+            )
+            if existing is not None:
+                continue
+            if observed_name is None:
+                continue
+            candidates = [
+                team_id
+                for team_id, team in expected_teams.items()
+                if team is not None and _names_match(team.name, observed_name)
+            ]
+            if len(candidates) != 1:
+                continue
+            session.add(
+                ProviderTeamMapping(
+                    provider=provider,
+                    provider_team_id=provider_team_id,
+                    canonical_team_id=candidates[0],
+                    observed_name=observed_name,
+                )
+            )
+            resolved += 1
+        if resolved:
+            await session.flush()
+        return resolved
+
 
 def _names_match(canonical_name: str, provider_name: str) -> bool:
-    return bool(
-        equivalent_team_aliases(canonical_name) & equivalent_team_aliases(provider_name)
-    )
+    return bool(equivalent_team_aliases(canonical_name) & equivalent_team_aliases(provider_name))
 
 
 async def _merge_placeholder_team(

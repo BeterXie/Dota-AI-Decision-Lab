@@ -1,42 +1,21 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-
 import { App } from "./App";
 
 const runtime = {
   overall: "ACTION_REQUIRED",
   workers: {},
-  dependencies: {
-    DATABASE: {
-      name: "DATABASE",
-      status: "READY",
-      message: null,
-      updated_at: "2026-08-12T12:00:00Z",
-      metadata: {}
-    }
-  },
-  observed_at: "2026-08-12T12:00:00Z"
+  dependencies: {},
+  observed_at: "2026-08-12T12:00:00Z",
+  live_state_max_age_seconds: 120
 };
+
+const jobs = { by_status: {}, by_type: [], oldest_pending_at: null, recent_failures: [] };
 
 beforeEach(() => {
   window.localStorage.clear();
   Object.defineProperty(window, "WebSocket", { value: undefined, configurable: true });
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      const payload = url.endsWith("/api/matches")
-        ? []
-        : url.endsWith("/api/jobs/summary")
-          ? { by_status: {}, by_type: [], oldest_pending_at: null, recent_failures: [] }
-          : runtime;
-      return new Response(JSON.stringify(payload), {
-        status: 200,
-        headers: { "Content-Type": "application/json" }
-      });
-    })
-  );
 });
 
 afterEach(() => {
@@ -44,182 +23,193 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
-test("renders operational empty and readiness states", async () => {
+function renderApp() {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
-    <QueryClientProvider client={client}>
-      <App />
-    </QueryClientProvider>
-  );
+  return render(<QueryClientProvider client={client}><App /></QueryClientProvider>);
+}
 
-  expect((await screen.findAllByText("ACTION REQUIRED")).length).toBeGreaterThan(0);
-  expect(await screen.findByText("No discovered matches")).toBeInTheDocument();
-  expect(screen.getByText("Waiting for canonical map discovery")).toBeInTheDocument();
-});
+function response(payload: unknown) {
+  return new Response(JSON.stringify(payload), { status: 200, headers: { "Content-Type": "application/json" } });
+}
 
-test("switches to Chinese and restores the choice after remount", async () => {
-  const firstClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const firstView = render(
-    <QueryClientProvider client={firstClient}>
-      <App />
-    </QueryClientProvider>
-  );
-
-  fireEvent.click(await screen.findByRole("button", { name: "中文" }));
-  expect(await screen.findByText("暂无已发现比赛")).toBeInTheDocument();
-  expect(screen.getByText("等待规范化地图发现")).toBeInTheDocument();
-  expect(window.localStorage.getItem("dota-ai-decision-lab-locale")).toBe("zh-CN");
-  expect(document.documentElement.lang).toBe("zh-CN");
-
-  firstView.unmount();
-  const secondClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(
-    <QueryClientProvider client={secondClient}>
-      <App />
-    </QueryClientProvider>
-  );
-
-  expect(await screen.findByText("暂无已发现比赛")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "中文" })).toHaveAttribute("aria-pressed", "true");
-});
-
-test("shows RayBet series while canonical map identity is pending", async () => {
-  const pending = {
-    entity_type: "SERIES",
-    identity_status: "PENDING_MAP_IDENTITY",
-    id: "22222222-2222-2222-2222-222222222222",
-    series_id: "22222222-2222-2222-2222-222222222222",
-    canonical_map_id: null,
-    map_number: null,
-    valve_match_id: null,
-    scheduled_at: "2026-08-13T05:00:00Z",
-    provider_match_id: 38423260,
-    tournament_name: "TI15 International",
-    round: "bo3",
-    raw_status: 1,
-    provider_observed_at: "2026-08-12T12:00:00Z",
-    team_a: { id: "team-a", name: "Spirit" },
-    team_b: { id: "team-b", name: "Xtreme Gaming" },
-    market: [{
-      odds_id: 10,
-      selection_team_id: "team-a",
-      price: "1.90",
-      fair_probability: null,
-      raw_status: 1,
-      normalized_status: "UNKNOWN",
-      metadata_version: "registry-v1",
-      market_type: "Winner",
-      match_stage: "Full Time",
-      received_at: "2026-08-12T12:00:01Z",
-      age_seconds: 1
-    }, {
-      odds_id: 20,
-      selection_team_id: "team-b",
-      price: "2.10",
-      fair_probability: null,
-      raw_status: 1,
-      normalized_status: "UNKNOWN",
-      metadata_version: "registry-v1",
-      market_type: "Winner",
-      match_stage: "Full Time",
-      received_at: "2026-08-12T12:00:01Z",
-      age_seconds: 1
-    }],
-    market_quality: null,
-    draft: null,
-    live: null,
-    sync: null,
-    latest_snapshot: null,
-    decisions: []
-  };
-  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-    const url = String(input);
-    const payload = url.endsWith("/api/matches")
-      ? [pending]
-      : url.endsWith("/api/jobs/summary")
-        ? { by_status: {}, by_type: [], oldest_pending_at: null, recent_failures: [] }
-        : runtime;
-    return new Response(JSON.stringify(payload), {
-      status: 200,
-      headers: { "Content-Type": "application/json" }
-    });
-  });
-  vi.stubGlobal("fetch", fetchMock);
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(<QueryClientProvider client={client}><App /></QueryClientProvider>);
-
-  expect(await screen.findByRole("heading", { name: "Spirit vs Xtreme Gaming" })).toBeInTheDocument();
-  expect(screen.getByLabelText("Headline odds")).toHaveTextContent("1.90");
-  expect(screen.getByLabelText("Headline odds")).toHaveTextContent("2.10");
-  expect(screen.getAllByText("PENDING MAP IDENTITY").length).toBeGreaterThan(0);
-  expect(screen.getByText("RayBet data and team history prewarm are available. Valve/DLTV map identity is still required for the current roster, draft and live decision modes.")).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "Historical prewarm" })).toBeInTheDocument();
-  expect(screen.getByText("0/2")).toBeInTheDocument();
-  expect(fetchMock.mock.calls.some(([input]) => String(input).includes("/api/maps/"))).toBe(false);
-
-  fireEvent.click(screen.getByRole("button", { name: "中文" }));
-  expect((await screen.findAllByText("等待地图身份")).length).toBeGreaterThan(0);
-  expect(screen.getByText("RayBet 比赛、赔率与队伍历史预热已开始；当前上场阵容、选人和实时决策仍需解析 Valve/DLTV 地图身份。")).toBeInTheDocument();
-  expect(screen.getByRole("heading", { name: "历史预热" })).toBeInTheDocument();
-});
-
-test("shows bilingual audit evidence for a decision lifecycle", async () => {
-  const map = {
+function liveMatchFixture() {
+  return {
     entity_type: "MAP",
     identity_status: "RESOLVED",
+    phase: "LIVE",
     id: "11111111-1111-1111-1111-111111111111",
     series_id: "22222222-2222-2222-2222-222222222222",
     canonical_map_id: "11111111-1111-1111-1111-111111111111",
-    map_number: 1,
+    map_number: 2,
     valve_match_id: 8940730389,
     scheduled_at: "2026-08-12T12:00:00Z",
     provider_match_id: 38423260,
-    tournament_name: "TI15 International",
+    tournament_name: "EPL Masters",
     round: "bo3",
     raw_status: 1,
     provider_observed_at: "2026-08-12T11:59:00Z",
-    team_a: { id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", name: "Radiant" },
-    team_b: { id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", name: "Dire" },
+    team_a: { id: "team-a", name: "Team Spirit" },
+    team_b: { id: "team-b", name: "Aurora" },
     market: [
-      { odds_id: 10, selection_team_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", price: "1.90", fair_probability: 0.52, raw_status: 1, normalized_status: "UNKNOWN", metadata_version: "registry-v1", market_type: "match_winner", match_stage: "Map 1", received_at: "2026-08-12T12:00:01Z", age_seconds: 1 },
-      { odds_id: 20, selection_team_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb", price: "2.10", fair_probability: 0.48, raw_status: 1, normalized_status: "UNKNOWN", metadata_version: "registry-v1", market_type: "match_winner", match_stage: "Map 1", received_at: "2026-08-12T12:00:01Z", age_seconds: 1 }
+      { odds_id: 10, selection_team_id: "team-a", price: "1.72", fair_probability: 0.56, raw_status: 1, normalized_status: "UNKNOWN", metadata_version: "v1.4.2", market_type: "match_winner", match_stage: "Map 2", received_at: "2026-08-12T12:18:40Z", age_seconds: 2 },
+      { odds_id: 20, selection_team_id: "team-b", price: "2.18", fair_probability: 0.44, raw_status: 1, normalized_status: "UNKNOWN", metadata_version: "v1.4.2", market_type: "match_winner", match_stage: "Map 2", received_at: "2026-08-12T12:18:40Z", age_seconds: 2 }
     ],
-    market_quality: { eligible: true, blockers: [], warnings: ["MARKET_STATUS_UNKNOWN"], metadata_version: "registry-v1", paired_at: "2026-08-12T12:00:02Z", pair_skew_seconds: 0 },
-    draft: null,
-    live: null,
-    sync: null,
-    latest_snapshot: { id: "33333333-3333-3333-3333-333333333333", decision_at: "2026-08-12T12:00:02Z", created_at: "2026-08-12T12:00:03Z", mode: "PREMATCH", snapshot_hash: "abcdef1234567890", quality: { eligible: true, blockers: [], warnings: [] }, market_quality: null, history_coverage: null },
-    decisions: [],
-    market_timeline: [],
-    live_timeline: [],
-    snapshot_payload: { history: {}, quality: {} },
-    future_odds: [{ id: "44444444-4444-4444-4444-444444444444", capture_type: "CLOSING", horizon_seconds: null, triggered_at: "2026-08-12T12:05:00Z", due_at: "2026-08-12T12:05:00Z", observed_at: "2026-08-12T12:04:59Z", odds_a: "1.80", odds_b: "2.20", market_type: "match_winner", match_stage: "Map 1", market_status: "UNKNOWN", capture_policy_version: "closing-policy-v1", pair_quality: { eligible: true }, pair_skew_seconds: 0, status: "CAPTURED" }],
-    result: { winner_team_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", basic_first_usable_at: "2026-08-12T13:00:00Z", advanced_first_usable_at: null, settled_at: "2026-08-12T13:00:01Z", provider_conflict: false },
-    result_evidence: [{ id: "55555555-5555-5555-5555-555555555555", provider: "opendota", provider_match_id: "8940730389", winner_team_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", result_observed_at: "2026-08-12T13:00:00Z", first_usable_at: "2026-08-12T13:00:00Z", raw_event_id: "66666666-6666-6666-6666-666666666666", normalizer_version: "opendota-v1", identity_confidence: 1, conflict_status: "CONSISTENT" }]
+    market_quality: { eligible: true, blockers: [], warnings: [], metadata_version: "v1.4.2", paired_at: "2026-08-12T12:18:40Z", pair_skew_seconds: 0 },
+    snapshot_market_quality: null,
+    draft: {
+      complete: true,
+      blockers: [], warnings: [], observed_at: "2026-08-12T12:00:00Z", statistics_cutoff: "2026-08-01T00:00:00Z",
+      features: { current_edge: 5.2, next_5m_edge: 6.1, peak_edge: 8.4, peak_minute: 31, cross_over_minute: 46 },
+      curve: [
+        { minute: 20, pure_radiant_edge: 2.2, adjusted_radiant_edge: 3.0, support: 100, confidence: 0.8 },
+        { minute: 31, pure_radiant_edge: 6.8, adjusted_radiant_edge: 8.4, support: 100, confidence: 0.8 },
+        { minute: 46, pure_radiant_edge: -0.5, adjusted_radiant_edge: -0.8, support: 80, confidence: 0.7 },
+        { minute: 47, pure_radiant_edge: -1.0, adjusted_radiant_edge: -1.2, support: 80, confidence: 0.7 }
+      ],
+      model_version: "rosh-v1", data_version: "stratz-v1", roster_ready_count: 10, hero_ready_count: 10,
+      slots: [
+        { side: "radiant", position: 1, account_id: 101, canonical_player_id: "p1", player_name: "Yatoro", hero_id: 10, hero_name: "Morphling" },
+        { side: "dire", position: 1, account_id: 201, canonical_player_id: "p6", player_name: "23savage", hero_id: 1, hero_name: "Anti-Mage" }
+      ]
+    },
+    live: {
+      game_time_seconds: 1320, radiant_kills: 12, dire_kills: 8, radiant_nw_lead: 3400, first_blood: "Dire",
+      received_at: "2026-08-12T12:22:00Z", last_message_received_at: "2026-08-12T12:21:59Z", last_state_change_received_at: "2026-08-12T12:21:58Z",
+      message_age_seconds: 1, effective_state_age_seconds: 2, connection_id: "conn-1", reconnect_generation: 0
+    },
+    sync: { status: "SAFE", p50_seconds: 1.2, p90_seconds: 2.1, jitter_seconds: 0.3, sample_size: 100, accepted_pair_ratio: 0.98, ambiguous_ratio: 0.01, outlier_ratio: 0.01, confidence: "HIGH", calculated_at: "2026-08-12T12:21:59Z" },
+    latest_snapshot: { id: "snap-1", decision_at: "2026-08-12T12:21:59Z", created_at: "2026-08-12T12:22:00Z", mode: "LIVE_BASIC", snapshot_hash: "3a7f89b1c4e20d", market_quality: null, history_coverage: null, quality: { eligible: true, blockers: [], warnings: [] } },
+    decisions: [
+      { id: "dec-gpt", provider: "openai", model: "gpt-5", model_version: "2026-08", prompt_version: "v2.1", decision_policy_version: "v1.0", snapshot_hash: "3a7f89b1c4e20d", request_started_at: "2026-08-12T12:21:59Z", response_received_at: "2026-08-12T12:22:00Z", parse_status: "PARSED", latency_seconds: 0.8, decision: { action: "BUY_A", confidence: 0.76, fair_probability_a: 0.61, primary_reasons: ["Draft and price align"], counter_arguments: ["Late crossover risk"], data_quality_concerns: [] }, error: null }
+    ],
+    market_timeline: [], live_timeline: [], snapshot_payload: { history: {}, quality: {} }, future_odds: [], result: null, result_evidence: []
   };
-  vi.stubGlobal(
-    "fetch",
-    vi.fn(async (input: RequestInfo | URL) => {
-      const url = String(input);
-      const payload = url.endsWith(`/api/maps/${map.id}`)
-        ? map
-        : url.endsWith("/api/matches")
-          ? [map]
-          : url.endsWith("/api/jobs/summary")
-            ? { by_status: {}, by_type: [], oldest_pending_at: null, recent_failures: [] }
-            : runtime;
-      return new Response(JSON.stringify(payload), { status: 200, headers: { "Content-Type": "application/json" } });
-    })
-  );
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(<QueryClientProvider client={client}><App /></QueryClientProvider>);
+}
 
-  expect(await screen.findByText(/Snapshot hash abcdef123456/)).toBeInTheDocument();
-  expect(await screen.findByText("Market pair usable")).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("tab", { name: "Evaluation" }));
-  expect(await screen.findByText("Closing odds")).toBeInTheDocument();
-  expect(screen.getByText("Result evidence")).toBeInTheDocument();
+function summaryFromDetail(detail: ReturnType<typeof liveMatchFixture>) {
+  const summary: Record<string, unknown> = { ...detail };
+  for (const key of ["market_timeline", "live_timeline", "snapshot_payload", "future_odds", "result", "result_evidence"]) {
+    delete summary[key];
+  }
+  return summary;
+}
 
+test("renders operational empty state and persists locale", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    return response(url.endsWith("/api/matches") ? [] : url.endsWith("/api/jobs/summary") ? jobs : runtime);
+  }));
+
+  const first = renderApp();
+  expect((await screen.findAllByText("No discovered matches")).length).toBeGreaterThan(0);
+  expect(screen.getByText("Dota AI Decision Lab")).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "中文" }));
-  expect(await screen.findByText("赛果证据")).toBeInTheDocument();
+  expect(window.localStorage.getItem("dota-ai-decision-lab-locale")).toBe("zh-CN");
+  first.unmount();
+
+  renderApp();
+  expect(await screen.findByRole("button", { name: "中文" })).toHaveAttribute("aria-pressed", "true");
+});
+
+test("renders player-first match intelligence and explicit R.O.S.H. side advantage", async () => {
+  const match = liveMatchFixture();
+
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/api/matches")) return response([match]);
+    if (url.includes("/api/maps/")) return response(match);
+    if (url.endsWith("/api/jobs/summary")) return response({ ...jobs, by_status: { COMPLETED: 15 } });
+    return response(runtime);
+  }));
+
+  renderApp();
+  expect((await screen.findAllByText("Team Spirit")).length).toBeGreaterThan(0);
+  expect(screen.getByText("Decision data ready")).toBeInTheDocument();
+  expect(screen.getByText("Independent AI decisions")).toBeInTheDocument();
+  expect(screen.getAllByText("BUY A").length).toBeGreaterThan(0);
+  expect(screen.getByText("R.O.S.H. Draft Advantage")).toBeInTheDocument();
+  expect(screen.getByText("Radiant advantage")).toBeInTheDocument();
+  expect(screen.getByText("Radiant +5.2pp")).toBeInTheDocument();
+  expect(screen.getByText("46m → Dire")).toBeInTheDocument();
+  expect(screen.queryByText("Team Spirit advantage")).not.toBeInTheDocument();
+  expect(screen.getByText("DRAFT LINEUP")).toBeInTheDocument();
+  expect(screen.getAllByText("Yatoro").length).toBeGreaterThan(0);
+
+  fireEvent.click(screen.getByTitle("Open Engineering Diagnostics"));
+  expect(await screen.findByText("System Diagnostics & Engineering Audit")).toBeInTheDocument();
+});
+
+test("default-selects the LIVE match instead of the first list row", async () => {
+  const prematch = {
+    ...liveMatchFixture(),
+    id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    canonical_map_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    phase: "PREMATCH",
+    scheduled_at: "2026-08-13T12:00:00Z",
+    team_a: { id: "team-a2", name: "Prematch Team" },
+    team_b: { id: "team-b2", name: "Prematch Foe" }
+  };
+  const live = {
+    ...liveMatchFixture(),
+    id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+    canonical_map_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+  };
+  const requestedDetails: string[] = [];
+
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/api/matches")) return response([prematch, live]);
+    if (url.includes("/api/maps/")) {
+      requestedDetails.push(url);
+      return response(url.includes(live.canonical_map_id) ? live : prematch);
+    }
+    if (url.endsWith("/api/jobs/summary")) return response({ ...jobs, by_status: { COMPLETED: 15 } });
+    return response(runtime);
+  }));
+
+  renderApp();
+  expect(await screen.findByText("Decision data ready")).toBeInTheDocument();
+  expect(requestedDetails.some((url) => url.includes(`/api/maps/${live.canonical_map_id}`))).toBe(true);
+  expect(requestedDetails.some((url) => url.includes(`/api/maps/${prematch.canonical_map_id}`))).toBe(false);
+});
+
+test("enriches LIVE summary decisions and shows probability for the selected BUY side", async () => {
+  const detail = liveMatchFixture();
+  detail.decisions[0].decision.action = "BUY_B";
+  detail.decisions[0].decision.fair_probability_a = 0.25;
+  const summary = summaryFromDetail(detail);
+  summary.decisions = [];
+
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/api/matches")) return response([summary]);
+    if (url.includes("/api/maps/")) return response(detail);
+    if (url.endsWith("/api/jobs/summary")) return response(jobs);
+    return response(runtime);
+  }));
+
+  renderApp();
+  expect(await screen.findByText("BUY B 75%")).toBeInTheDocument();
+});
+
+test("renders a detail error instead of leaving a failed request in loading state", async () => {
+  const summary = summaryFromDetail(liveMatchFixture());
+  summary.decisions = [];
+
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/api/matches")) return response([summary]);
+    if (url.includes("/api/maps/")) {
+      return new Response(JSON.stringify({ detail: "fixture failure" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+    if (url.endsWith("/api/jobs/summary")) return response(jobs);
+    return response(runtime);
+  }));
+
+  renderApp();
+  expect(await screen.findByText("Failed to load match intelligence")).toBeInTheDocument();
+  expect(screen.queryByText("Loading match intelligence")).not.toBeInTheDocument();
 });

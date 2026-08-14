@@ -1,15 +1,32 @@
 from functools import lru_cache
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+DEFAULT_RAYBET_INFO_BASE_URLS = (
+    "https://cfinfo.365raylinks.com/v2",
+    "https://iminfo.esportsworldlink.com/v2",
+    "https://cfinfo.365raylines.com/v2",
+)
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        extra="ignore",
+        validate_assignment=True,
+    )
 
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/dota_ai_decision_lab"
 
-    raybet_info_base_url: str = "https://cfinfo.365raylines.com/v2"
+    # Empty default so the legacy singular spelling below actually works as a
+    # fallback for existing .env files; the built-in hosts apply only when
+    # neither variable is configured.
+    raybet_info_base_urls: str = ""
+    # Legacy singular spelling kept for backward compatibility with existing
+    # .env files; used only when the plural list is empty.
+    raybet_info_base_url: str | None = None
     raybet_socket_url: str = "wss://cfsocket.365raylinks.com/socketcluster/"
     raybet_origin: str = "https://www.ray086.com"
     raybet_dota_game_id: int = 151
@@ -21,32 +38,42 @@ class Settings(BaseSettings):
     dltv_bootstrap_interval_seconds: float = 30.0
 
     stratz_graphql_url: str = "https://api.stratz.com/graphql"
-    stratz_token: str | None = None
+    stratz_token: SecretStr | None = None
     opendota_base_url: str = "https://api.opendota.com/api"
-    opendota_api_key: str | None = None
+    opendota_api_key: SecretStr | None = None
     historical_refresh_seconds: float = 1_200.0
     historical_prewarm_maps: int = 100
     historical_sync_batch_maps: int = 20
 
-    openai_api_key: str | None = None
+    openai_api_key: SecretStr | None = None
     openai_base_url: str = "https://api.openai.com/v1"
     openai_model: str = "gpt-5.6-terra"
-    openai_reasoning_effort: str = "xhigh"
-    anthropic_api_key: str | None = None
+    openai_reasoning_effort: str = "high"
+    anthropic_api_key: SecretStr | None = None
     anthropic_base_url: str = "https://api.anthropic.com/v1"
     anthropic_model: str = "claude-sonnet-4-6"
-    gemini_api_key: str | None = None
+    gemini_api_key: SecretStr | None = None
     gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta"
     gemini_model: str = "gemini-3.6-flash"
-    deepseek_api_key: str | None = None
+    deepseek_api_key: SecretStr | None = None
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-v4-flash"
     deepseek_pro_model: str = "deepseek-v4-pro"
-    deepseek_reasoning_effort: str = "xhigh"
-    kimi_api_key: str | None = None
+    deepseek_reasoning_effort: str = "high"
+    kimi_api_key: SecretStr | None = None
     kimi_base_url: str = "https://api.moonshot.cn/v1"
     kimi_model: str = "kimi-k2.5"
-    ai_timeout_seconds: float = 120.0
+    # Kimi votes in decisions only while enabled; disabled by default for low latency.
+    # The key stays configured so it can be re-enabled without touching credentials.
+    kimi_decisions_enabled: bool = False
+    ai_timeout_seconds: float = 50.0
+    # Delayed DLTV broadcast data beyond this lag is excluded from the AI input
+    # (the decision then uses only freeze-time consistent information).
+    ai_max_live_data_lag_seconds: float = 120.0
+    # The deepseek flash model still powers email translation; this flag only
+    # controls whether it also produces decision votes (off by default).
+    deepseek_flash_decisions_enabled: bool = False
+    email_translation_reasoning_effort: str = "low"
 
     email_notifications_enabled: bool = False
     email_recipients: str = ""
@@ -56,16 +83,26 @@ class Settings(BaseSettings):
     resend_base_url: str = "https://api.resend.com"
     resend_timeout_seconds: float = Field(default=30.0, gt=0)
 
-    live_sync_safe_seconds: float = 3.0
-    live_sync_caution_seconds: float = 8.0
+    # Calibrated against production RayBet/DLTV signal cadence: DLTV state
+    # changes arrive event-driven every ~40-60s with a median pairing lag of
+    # ~10-23s, so the original 3s/8s thresholds could never be satisfied.
+    live_sync_safe_seconds: float = 30.0
+    live_sync_caution_seconds: float = 60.0
     live_sync_calibration_window_seconds: float = 30.0
     live_sync_min_samples: int = 3
     live_sync_nw_signal_threshold: int = 500
     live_sync_ambiguity_margin_seconds: float = 0.5
     live_sync_min_accepted_pair_ratio: float = 0.6
-    live_market_max_age_seconds: float = 30.0
+    # RayBet socket batches arrive ~20-50s apart even for an active match
+    # (odds publish on change; the deciding map's series market updates on a
+    # ~40-50s cadence), so a 30s window makes live markets intermittently
+    # STALE_LEG. 90s covers the cadence plus one missed batch while still
+    # rejecting genuinely dead feeds.
+    live_market_max_age_seconds: float = 90.0
     market_max_pair_skew_seconds: float = 5.0
-    live_state_max_age_seconds: float = 45.0
+    # DLTV fast-state updates every ~40-60s (event driven, not per second), so
+    # a 45s freshness window would falsely age out live fields between updates.
+    live_state_max_age_seconds: float = 120.0
     historical_max_age_seconds: float = 7_200.0
     delayed_detail_max_delay_seconds: float = 30.0
 
@@ -88,8 +125,20 @@ class Settings(BaseSettings):
     metrics_enabled: bool = True
     otel_exporter_otlp_endpoint: str | None = None
     host: str = "127.0.0.1"
+    # Reserved for a future authenticated remote-access mode. It does not
+    # unlock non-loopback binding while the dashboard has no auth layer.
+    api_token: SecretStr | None = None
     port: int = Field(default=8000, ge=1, le=65_535)
     log_level: str = "INFO"
+
+    @field_validator("host")
+    @classmethod
+    def require_loopback_host(cls, value: str) -> str:
+        if value not in _LOOPBACK_HOSTS:
+            raise ValueError(
+                "HOST must be loopback until HTTP and WebSocket authentication are implemented"
+            )
+        return value
 
     @property
     def checkpoint_minutes(self) -> tuple[int, ...]:
@@ -98,6 +147,15 @@ class Settings(BaseSettings):
     @property
     def raybet_discovery_match_types(self) -> tuple[int, ...]:
         return tuple(int(value.strip()) for value in self.raybet_match_types.split(","))
+
+    @property
+    def raybet_http_hosts(self) -> tuple[str, ...]:
+        raw = self.raybet_info_base_urls.strip()
+        if raw:
+            return tuple(value.strip().rstrip("/") for value in raw.split(",") if value.strip())
+        if self.raybet_info_base_url:
+            return (self.raybet_info_base_url.strip().rstrip("/"),)
+        return DEFAULT_RAYBET_INFO_BASE_URLS
 
     @property
     def future_odds_horizons(self) -> tuple[int, ...]:

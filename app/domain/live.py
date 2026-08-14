@@ -25,6 +25,8 @@ class DltvFastState(BaseModel):
     dire_kills: int | None = Field(default=None, ge=0)
     radiant_nw_lead: int | None = None
     first_blood: str | None = None
+    canvas: dict[str, Any] | None = None
+    charts: dict[str, Any] | None = None
     source_game_time: int | None = Field(default=None, ge=0)
     last_message_received_at: datetime
     last_state_change_received_at: datetime

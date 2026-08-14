@@ -3,7 +3,7 @@ from collections.abc import Awaitable, Callable
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.domain.jobs import DurableJob, JobType
+from app.domain.jobs import DurableJob, JobType, LeaseOwnershipLost
 from app.jobs.repository import JobRepository
 
 JobHandler = Callable[[DurableJob], Awaitable[None]]
@@ -59,19 +59,47 @@ class JobRunner:
         if handler is None:
             await self._mark_failed(job, f"no handler registered for {job.job_type.value}")
             return
+        renewal_stop = asyncio.Event()
+        handler_task = asyncio.create_task(handler(job))
+        renewal_task = asyncio.create_task(self._renew_lease(job, renewal_stop))
+        lease_lost = False
         try:
-            renewal_stop = asyncio.Event()
-            renewal = asyncio.create_task(self._renew_lease(job, renewal_stop))
-            try:
-                await handler(job)
-            finally:
-                renewal_stop.set()
-                await renewal
+            done, _pending = await asyncio.wait(
+                (handler_task, renewal_task),
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+            if renewal_task in done:
+                # _renew_lease only ends by raising LeaseOwnershipLost: the
+                # job was reclaimed by reconciliation and belongs to another
+                # worker now. Stop the handler immediately instead of letting
+                # two workers execute the same job side by side.
+                lease_lost = True
+                handler_task.cancel()
         except asyncio.CancelledError:
-            await self._mark_failed(job, "worker shutdown during job execution")
+            handler_task.cancel()
+            if not lease_lost:
+                await self._mark_failed(job, "worker shutdown during job execution")
+            raise
+        finally:
+            renewal_stop.set()
+            try:
+                await renewal_task
+            except LeaseOwnershipLost:
+                lease_lost = True
+        try:
+            await handler_task
+        except asyncio.CancelledError:
+            if lease_lost:
+                return
             raise
         except Exception as exc:
+            if lease_lost:
+                return
             await self._mark_failed(job, f"{type(exc).__name__}: {exc}")
+            return
+        if lease_lost:
+            # The job belongs to another worker now; this worker must not
+            # mark it succeeded or failed.
             return
         async with self._session_factory() as session, session.begin():
             await self._repository.succeed(
@@ -103,4 +131,4 @@ class JobRunner:
                         worker_id=self._worker_id,
                     )
                 if not renewed:
-                    raise RuntimeError("durable job lease ownership was lost") from None
+                    raise LeaseOwnershipLost("durable job lease ownership was lost") from None

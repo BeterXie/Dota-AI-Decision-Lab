@@ -567,9 +567,12 @@ class Settings(BaseSettings):
     anthropic_api_key: str | None = None
     gemini_api_key: str | None = None
 
-    # Initial safety thresholds; must be configurable and later calibrated.
-    live_sync_safe_seconds: float = 3.0
-    live_sync_caution_seconds: float = 8.0
+    # Calibrated against production signal cadence (DLTV state changes are
+    # event-driven every ~40-60s with median pairing lag ~10-23s): the
+    # original 3s/8s thresholds could never be satisfied in practice.
+    live_sync_safe_seconds: float = 30.0
+    live_sync_caution_seconds: float = 60.0
+    live_state_max_age_seconds: float = 120.0
 
     ai_min_game_time_seconds: int = 600
     ai_checkpoint_minutes: str = "10,15,20,25,30,35,40,45,50,55,60"

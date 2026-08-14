@@ -92,9 +92,9 @@ class RoshService:
             )
         )
         if not synergy_response.payload.get("errors"):
-            analysis["synergy"] = normalize_rosh_analysis(
-                {"synergy": synergy_response.payload}
-            )["synergy"]
+            analysis["synergy"] = normalize_rosh_analysis({"synergy": synergy_response.payload})[
+                "synergy"
+            ]
 
         players = [
             {"steamAccountId": slot.account_id, "heroId": hero_id}
@@ -117,13 +117,7 @@ class RoshService:
                     provider_key=str(canonical_map_id),
                 )
             )
-            # GraphQL may return usable `data.plus` entries alongside errors for
-            # anonymous accounts. Preserve the usable entries and expose the
-            # unresolved slots through player_analysis instead of discarding all
-            # ten results.
-            highlights = normalize_player_highlights_response(
-                highlight_request, response.payload
-            )
+            highlights = normalize_player_highlights_response(highlight_request, response.payload)
         radiant_highlights = [highlights.get(index) for index in range(5)]
         dire_highlights = [highlights.get(index) for index in range(5, 10)]
         slot_statuses = [
@@ -168,6 +162,14 @@ class RoshService:
                 "player_analysis": result["player_analysis"],
                 "used_player_adjustment": result["used_player_adjustment"],
                 "fell_back_to_pure_score": result["fell_back_to_pure_score"],
+                "decomposition": _decomposition_summary(
+                    result,
+                    current_minute=curve.features.current_minute,
+                ),
+                "adjustment_delta": _difference(
+                    result["player_adjusted_lineup_score"],
+                    result["pure_lineup_score"],
+                ),
                 "reference": result["reference"],
                 "query_version": QUERY_VERSION,
                 "statistics_week": statistics_week,
@@ -200,13 +202,6 @@ class RoshService:
         cutoff,
         raw_source_ids: list[UUID],
     ) -> tuple[dict[str, dict], dict[str, dict], int]:
-        """Load the newest usable STRATZ statistics week at or before cutoff.
-
-        STRATZ can return an empty current-week window during the provider's
-        weekly roll-over. The empty response is valid raw evidence, but it is
-        not a usable Draft Intelligence input. Try prior completed weeks while
-        preserving every raw response for provenance.
-        """
         cutoff_week = int(cutoff.timestamp())
         for weeks_back in range(5):
             statistics_week = cutoff_week - (weeks_back * WEEK_SECONDS)
@@ -261,6 +256,34 @@ class RoshService:
             received_at=response.received_at,
             parser_version=QUERY_VERSION,
         )
+
+
+def _decomposition_summary(result: dict, *, current_minute: int | None) -> dict:
+    rows = result.get("minute_table") or []
+    if not rows:
+        return {}
+    target_minute = current_minute if current_minute is not None else rows[0].get("minute")
+    current = min(rows, key=lambda row: abs(int(row.get("minute", 0)) - int(target_minute or 0)))
+    peak = max(rows, key=lambda row: abs(float(row.get("win_rate_graph", 0.0))))
+    fields = (
+        "hero_base_adjustment",
+        "hero_tempo_adjustment",
+        "synergy_adjustment",
+        "player_adjustment",
+        "hero_adjustment",
+    )
+    return {
+        "current_minute": current.get("minute"),
+        "current": {field: current.get(field) for field in fields},
+        "peak_minute": peak.get("minute"),
+        "peak": {field: peak.get(field) for field in fields},
+    }
+
+
+def _difference(first, second) -> float | None:
+    if not isinstance(first, (int, float)) or not isinstance(second, (int, float)):
+        return None
+    return float(first) - float(second)
 
 
 def _curve_from_record(record: DraftMinuteCurveRecord) -> DraftCurve:

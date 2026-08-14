@@ -38,9 +38,7 @@ class _OpenDotaCatalog:
     normalizer_version = "opendota-v1"
 
     async def get_team_catalog(self, _page: int) -> TimedPayload:
-        return await _timed_payload(
-            [{"team_id": 9247354, "name": "Team Falcons"}]
-        )
+        return await _timed_payload([{"team_id": 9247354, "name": "Team Falcons"}])
 
 
 @pytest.mark.asyncio

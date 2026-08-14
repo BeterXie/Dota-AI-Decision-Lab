@@ -6,6 +6,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.history.scoring import sample_confidence
 from app.models import (
+    HistoricalMapRecord,
+    HistoricalPlayerMapRecord,
     PlayerFormSnapshotRecord,
     PlayerHeroSnapshotRecord,
     TeamFormSnapshotRecord,
@@ -78,6 +80,10 @@ class HistoricalIntelligenceService:
             return {
                 "base_strength": None,
                 "recent_form": None,
+                "recent_5": None,
+                "recent_10": None,
+                "recent_20": None,
+                "sample_size": 0,
                 "confidence": None,
                 "knowledge_cutoff": None,
             }
@@ -101,6 +107,13 @@ class HistoricalIntelligenceService:
         position: int,
         as_of: datetime,
     ) -> dict:
+        recent_uses = await self.get_player_hero_recent_uses(
+            session,
+            player_id,
+            hero_id=hero_id,
+            as_of=as_of,
+            limit=20,
+        )
         snapshot = await session.scalar(
             select(PlayerHeroSnapshotRecord)
             .where(
@@ -114,11 +127,23 @@ class HistoricalIntelligenceService:
         )
         if snapshot is None:
             return {
+                "last_20_uses": recent_uses,
+                "historical_maps": 0,
+                "historical_win_rate": None,
+                "historical_performance": None,
+                "recent_180d_maps": 0,
+                "recent_180d_win_rate": None,
+                "recent_180d_performance": None,
+                "current_patch_maps": 0,
+                "current_patch_win_rate": None,
+                "current_patch_performance": None,
+                "position_fit": None,
                 "adjusted_strength": None,
                 "confidence": None,
-                "knowledge_cutoff": None,
+                "knowledge_cutoff": recent_uses["knowledge_cutoff"],
             }
         return {
+            "last_20_uses": recent_uses,
             "historical_maps": snapshot.historical_maps,
             "historical_win_rate": snapshot.historical_win_rate,
             "historical_performance": snapshot.historical_performance,
@@ -131,7 +156,70 @@ class HistoricalIntelligenceService:
             "position_fit": snapshot.position_fit,
             "adjusted_strength": snapshot.adjusted_strength,
             "confidence": snapshot.confidence,
-            "knowledge_cutoff": snapshot.knowledge_cutoff,
+            "knowledge_cutoff": max(
+                value
+                for value in (snapshot.knowledge_cutoff, recent_uses["knowledge_cutoff"])
+                if value is not None
+            ),
+        }
+
+    async def get_player_hero_recent_uses(
+        self,
+        session: AsyncSession,
+        player_id: UUID,
+        *,
+        hero_id: int,
+        as_of: datetime,
+        limit: int = 20,
+    ) -> dict:
+        rows = list(
+            (
+                await session.execute(
+                    select(HistoricalPlayerMapRecord, HistoricalMapRecord)
+                    .join(
+                        HistoricalMapRecord,
+                        HistoricalMapRecord.id == HistoricalPlayerMapRecord.historical_map_id,
+                    )
+                    .where(
+                        HistoricalPlayerMapRecord.canonical_player_id == player_id,
+                        HistoricalPlayerMapRecord.hero_id == hero_id,
+                        HistoricalPlayerMapRecord.basic_first_usable_at <= as_of,
+                        HistoricalMapRecord.first_usable_at <= as_of,
+                        HistoricalMapRecord.sync_status != "DATA_CONFLICT",
+                    )
+                    .order_by(
+                        HistoricalMapRecord.started_at.desc(),
+                        HistoricalMapRecord.provider.desc(),
+                    )
+                )
+            ).all()
+        )
+        selected: list[tuple[HistoricalPlayerMapRecord, HistoricalMapRecord]] = []
+        seen: set[str] = set()
+        for player, match in rows:
+            key = (
+                str(match.canonical_map_id)
+                if match.canonical_map_id is not None
+                else f"{match.provider}:{match.provider_match_id}"
+            )
+            if key in seen:
+                continue
+            seen.add(key)
+            selected.append((player, match))
+            if len(selected) >= limit:
+                break
+        wins = sum(player.won for player, _ in selected)
+        maps = len(selected)
+        cutoffs = [
+            max(player.basic_first_usable_at, match.first_usable_at) for player, match in selected
+        ]
+        return {
+            "maps": maps,
+            "wins": wins,
+            "losses": maps - wins,
+            "win_rate": wins / maps if maps else None,
+            "knowledge_cutoff": max(cutoffs) if cutoffs else None,
+            "last_included_match_id": selected[0][1].provider_match_id if selected else None,
         }
 
 

@@ -116,8 +116,7 @@ def _merge_lgd_identity(connection, source_team_id, target_team_id) -> None:
     )
     connection.execute(
         sa.text(
-            "UPDATE team_aliases SET canonical_team_id = :target "
-            "WHERE canonical_team_id = :source"
+            "UPDATE team_aliases SET canonical_team_id = :target WHERE canonical_team_id = :source"
         ),
         {"source": source_team_id, "target": target_team_id},
     )

@@ -94,8 +94,7 @@ class RayBetOddsCollector:
                         aggregate_type="raybet_match",
                         aggregate_id=str(delta.match_id),
                         dedupe_key=(
-                            f"unknown-odds:{delta.match_id}:"
-                            f"{received.strftime('%Y%m%d%H')}"
+                            f"unknown-odds:{delta.match_id}:{received.strftime('%Y%m%d%H')}"
                         ),
                         payload={
                             "provider_match_id": delta.match_id,

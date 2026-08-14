@@ -33,5 +33,9 @@ class DltvBootstrapIdentity(BaseModel):
     first_team_name: str
     second_team_id: int
     second_team_name: str
+    radiant_provider_team_id: int | None = None
+    dire_provider_team_id: int | None = None
+    side_identity_source: str | None = None
+    side_identity_confidence: float | None = None
     started_at: datetime | None
     map_number: int | None

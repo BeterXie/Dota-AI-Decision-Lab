@@ -17,6 +17,35 @@ def test_ai_checkpoints_start_at_ten_minutes_by_default() -> None:
     assert 5 not in settings.checkpoint_minutes
 
 
+@pytest.mark.parametrize("host", ["127.0.0.1", "localhost", "::1"])
+def test_loopback_dashboard_hosts_are_allowed(host: str) -> None:
+    from app.config import Settings
+
+    settings = Settings(_env_file=None, host=host, api_token="unused-future-token")
+
+    assert settings.host == host
+
+
+def test_api_token_does_not_unlock_non_loopback_binding() -> None:
+    from app.config import Settings
+
+    with pytest.raises(ValueError, match="HOST must be loopback"):
+        Settings(
+            _env_file=None,
+            host="0.0.0.0",
+            api_token="this-is-not-authentication",
+        )
+
+
+def test_runtime_host_cannot_be_reassigned_to_non_loopback() -> None:
+    from app.config import Settings
+
+    settings = Settings(_env_file=None, host="127.0.0.1")
+
+    with pytest.raises(ValueError, match="HOST must be loopback"):
+        settings.host = "0.0.0.0"
+
+
 @pytest.mark.asyncio
 async def test_configured_openai_deepseek_and_kimi_are_registered() -> None:
     from app.config import Settings
@@ -27,13 +56,15 @@ async def test_configured_openai_deepseek_and_kimi_are_registered() -> None:
         openai_api_key="openai-test",
         deepseek_api_key="deepseek-test",
         kimi_api_key="kimi-test",
+        kimi_decisions_enabled=True,
     )
     providers = _ai_providers(settings)
 
     assert {provider.name for provider in providers} == {"openai", "deepseek", "kimi"}
+    # deepseek flash decisions are disabled by default (flash still powers
+    # email translation); only the pro model votes.
     assert [provider.model for provider in providers] == [
         "gpt-5.6-terra",
-        "deepseek-v4-flash",
         "deepseek-v4-pro",
         "kimi-k2.5",
     ]
@@ -41,7 +72,25 @@ async def test_configured_openai_deepseek_and_kimi_are_registered() -> None:
         provider.reasoning_effort
         for provider in providers
         if provider.name in {"openai", "deepseek"}
-    ] == ["xhigh", "xhigh", "xhigh"]
+    ] == ["high", "high"]
+    for provider in providers:
+        await provider.close()
+
+
+@pytest.mark.asyncio
+async def test_kimi_is_excluded_when_decisions_are_disabled() -> None:
+    from app.config import Settings
+    from app.main import _ai_providers
+
+    settings = Settings(
+        _env_file=None,
+        openai_api_key="openai-test",
+        kimi_api_key="kimi-test",
+        kimi_decisions_enabled=False,
+    )
+    providers = _ai_providers(settings)
+
+    assert {provider.name for provider in providers} == {"openai"}
     for provider in providers:
         await provider.close()
 

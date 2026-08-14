@@ -1,4 +1,5 @@
 import asyncio
+import hashlib
 from datetime import UTC, datetime
 from time import perf_counter
 
@@ -7,25 +8,42 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.base import (
+    AI_VIEW_VERSION,
     DECISION_POLICY_VERSION,
     PROMPT_VERSION,
     AiProvider,
     AiProviderFailure,
+    ai_experiment_key,
 )
+from app.ai.input import build_ai_input
 from app.canonical import canonical_bytes
 from app.domain.snapshot import DecisionSnapshot
 from app.models import AiDecisionRecord
 
 
 class AiCoordinator:
-    def __init__(self, providers: list[AiProvider], *, timeout_seconds: float) -> None:
+    def __init__(
+        self,
+        providers: list[AiProvider],
+        *,
+        timeout_seconds: float,
+        max_live_data_lag_seconds: float = 120.0,
+    ) -> None:
         self._providers = providers
         self._timeout_seconds = timeout_seconds
+        self._max_live_data_lag_seconds = max_live_data_lag_seconds
 
     async def run_all(
         self, session: AsyncSession, snapshot: DecisionSnapshot
     ) -> list[AiDecisionRecord]:
-        snapshot_input = canonical_bytes(snapshot.model_dump(mode="json")).decode("utf-8")
+        snapshot_input_bytes = canonical_bytes(
+            build_ai_input(
+                snapshot,
+                max_live_data_lag_seconds=self._max_live_data_lag_seconds,
+            )
+        )
+        snapshot_input = snapshot_input_bytes.decode("utf-8")
+        ai_input_hash = hashlib.sha256(snapshot_input_bytes).hexdigest()
         existing = list(
             (
                 await session.scalars(
@@ -41,17 +59,13 @@ class AiCoordinator:
                 record.model,
                 record.prompt_version,
                 record.decision_policy_version,
+                record.ai_view_version,
             ): record
             for record in existing
         }
 
         async def run(provider: AiProvider):
-            experiment = (
-                provider.name,
-                provider.model,
-                PROMPT_VERSION,
-                DECISION_POLICY_VERSION,
-            )
+            experiment = ai_experiment_key(provider.name, provider.model)
             if experiment in existing_by_experiment:
                 return existing_by_experiment[experiment]
             started_at = datetime.now(UTC)
@@ -91,6 +105,8 @@ class AiCoordinator:
                 model_version=model_version,
                 prompt_version=PROMPT_VERSION,
                 decision_policy_version=DECISION_POLICY_VERSION,
+                ai_view_version=AI_VIEW_VERSION,
+                ai_input_hash=ai_input_hash,
                 request_started_at=started_at,
                 response_received_at=received_at,
                 latency_seconds=perf_counter() - started_clock,

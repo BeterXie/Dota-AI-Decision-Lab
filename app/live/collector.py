@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -7,11 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.domain.events import DomainEvent, DomainEventType
 from app.domain.live import DltvFastState
 from app.events.outbox import EventRepository
+from app.live.anchor import picks_ended_anchor
 from app.models import CanonicalMap, DltvLiveObservationRecord, ProviderRawEvent
 from app.providers.dltv.parser import PARSER_VERSION, parse_fast_patch, parse_series_frame
 from app.providers.dltv.reducer import reduce_fast_state
 from app.repositories.raw import RawEventRepository
 from app.snapshots.triggers import record_crossed_checkpoints
+
+_ANCHOR_UNRESOLVED = object()
 
 
 class DltvSocketCollector:
@@ -27,6 +31,8 @@ class DltvSocketCollector:
         self._raw_events = raw_events
         self._events = events
         self._checkpoint_minutes = checkpoint_minutes
+        self._live_anchors: dict[UUID, datetime | None | object] = {}
+        self._last_real_elapsed: dict[UUID, float] = {}
 
     async def collect(
         self,
@@ -38,13 +44,25 @@ class DltvSocketCollector:
         received_at: datetime | None = None,
     ) -> None:
         received_at = received_at or datetime.now(UTC)
+        is_match_event = event_name.startswith("__nd2_match_")
         async with self._session_factory() as session, session.begin():
+            previous_socket_event = None
+            if is_match_event:
+                previous_socket_event = await session.scalar(
+                    select(ProviderRawEvent)
+                    .where(
+                        ProviderRawEvent.provider == "dltv",
+                        ProviderRawEvent.event_type == "DLTV_FAST_SOCKET",
+                        ProviderRawEvent.provider_key == event_name,
+                    )
+                    .order_by(ProviderRawEvent.received_at.desc())
+                    .limit(1)
+                )
+
             raw_event_id = await self._raw_events.append(
                 session,
                 provider="dltv",
-                event_type=(
-                    "DLTV_FAST_SOCKET" if event_name.startswith("__nd2_match_") else "DLTV_SERIES"
-                ),
+                event_type="DLTV_FAST_SOCKET" if is_match_event else "DLTV_SERIES",
                 provider_key=event_name,
                 payload=payload,
                 received_at=received_at,
@@ -70,7 +88,7 @@ class DltvSocketCollector:
                         ),
                     )
                 return
-            if not event_name.startswith("__nd2_match_"):
+            if not is_match_event:
                 return
             try:
                 valve_match_id = int(event_name.rsplit("_", 1)[1])
@@ -99,6 +117,36 @@ class DltvSocketCollector:
                     ),
                 )
                 return
+
+            if _is_reconnect(previous_socket_event, connection_id, reconnect_generation):
+                recovery_key = connection_id or f"generation-{reconnect_generation}"
+                await self._events.record(
+                    session,
+                    DomainEvent(
+                        event_type=DomainEventType.DLTV_MATCH_DISCOVERED,
+                        aggregate_type="dltv_match",
+                        aggregate_id=str(valve_match_id),
+                        dedupe_key=f"dltv-reconnect:{valve_match_id}:{recovery_key}",
+                        payload={
+                            "valve_match_id": valve_match_id,
+                            "connection_id": connection_id,
+                            "previous_connection_id": (
+                                previous_socket_event.connection_id
+                                if previous_socket_event is not None
+                                else None
+                            ),
+                            "reconnect_generation": reconnect_generation,
+                            "previous_reconnect_generation": (
+                                previous_socket_event.reconnect_generation
+                                if previous_socket_event is not None
+                                else None
+                            ),
+                            "reason": "SOCKET_RECONNECT_RECOVERY",
+                        },
+                        occurred_at=received_at,
+                    ),
+                )
+
             latest = await session.scalar(
                 select(DltvLiveObservationRecord)
                 .where(DltvLiveObservationRecord.valve_match_id == valve_match_id)
@@ -127,6 +175,8 @@ class DltvSocketCollector:
                     dire_kills=state.dire_kills,
                     radiant_nw_lead=state.radiant_nw_lead,
                     first_blood=state.first_blood,
+                    canvas=state.canvas,
+                    charts=state.charts,
                     source_game_time=state.source_game_time,
                     received_at=received_at,
                     payload_hash=state.state_hash,
@@ -153,6 +203,23 @@ class DltvSocketCollector:
                         occurred_at=received_at,
                     ),
                 )
+            real_elapsed_seconds: float | None = None
+            previous_real_elapsed_seconds: float | None = None
+            anchor = self._live_anchors.get(canonical_map.id, _ANCHOR_UNRESOLVED)
+            if anchor is _ANCHOR_UNRESOLVED:
+                resolved = await picks_ended_anchor(
+                    session, valve_match_id=valve_match_id, decision_at=received_at
+                )
+                # Do NOT cache None: the bootstrap may not carry
+                # is_picks_ended_time yet (picks still running); keep retrying
+                # until it appears instead of pinning the fallback forever.
+                if resolved is not None:
+                    self._live_anchors[canonical_map.id] = resolved
+                anchor = resolved
+            if isinstance(anchor, datetime):
+                real_elapsed_seconds = (received_at - anchor).total_seconds()
+                previous_real_elapsed_seconds = self._last_real_elapsed.get(canonical_map.id)
+                self._last_real_elapsed[canonical_map.id] = real_elapsed_seconds
             await record_crossed_checkpoints(
                 session,
                 self._events,
@@ -161,7 +228,22 @@ class DltvSocketCollector:
                 current_game_time=state.game_time_seconds,
                 checkpoint_minutes=self._checkpoint_minutes,
                 observed_at=received_at,
+                real_elapsed_seconds=real_elapsed_seconds,
+                previous_real_elapsed_seconds=previous_real_elapsed_seconds,
             )
+
+
+def _is_reconnect(
+    previous: ProviderRawEvent | None,
+    connection_id: str | None,
+    reconnect_generation: int,
+) -> bool:
+    if previous is None:
+        return False
+    if connection_id is not None:
+        return previous.connection_id != connection_id
+    previous_generation = previous.reconnect_generation
+    return previous_generation is not None and reconnect_generation > previous_generation
 
 
 def _state_from_record(record: DltvLiveObservationRecord) -> DltvFastState:
@@ -172,6 +254,8 @@ def _state_from_record(record: DltvLiveObservationRecord) -> DltvFastState:
         dire_kills=record.dire_kills,
         radiant_nw_lead=record.radiant_nw_lead,
         first_blood=record.first_blood,
+        canvas=record.canvas,
+        charts=record.charts,
         source_game_time=record.source_game_time,
         last_message_received_at=record.last_message_received_at,
         last_state_change_received_at=record.last_state_change_received_at,

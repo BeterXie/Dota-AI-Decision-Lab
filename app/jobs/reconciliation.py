@@ -6,11 +6,16 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.eligibility import ai_record_is_game_time_eligible
+from app.ai.view import AI_VIEW_VERSION
+from app.domain.events import DomainEvent, DomainEventType
 from app.domain.jobs import JobType
 from app.draft.engine import MODEL_VERSION
+from app.events.outbox import EventRepository
 from app.jobs.repository import JobRepository
+from app.live.anchor import picks_ended_anchor
 from app.models import (
     AiDecisionRecord,
+    CanonicalMap,
     DecisionEvaluationRecord,
     DecisionFutureOdds,
     DecisionSnapshotRecord,
@@ -34,34 +39,46 @@ class ReconciliationResult:
     snapshot_jobs: int
     ai_jobs: int
     future_odds_jobs: int
+    postmatch_jobs: int
     settlement_jobs: int
     evaluation_jobs: int
+    checkpoint_sweep_jobs: int = 0
 
 
 class ReconciliationService:
     def __init__(
         self,
         jobs: JobRepository,
+        events: EventRepository,
         *,
         lease_seconds: float,
-        ai_experiments: tuple[tuple[str, str, str, str], ...],
+        ai_experiments: tuple[tuple[str, str, str, str, str], ...],
         future_odds_horizons: tuple[int, ...],
         ai_min_game_time_seconds: int = 600,
+        checkpoint_minutes: tuple[int, ...] = (10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60),
+        live_state_max_age_seconds: float = 120.0,
+        checkpoint_sweep_grace_seconds: float = 300.0,
     ) -> None:
         self._jobs = jobs
+        self._events = events
         self._lease_seconds = lease_seconds
         self._ai_experiments = ai_experiments
         self._future_odds_horizons = future_odds_horizons
         self._ai_min_game_time_seconds = ai_min_game_time_seconds
+        self._checkpoint_minutes = checkpoint_minutes
+        self._live_state_max_age_seconds = live_state_max_age_seconds
+        self._checkpoint_sweep_grace_seconds = checkpoint_sweep_grace_seconds
 
     async def run(self, session: AsyncSession, *, now: datetime) -> ReconciliationResult:
         reclaimed = await self._jobs.reclaim_expired(
             session, lease_seconds=self._lease_seconds, now=now
         )
+        checkpoint_sweep_jobs = await self._reconcile_live_checkpoints(session, now=now)
         draft_jobs = await self._reconcile_drafts(session)
         snapshot_jobs = await self._reconcile_snapshots(session, now=now)
         ai_jobs = await self._reconcile_ai(session)
         future_jobs = await self._reconcile_future_odds(session)
+        postmatch_jobs = await self._reconcile_postmatch(session, now=now)
         settlement_jobs = await self._reconcile_settlements(session)
         evaluation_jobs = await self._reconcile_evaluations(session)
         return ReconciliationResult(
@@ -70,9 +87,101 @@ class ReconciliationService:
             snapshot_jobs=snapshot_jobs,
             ai_jobs=ai_jobs,
             future_odds_jobs=future_jobs,
+            postmatch_jobs=postmatch_jobs,
             settlement_jobs=settlement_jobs,
             evaluation_jobs=evaluation_jobs,
+            checkpoint_sweep_jobs=checkpoint_sweep_jobs,
         )
+
+    async def _reconcile_live_checkpoints(self, session: AsyncSession, *, now: datetime) -> int:
+        """Close the trigger gap when the DLTV fast socket goes quiet.
+
+        Checkpoints are normally recorded as DLTV fast-state messages arrive;
+        the socket is event-driven, so during quiet mid-game stretches it can
+        be minutes between messages and real-time checkpoints fire late. This
+        sweeper fires crossed checkpoint minutes that are still inside the
+        grace window for every LIVE map with a known real-start anchor. The
+        domain-event dedupe key is identical to the collector's, so the two
+        paths are idempotent with each other.
+        """
+        if not self._checkpoint_minutes:
+            return 0
+        cutoff = now - timedelta(seconds=self._live_state_max_age_seconds)
+        live_map_ids = set(
+            (
+                await session.scalars(
+                    select(DltvLiveObservationRecord.canonical_map_id)
+                    .where(
+                        DltvLiveObservationRecord.canonical_map_id.is_not(None),
+                        DltvLiveObservationRecord.valve_match_id.is_not(None),
+                        DltvLiveObservationRecord.received_at >= cutoff,
+                    )
+                    .distinct()
+                )
+            ).all()
+        )
+        created = 0
+        for canonical_map_id in live_map_ids:
+            canonical_map = await session.get(CanonicalMap, canonical_map_id)
+            if canonical_map is None or canonical_map.valve_match_id is None:
+                continue
+            anchor = await picks_ended_anchor(
+                session,
+                valve_match_id=canonical_map.valve_match_id,
+                decision_at=now,
+            )
+            if anchor is None:
+                continue
+            elapsed_seconds = (now - ensure_utc(anchor)).total_seconds()
+            if elapsed_seconds < self._checkpoint_minutes[0] * 60:
+                continue
+            recorded = list(
+                (
+                    await session.scalars(
+                        select(DomainEventRecord.payload).where(
+                            DomainEventRecord.event_type
+                            == DomainEventType.DECISION_CHECKPOINT_DUE.value,
+                            DomainEventRecord.aggregate_id == str(canonical_map.id),
+                        )
+                    )
+                ).all()
+            )
+            recorded_minutes = {
+                int(payload["checkpoint_minute"])
+                for payload in recorded
+                if isinstance(payload, dict) and isinstance(payload.get("checkpoint_minute"), int)
+            }
+            due_minutes = []
+            for minute in self._checkpoint_minutes:
+                if minute in recorded_minutes:
+                    continue
+                crossed_seconds = elapsed_seconds - minute * 60
+                if 0 <= crossed_seconds <= self._checkpoint_sweep_grace_seconds:
+                    due_minutes.append(minute)
+            # First sight of a map with a fresh anchor: only the latest
+            # crossed minute fires (mirrors the collector), so a map first
+            # seen at minute 30 does not retroactively fire 10-29.
+            if not recorded_minutes and due_minutes:
+                due_minutes = [due_minutes[-1]]
+            for minute in due_minutes:
+                await self._events.record(
+                    session,
+                    DomainEvent(
+                        event_type=DomainEventType.DECISION_CHECKPOINT_DUE,
+                        aggregate_type="canonical_map",
+                        aggregate_id=str(canonical_map.id),
+                        dedupe_key=f"checkpoint-real:{canonical_map.id}:{minute}",
+                        payload={
+                            "canonical_map_id": str(canonical_map.id),
+                            "decision_at": now.isoformat(),
+                            "checkpoint_minute": minute,
+                            "basis": "real_time",
+                        },
+                        occurred_at=now,
+                    ),
+                )
+                created += 1
+        return created
 
     async def _reconcile_drafts(self, session: AsyncSession) -> int:
         drafts = list(
@@ -100,6 +209,71 @@ class ReconciliationService:
                     "canonical_map_id": str(draft.canonical_map_id),
                     "draft_snapshot_id": str(draft.id),
                 },
+            )
+            created += 1
+        return created
+
+    async def _reconcile_postmatch(self, session: AsyncSession, *, now: datetime) -> int:
+        latest_live = (
+            select(
+                DltvLiveObservationRecord.canonical_map_id,
+                func.max(DltvLiveObservationRecord.received_at).label("latest_received_at"),
+            )
+            .where(DltvLiveObservationRecord.canonical_map_id.is_not(None))
+            .group_by(DltvLiveObservationRecord.canonical_map_id)
+            .subquery()
+        )
+        candidates = list(
+            (
+                await session.execute(
+                    select(
+                        CanonicalMap.id,
+                        CanonicalMap.valve_match_id,
+                        latest_live.c.latest_received_at,
+                    )
+                    .select_from(CanonicalMap)
+                    .join(
+                        latest_live,
+                        latest_live.c.canonical_map_id == CanonicalMap.id,
+                    )
+                    .where(
+                        CanonicalMap.valve_match_id.is_not(None),
+                        select(ProviderMatchMapping.id)
+                        .where(
+                            ProviderMatchMapping.provider == "raybet",
+                            ProviderMatchMapping.canonical_series_id == CanonicalMap.series_id,
+                        )
+                        .exists(),
+                        latest_live.c.latest_received_at < now - timedelta(minutes=3),
+                        ~select(MapResultRecord.id)
+                        .where(MapResultRecord.canonical_map_id == CanonicalMap.id)
+                        .exists(),
+                    )
+                )
+            ).all()
+        )
+        bucket = int(now.timestamp()) // 900
+        created = 0
+        for canonical_map_id, valve_match_id, _latest_received_at in candidates:
+            dedupe_key = f"reconcile-postmatch-v2:{canonical_map_id}:{bucket}"
+            existing = await session.scalar(
+                select(DurableJobRecord.id).where(
+                    DurableJobRecord.job_type == JobType.RESOLVE_POSTMATCH.value,
+                    DurableJobRecord.dedupe_key == dedupe_key,
+                )
+            )
+            if existing is not None:
+                continue
+            await self._jobs.enqueue(
+                session,
+                job_type=JobType.RESOLVE_POSTMATCH,
+                dedupe_key=dedupe_key,
+                payload={
+                    "canonical_map_id": str(canonical_map_id),
+                    "valve_match_id": valve_match_id,
+                },
+                priority=80,
+                max_attempts=10,
             )
             created += 1
         return created
@@ -141,13 +315,6 @@ class ReconciliationService:
                 map_id_value = UUID(canonical_map_id)
             except ValueError:
                 continue
-            snapshot_exists = await session.scalar(
-                select(DecisionSnapshotRecord.id)
-                .where(DecisionSnapshotRecord.canonical_map_id == map_id_value)
-                .limit(1)
-            )
-            if snapshot_exists is not None:
-                continue
             live_at = await session.scalar(
                 select(DltvLiveObservationRecord.received_at)
                 .where(DltvLiveObservationRecord.canonical_map_id == map_id_value)
@@ -167,8 +334,22 @@ class ReconciliationService:
                     )
                 except ValueError:
                     continue
+                # Per-checkpoint reconciliation: a snapshot for one checkpoint
+                # must not hide a later checkpoint that still has no snapshot.
+                checkpoint_snapshot = await session.scalar(
+                    select(DecisionSnapshotRecord.id)
+                    .where(
+                        DecisionSnapshotRecord.canonical_map_id == map_id_value,
+                        DecisionSnapshotRecord.decision_at == decision_at_value,
+                    )
+                    .limit(1)
+                )
+                if checkpoint_snapshot is not None:
+                    continue
                 market_team_count = await session.scalar(
-                    select(func.count(func.distinct(OddsObservationRecord.selection_team_id))).where(
+                    select(
+                        func.count(func.distinct(OddsObservationRecord.selection_team_id))
+                    ).where(
                         OddsObservationRecord.canonical_map_id == map_id_value,
                         OddsObservationRecord.market_type == "Winner",
                         OddsObservationRecord.selection_team_id.is_not(None),
@@ -220,6 +401,7 @@ class ReconciliationService:
                             AiDecisionRecord.model,
                             AiDecisionRecord.prompt_version,
                             AiDecisionRecord.decision_policy_version,
+                            AiDecisionRecord.ai_view_version,
                         ).where(AiDecisionRecord.snapshot_id == snapshot.id)
                     )
                 ).all()
@@ -229,8 +411,12 @@ class ReconciliationService:
             await self._jobs.enqueue(
                 session,
                 job_type=JobType.RUN_AI_PROVIDER,
-                dedupe_key=f"reconcile-ai:{snapshot.id}",
+                # The dedupe key is version-scoped: a succeeded v1-era job with
+                # the same snapshot must not block the v2 experiment re-run
+                # (and vice versa), and backfill jobs yield to live decisions.
+                dedupe_key=f"reconcile-ai:{AI_VIEW_VERSION}:{snapshot.id}",
                 payload={"snapshot_id": str(snapshot.id)},
+                priority=150,
             )
             created += 1
         return created

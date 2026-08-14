@@ -7,6 +7,8 @@ STATE_FIELDS = (
     "dire_kills",
     "radiant_nw_lead",
     "first_blood",
+    "canvas",
+    "charts",
 )
 
 

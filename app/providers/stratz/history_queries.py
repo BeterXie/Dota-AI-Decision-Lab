@@ -3,7 +3,7 @@ from typing import Any
 
 from app.domain.history import HistoricalMap, HistoricalMatchBundle, PlayerHistoricalMap
 
-NORMALIZER_VERSION = "stratz-match-v2"
+NORMALIZER_VERSION = "stratz-match-v3"
 
 TEAM_MATCHES_QUERY = """
 query HistoricalTeamMatches($teamId: Int!, $take: Int!, $skip: Int!) {
@@ -34,6 +34,8 @@ query HistoricalMatch($matchId: Long!) {
     didRadiantWin
     radiantTeamId
     direTeamId
+    radiantTeam { name }
+    direTeam { name }
     gameVersionId
     league { id name }
     players {
@@ -191,4 +193,15 @@ def _id(value: object) -> str | None:
 
 def _position(value: object) -> int | None:
     parsed = _int(value)
+    if parsed in {1, 2, 3, 4, 5}:
+        return parsed
+    if not isinstance(value, str):
+        return None
+    normalized = value.strip().upper()
+    if not normalized.startswith("POSITION_"):
+        return None
+    suffix = normalized.removeprefix("POSITION_")
+    if not suffix.isdigit():
+        return None
+    parsed = int(suffix)
     return parsed if parsed in {1, 2, 3, 4, 5} else None

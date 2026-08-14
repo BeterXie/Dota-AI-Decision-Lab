@@ -21,6 +21,7 @@ from app.domain.jobs import JobType
 from app.draft.coordinator import DltvBootstrapCoordinator
 from app.draft.engine import score_rosh_lineups
 from app.draft.features import build_draft_curve
+from app.draft.role_assignment import DraftRoleAssignmentService
 from app.evaluation import EvaluationService, FutureOddsService, SettlementService
 from app.events.outbox import EventRepository
 from app.history.repository import HistoricalRepository
@@ -101,6 +102,29 @@ class _DltvFixtureClient:
         return TimedPayload(
             payload=self._payload,
             request_started_at=self._received_at - timedelta(seconds=1),
+            received_at=self._received_at,
+        )
+
+
+class _DotaPositionFixtureClient:
+    def __init__(self, received_at: datetime) -> None:
+        self._received_at = received_at
+
+    async def execute(self, *, operation_name: str, query: str, variables: dict) -> TimedPayload:
+        players = []
+        for is_radiant, account_start, hero_start in ((True, 1000, 0), (False, 2000, 100)):
+            for position in range(1, 6):
+                players.append(
+                    {
+                        "steamAccountId": account_start + position,
+                        "heroId": hero_start + position,
+                        "position": f"POSITION_{position}",
+                        "isRadiant": is_radiant,
+                    }
+                )
+        return TimedPayload(
+            payload={"data": {"match": {"id": variables["matchId"], "players": players}}},
+            request_started_at=self._received_at - timedelta(milliseconds=100),
             received_at=self._received_at,
         )
 
@@ -258,7 +282,7 @@ async def test_production_lifecycle_replay_uses_postgres_and_converges() -> None
         async with engine.connect() as connection:
             assert await connection.scalar(text("select 1")) == 1
             revision = await connection.scalar(text("select version_num from alembic_version"))
-            assert revision == "0019_repair_non_map_market_identity"
+            assert revision == "0022_ai_view_experiment_identity"
 
         start = datetime.now(UTC).replace(microsecond=0)
         raw_events = RawEventRepository()
@@ -269,6 +293,10 @@ async def test_production_lifecycle_replay_uses_postgres_and_converges() -> None
             raw_events=raw_events,
             events=events,
             identities=identities,
+            role_assignment=DraftRoleAssignmentService(
+                stratz=_DotaPositionFixtureClient(start + timedelta(seconds=1)),
+                raw_events=raw_events,
+            ),
         )
         raybet = RayBetOddsCollector(
             raw_events=raw_events,
@@ -680,7 +708,7 @@ async def test_production_lifecycle_replay_uses_postgres_and_converges() -> None
                 "POST_DRAFT",
                 "LIVE_BASIC",
             ]
-            assert await session.scalar(select(func.count()).select_from(ProviderRawEvent)) >= 13
+            assert await session.scalar(select(func.count()).select_from(ProviderRawEvent)) >= 14
             assert (
                 await session.scalar(
                     select(func.count())

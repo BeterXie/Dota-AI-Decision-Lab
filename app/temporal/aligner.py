@@ -5,17 +5,20 @@ from math import ceil
 from statistics import median, pstdev
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.domain.live import CalibrationPair, LiveSynchronizationEstimate
 from app.models import (
+    CanonicalMap,
+    CanonicalSeries,
     DltvLiveObservationRecord,
     LiveCalibrationPairRecord,
     LiveSyncEstimateRecord,
     OddsObservationRecord,
 )
+from app.snapshots.builder import _map_market_stages
 from app.time import ensure_utc
 
 
@@ -136,11 +139,18 @@ def _calibrate(
         p90 = _nearest_rank(absolute_lags, 0.90)
         jitter = pstdev(lags) if sample_size > 1 else 0.0
 
-    total_pairs = len(pairs)
+    # RayBet signals arrive far more often than DLTV state changes, so most
+    # RayBet signals have no forward DLTV candidate inside the pairing window.
+    # That is a cadence mismatch, not a pairing-quality failure: ratio metrics
+    # are computed over pairs that HAD a candidate.
+    candidate_pairs = [pair for pair in pairs if pair.reject_reason != "NO_FORWARD_CANDIDATE"]
+    total_pairs = len(candidate_pairs)
     accepted_ratio = sample_size / total_pairs if total_pairs else 0.0
-    ambiguous_count = sum(pair.reject_reason == "AMBIGUOUS_NEAREST" for pair in pairs)
+    ambiguous_count = sum(pair.reject_reason == "AMBIGUOUS_NEAREST" for pair in candidate_pairs)
     ambiguous_ratio = ambiguous_count / total_pairs if total_pairs else 0.0
-    outlier_count = sum(pair.reject_reason not in {None, "AMBIGUOUS_NEAREST"} for pair in pairs)
+    outlier_count = sum(
+        pair.reject_reason not in {None, "AMBIGUOUS_NEAREST"} for pair in candidate_pairs
+    )
     outlier_ratio = outlier_count / total_pairs if total_pairs else 0.0
 
     if total_pairs == 0:
@@ -205,13 +215,38 @@ class TemporalAligner:
         )
         if existing is not None:
             return _estimate_from_record(existing)
+        canonical_map = await session.get(CanonicalMap, canonical_map_id)
+        series = (
+            await session.get(CanonicalSeries, canonical_map.series_id)
+            if canonical_map and canonical_map.series_id
+            else None
+        )
+        stages = (
+            _map_market_stages(
+                canonical_map.map_number,
+                best_of=series.best_of if series else None,
+            )
+            if canonical_map
+            else ()
+        )
+        market_criteria = (
+            or_(
+                OddsObservationRecord.canonical_map_id == canonical_map_id,
+                and_(
+                    OddsObservationRecord.canonical_series_id == canonical_map.series_id,
+                    OddsObservationRecord.match_stage.in_(stages),
+                ),
+            )
+            if canonical_map and canonical_map.series_id and stages
+            else (OddsObservationRecord.canonical_map_id == canonical_map_id)
+        )
         odds = list(
             reversed(
                 (
                     await session.scalars(
                         select(OddsObservationRecord)
                         .where(
-                            OddsObservationRecord.canonical_map_id == canonical_map_id,
+                            market_criteria,
                             OddsObservationRecord.received_at <= as_of,
                         )
                         .order_by(OddsObservationRecord.received_at.desc())
@@ -264,6 +299,10 @@ class TemporalAligner:
             )
         )
         for pair in pairs:
+            if pair.reject_reason == "NO_FORWARD_CANDIDATE":
+                # Cadence-mismatch noise: no DLTV signal id, no lag, nothing to
+                # audit.  Persisting thousands of these per live match is bloat.
+                continue
             session.add(
                 LiveCalibrationPairRecord(
                     canonical_map_id=canonical_map_id,

@@ -7,10 +7,14 @@
   "first_blood": "radiant",
   "is_picks_ended": true,
   "draft_supreme_complete": true,
-  "live_league_data": {"stream_delay_s": 900},
+  "live_league_data": {
+    "stream_delay_s": 900,
+    "radiant_team": {"team_id": 9502, "team_name": "Radiant Sample"},
+    "dire_team": {"team_id": 9501, "team_name": "Dire Sample"}
+  },
   "db": {
-    "first_team": {"id": 501, "title": "Radiant Sample"},
-    "second_team": {"id": 502, "title": "Dire Sample"},
+    "first_team": {"id": 501, "title": "Dire Sample", "is_radiant": false},
+    "second_team": {"id": 502, "title": "Radiant Sample", "is_radiant": true},
     "series": {
       "id": 427609,
       "event_id": 88,

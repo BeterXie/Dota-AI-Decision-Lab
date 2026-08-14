@@ -83,5 +83,42 @@ def _retry_after_seconds(value: str | None) -> float:
     except ValueError:
         try:
             return max(0.0, (parsedate_to_datetime(value) - datetime.now(UTC)).total_seconds())
-        except (TypeError, ValueError, OverflowError):
+        except TypeError, ValueError, OverflowError:
             return 0.25
+
+
+class RayBetHttpPool:
+    """Rotate across the same host list used by the RayBet web client."""
+
+    def __init__(self, clients: tuple[RayBetHttpClient, ...]) -> None:
+        if not clients:
+            raise ValueError("RayBet HTTP pool requires at least one client")
+        self._clients = clients
+        self._preferred_index = 0
+
+    async def get_games(self) -> TimedPayload:
+        return await self._request("get_games")
+
+    async def get_matches(self, match_type: int, page: int = 1) -> TimedPayload:
+        return await self._request("get_matches", match_type, page)
+
+    async def get_odds(self, match_id: int) -> TimedPayload:
+        return await self._request("get_odds", match_id)
+
+    async def close(self) -> None:
+        for client in self._clients:
+            await client.close()
+
+    async def _request(self, method: str, *args) -> TimedPayload:
+        failures: list[str] = []
+        for offset in range(len(self._clients)):
+            index = (self._preferred_index + offset) % len(self._clients)
+            client = self._clients[index]
+            try:
+                response = await getattr(client, method)(*args)
+            except Exception as exc:
+                failures.append(f"{type(exc).__name__}: {exc}")
+                continue
+            self._preferred_index = index
+            return response
+        raise RuntimeError("RayBet HTTP hosts failed: " + "; ".join(failures))

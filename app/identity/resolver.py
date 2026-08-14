@@ -36,6 +36,10 @@ class ResolvedMap(BaseModel):
     canonical_map_id: UUID
     team_a_id: UUID
     team_b_id: UUID
+    radiant_team_id: UUID | None = None
+    dire_team_id: UUID | None = None
+    side_identity_source: str | None = None
+    side_identity_confidence: float | None = None
     resolution_method: str
 
 
@@ -92,6 +96,24 @@ class IdentityResolver:
         session: AsyncSession,
         identity: DltvBootstrapIdentity,
     ) -> ResolvedMap:
+        first_team_id = await self._resolve_team(
+            session,
+            provider="dltv",
+            provider_team_id=str(identity.first_team_id),
+            name=identity.first_team_name,
+        )
+        second_team_id = await self._resolve_team(
+            session,
+            provider="dltv",
+            provider_team_id=str(identity.second_team_id),
+            name=identity.second_team_name,
+        )
+        radiant_team_id, dire_team_id = _canonical_sides(
+            identity,
+            first_team_id=first_team_id,
+            second_team_id=second_team_id,
+        )
+
         map_record = await session.scalar(
             select(CanonicalMap).where(CanonicalMap.valve_match_id == identity.valve_match_id)
         )
@@ -99,27 +121,21 @@ class IdentityResolver:
             series = await session.get(CanonicalSeries, map_record.series_id)
             if series is None:
                 raise ValueError("canonical map references a missing series")
+            _validate_series_teams(series, first_team_id, second_team_id)
+            _validate_series_sides(series, radiant_team_id, dire_team_id)
             return ResolvedMap(
                 canonical_event_id=series.event_id,
                 canonical_series_id=series.id,
                 canonical_map_id=map_record.id,
                 team_a_id=series.team_a_id,
                 team_b_id=series.team_b_id,
+                radiant_team_id=radiant_team_id,
+                dire_team_id=dire_team_id,
+                side_identity_source=identity.side_identity_source,
+                side_identity_confidence=identity.side_identity_confidence,
                 resolution_method="VALVE_MATCH_ID",
             )
 
-        team_a_id = await self._resolve_team(
-            session,
-            provider="dltv",
-            provider_team_id=str(identity.first_team_id),
-            name=identity.first_team_name,
-        )
-        team_b_id = await self._resolve_team(
-            session,
-            provider="dltv",
-            provider_team_id=str(identity.second_team_id),
-            name=identity.second_team_name,
-        )
         event_id = await self._resolve_event(
             session,
             provider="dltv",
@@ -128,8 +144,8 @@ class IdentityResolver:
         )
         candidates = await self._series_candidates(
             session,
-            team_a_id=team_a_id,
-            team_b_id=team_b_id,
+            team_a_id=first_team_id,
+            team_b_id=second_team_id,
             scheduled_at=identity.started_at,
         )
         if len(candidates) > 1:
@@ -140,13 +156,14 @@ class IdentityResolver:
         else:
             series = CanonicalSeries(
                 event_id=event_id,
-                team_a_id=team_a_id,
-                team_b_id=team_b_id,
+                team_a_id=first_team_id,
+                team_b_id=second_team_id,
                 scheduled_at=identity.started_at,
             )
             session.add(series)
             await session.flush()
             method = "DLTV_CANONICAL_CREATE"
+        _validate_series_sides(series, radiant_team_id, dire_team_id)
 
         if identity.map_number is not None:
             existing_slot = await session.scalar(
@@ -190,8 +207,12 @@ class IdentityResolver:
             canonical_event_id=series.event_id,
             canonical_series_id=series.id,
             canonical_map_id=map_record.id,
-            team_a_id=team_a_id,
-            team_b_id=team_b_id,
+            team_a_id=series.team_a_id,
+            team_b_id=series.team_b_id,
+            radiant_team_id=radiant_team_id,
+            dire_team_id=dire_team_id,
+            side_identity_source=identity.side_identity_source,
+            side_identity_confidence=identity.side_identity_confidence,
             resolution_method=method,
         )
 
@@ -363,6 +384,50 @@ class IdentityResolver:
                 ProviderMatchMapping.provider_match_id == provider_match_id,
             )
         )
+
+
+def _canonical_sides(
+    identity: DltvBootstrapIdentity,
+    *,
+    first_team_id: UUID,
+    second_team_id: UUID,
+) -> tuple[UUID | None, UUID | None]:
+    radiant_provider_id = identity.radiant_provider_team_id
+    dire_provider_id = identity.dire_provider_team_id
+    if radiant_provider_id is None and dire_provider_id is None:
+        return None, None
+    if radiant_provider_id is None or dire_provider_id is None:
+        raise IdentityAmbiguousError("SIDE_IDENTITY_PARTIAL")
+    provider_to_canonical = {
+        identity.first_team_id: first_team_id,
+        identity.second_team_id: second_team_id,
+    }
+    if {radiant_provider_id, dire_provider_id} != set(provider_to_canonical):
+        raise IdentityAmbiguousError("SIDE_IDENTITY_PROVIDER_CONFLICT")
+    return provider_to_canonical[radiant_provider_id], provider_to_canonical[dire_provider_id]
+
+
+def _validate_series_teams(
+    series: CanonicalSeries, first_team_id: UUID, second_team_id: UUID
+) -> None:
+    if {series.team_a_id, series.team_b_id} != {first_team_id, second_team_id}:
+        raise IdentityAmbiguousError("VALVE_MATCH_TEAM_CONFLICT")
+
+
+def _validate_series_sides(
+    series: CanonicalSeries,
+    radiant_team_id: UUID | None,
+    dire_team_id: UUID | None,
+) -> None:
+    if radiant_team_id is None and dire_team_id is None:
+        return
+    if radiant_team_id is None or dire_team_id is None:
+        raise IdentityAmbiguousError("SIDE_IDENTITY_PARTIAL")
+    if radiant_team_id == dire_team_id or {radiant_team_id, dire_team_id} != {
+        series.team_a_id,
+        series.team_b_id,
+    }:
+        raise IdentityAmbiguousError("SIDE_IDENTITY_SERIES_CONFLICT")
 
 
 def _parse_best_of(value: str | None) -> int | None:

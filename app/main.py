@@ -20,13 +20,14 @@ from app.ai import (
     KimiDecisionProvider,
     OpenAiDecisionProvider,
 )
-from app.ai.base import DECISION_POLICY_VERSION, PROMPT_VERSION
+from app.ai.base import ai_experiment_key
 from app.config import Settings, get_settings
 from app.db import create_engine, create_session_factory
 from app.db_partitions import ensure_weekly_partitions
 from app.domain.jobs import JobType
 from app.draft.coordinator import DltvBootstrapCoordinator
 from app.draft.refresh import schedule_incomplete_draft_refreshes
+from app.draft.role_assignment import DraftRoleAssignmentService
 from app.draft.rosh_service import RoshService
 from app.evaluation import EvaluationService, FutureOddsService, SettlementService
 from app.events.dispatcher import DomainEventDispatcher, OutboxDispatcher
@@ -57,13 +58,12 @@ from app.models import (
     ProviderMatchMapping,
 )
 from app.notifications import DecisionEmailNotificationService, ResendEmailSender
-from app.notifications.translation import DeepSeekEmailTranslator
 from app.observability import Metrics, configure_logging, configure_tracing
 from app.providers.dltv.bootstrap import DltvBootstrapClient
 from app.providers.dltv.socket import DltvSocketClient
 from app.providers.opendota.client import OpenDotaClient
-from app.providers.raybet.http import RayBetHttpClient
-from app.providers.raybet.http_transport import CurlRayBetHttpClient
+from app.providers.raybet.http import RayBetHttpClient, RayBetHttpPool
+from app.providers.raybet.http_transport import CurlRayBetHttpClient, CurlRayBetHttpPool
 from app.providers.raybet.socket import RayBetSocketClient
 from app.providers.stratz.client import StratzClient
 from app.providers.stratz.history import StratzHistoricalProvider
@@ -84,6 +84,7 @@ async def run() -> None:
     settings = get_settings()
     configure_logging(settings.log_level)
     configure_tracing(settings.otel_exporter_otlp_endpoint)
+    _assert_bind_safety(settings)
     if settings.auto_migrate:
         await asyncio.to_thread(_upgrade_database)
 
@@ -99,14 +100,24 @@ async def run() -> None:
     jobs = JobRepository()
     identities = IdentityResolver()
     odds_registry = OddsRegistry()
-    raybet_http = RayBetHttpClient(settings.raybet_info_base_url, settings.raybet_origin)
-    raybet_curl = CurlRayBetHttpClient(settings.raybet_info_base_url, settings.raybet_origin)
+    raybet_http = RayBetHttpPool(
+        tuple(RayBetHttpClient(host, settings.raybet_origin) for host in settings.raybet_http_hosts)
+    )
+    raybet_curl = CurlRayBetHttpPool(
+        tuple(
+            CurlRayBetHttpClient(host, settings.raybet_origin)
+            for host in settings.raybet_http_hosts
+        )
+    )
     raybet_socket = RayBetSocketClient(settings.raybet_socket_url, settings.raybet_origin)
     dltv_http = DltvBootstrapClient(settings.dltv_base_url)
     dltv_socket = DltvSocketClient(settings.dltv_base_url)
-    opendota = OpenDotaClient(settings.opendota_base_url, settings.opendota_api_key)
+    opendota = OpenDotaClient(
+        settings.opendota_base_url,
+        settings.opendota_api_key.get_secret_value() if settings.opendota_api_key else None,
+    )
     stratz_client = (
-        StratzClient(settings.stratz_graphql_url, settings.stratz_token)
+        StratzClient(settings.stratz_graphql_url, settings.stratz_token.get_secret_value())
         if settings.stratz_token
         else None
     )
@@ -141,6 +152,10 @@ async def run() -> None:
         raw_events=raw_events,
         events=events,
         identities=identities,
+        role_assignment=DraftRoleAssignmentService(
+            stratz=stratz_client,
+            raw_events=raw_events,
+        ),
     )
     dltv_collector = DltvSocketCollector(
         session_factory=session_factory,
@@ -168,7 +183,11 @@ async def run() -> None:
         repository=snapshots,
     )
     ai_providers = _ai_providers(settings)
-    ai = AiCoordinator(ai_providers, timeout_seconds=settings.ai_timeout_seconds)
+    ai = AiCoordinator(
+        ai_providers,
+        timeout_seconds=settings.ai_timeout_seconds,
+        max_live_data_lag_seconds=settings.ai_max_live_data_lag_seconds,
+    )
     email_notifications = _email_notifications(
         settings,
         session_factory=session_factory,
@@ -222,13 +241,13 @@ async def run() -> None:
     ).mapping()
     reconciliation = ReconciliationService(
         jobs,
+        events,
         lease_seconds=settings.job_lease_seconds,
-        ai_experiments=tuple(
-            (item.name, item.model, PROMPT_VERSION, DECISION_POLICY_VERSION)
-            for item in ai_providers
-        ),
+        ai_experiments=tuple(ai_experiment_key(item.name, item.model) for item in ai_providers),
         future_odds_horizons=settings.future_odds_horizons,
         ai_min_game_time_seconds=settings.ai_min_game_time_seconds,
+        checkpoint_minutes=settings.checkpoint_minutes,
+        live_state_max_age_seconds=settings.live_state_max_age_seconds,
     )
     async with session_factory() as session, session.begin():
         await reconciliation.run(session, now=datetime.now(UTC))
@@ -484,7 +503,14 @@ async def run() -> None:
         )
 
     frontend_dist = ROOT / "frontend" / "dist"
-    app = create_app(session_factory, health, frontend_dist=frontend_dist)
+    app = create_app(
+        session_factory,
+        health,
+        frontend_dist=frontend_dist,
+        live_state_max_age_seconds=settings.live_state_max_age_seconds,
+        live_market_max_age_seconds=settings.live_market_max_age_seconds,
+        market_max_pair_skew_seconds=settings.market_max_pair_skew_seconds,
+    )
     workers.append(
         WebServerWorker(
             app,
@@ -524,7 +550,7 @@ async def run() -> None:
 def _job_workers(*, settings, session_factory, jobs, handlers, health) -> list[ServiceWorker]:
     groups = {
         "RayBetRegistryRefreshWorker": (JobType.REFRESH_ODDS_REGISTRY,),
-        "DltvBootstrapWorker": (JobType.BOOTSTRAP_DLTV_MATCH,),
+        "DltvBootstrapWorker": (JobType.BOOTSTRAP_DLTV_MATCH, JobType.REPAIR_LEGACY_DRAFT),
         "HistoricalSyncWorker": (JobType.SYNC_HISTORICAL,),
         "DraftCoordinator": (JobType.BUILD_DRAFT_CURVE,),
         "SnapshotCoordinator": (JobType.BUILD_SNAPSHOT,),
@@ -585,12 +611,28 @@ def _provider_socket_workers(
     ]
 
 
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
+
+
+def _assert_bind_safety(settings: Settings) -> None:
+    """Refuse to expose the unauthenticated API beyond loopback.
+
+    The dashboard has no auth layer (CORS is not a security boundary), so
+    binding a non-loopback address without an API token would publish match
+    intelligence and decision state to the network.
+    """
+    if settings.host not in _LOOPBACK_HOSTS and settings.api_token is None:
+        raise RuntimeError(
+            "refusing to start: HOST is non-loopback but API_TOKEN is not configured"
+        )
+
+
 def _ai_providers(settings: Settings):
     providers = []
     if settings.openai_api_key:
         providers.append(
             OpenAiDecisionProvider(
-                api_key=settings.openai_api_key,
+                api_key=settings.openai_api_key.get_secret_value(),
                 model=settings.openai_model,
                 base_url=settings.openai_base_url,
                 reasoning_effort=settings.openai_reasoning_effort,
@@ -600,7 +642,7 @@ def _ai_providers(settings: Settings):
     if settings.anthropic_api_key:
         providers.append(
             AnthropicDecisionProvider(
-                api_key=settings.anthropic_api_key,
+                api_key=settings.anthropic_api_key.get_secret_value(),
                 model=settings.anthropic_model,
                 base_url=settings.anthropic_base_url,
                 timeout_seconds=settings.ai_timeout_seconds,
@@ -609,35 +651,36 @@ def _ai_providers(settings: Settings):
     if settings.gemini_api_key:
         providers.append(
             GeminiDecisionProvider(
-                api_key=settings.gemini_api_key,
+                api_key=settings.gemini_api_key.get_secret_value(),
                 model=settings.gemini_model,
                 base_url=settings.gemini_base_url,
                 timeout_seconds=settings.ai_timeout_seconds,
             )
         )
     if settings.deepseek_api_key:
-        providers.append(
-            DeepSeekDecisionProvider(
-                api_key=settings.deepseek_api_key,
-                model=settings.deepseek_model,
-                base_url=settings.deepseek_base_url,
-                reasoning_effort=settings.deepseek_reasoning_effort,
-                timeout_seconds=settings.ai_timeout_seconds,
+        if settings.deepseek_flash_decisions_enabled:
+            providers.append(
+                DeepSeekDecisionProvider(
+                    api_key=settings.deepseek_api_key.get_secret_value(),
+                    model=settings.deepseek_model,
+                    base_url=settings.deepseek_base_url,
+                    reasoning_effort=settings.deepseek_reasoning_effort,
+                    timeout_seconds=settings.ai_timeout_seconds,
+                )
             )
-        )
         providers.append(
             DeepSeekDecisionProvider(
-                api_key=settings.deepseek_api_key,
+                api_key=settings.deepseek_api_key.get_secret_value(),
                 model=settings.deepseek_pro_model,
                 base_url=settings.deepseek_base_url,
                 reasoning_effort=settings.deepseek_reasoning_effort,
                 timeout_seconds=settings.ai_timeout_seconds,
             )
         )
-    if settings.kimi_api_key:
+    if settings.kimi_api_key and settings.kimi_decisions_enabled:
         providers.append(
             KimiDecisionProvider(
-                api_key=settings.kimi_api_key,
+                api_key=settings.kimi_api_key.get_secret_value(),
                 model=settings.kimi_model,
                 base_url=settings.kimi_base_url,
                 timeout_seconds=settings.ai_timeout_seconds,
@@ -656,17 +699,6 @@ def _email_notifications(settings: Settings, *, session_factory, jobs):
         base_url=settings.resend_base_url,
         timeout_seconds=settings.resend_timeout_seconds,
     )
-    translator = (
-        DeepSeekEmailTranslator(
-            api_key=settings.deepseek_api_key,
-            model=settings.deepseek_model,
-            base_url=settings.deepseek_base_url,
-            reasoning_effort=settings.deepseek_reasoning_effort,
-            timeout_seconds=settings.ai_timeout_seconds,
-        )
-        if settings.deepseek_api_key
-        else None
-    )
     return DecisionEmailNotificationService(
         session_factory=session_factory,
         jobs=jobs,
@@ -674,7 +706,6 @@ def _email_notifications(settings: Settings, *, session_factory, jobs):
         sender_from=settings.resend_from,
         recipients=settings.decision_email_recipients,
         subject_prefix=settings.email_subject_prefix,
-        translator=translator,
     )
 
 
