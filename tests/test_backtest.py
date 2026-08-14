@@ -75,8 +75,12 @@ def test_backtest_summary_keeps_experiment_versions_isolated() -> None:
     summaries = summarize_backtest_rows(rows, calibration_bins=5)
 
     assert len(summaries) == 2
-    first = next(item for item in summaries if item["experiment"]["ai_view_version"] == "ai-view-v2")
-    second = next(item for item in summaries if item["experiment"]["ai_view_version"] == "ai-view-v3")
+    first = next(
+        item for item in summaries if item["experiment"]["ai_view_version"] == "ai-view-v2"
+    )
+    second = next(
+        item for item in summaries if item["experiment"]["ai_view_version"] == "ai-view-v3"
+    )
     assert first["bet_count"] == 2
     assert first["wins"] == 1
     assert first["decision_level_roi"] == 0.0
