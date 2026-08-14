@@ -108,7 +108,9 @@ def create_app(
                                 )
                                 .exists(),
                                 select(DltvLiveObservationRecord.id)
-                                .where(DltvLiveObservationRecord.canonical_map_id == CanonicalMap.id)
+                                .where(
+                                    DltvLiveObservationRecord.canonical_map_id == CanonicalMap.id
+                                )
                                 .exists(),
                                 select(DecisionSnapshotRecord.id)
                                 .where(DecisionSnapshotRecord.canonical_map_id == CanonicalMap.id)
@@ -327,7 +329,13 @@ async def _map_summary_payloads(
 
     event_ids = list({series.event_id for series in series_rows if series.event_id is not None})
     events = (
-        list((await session.scalars(select(CanonicalEvent).where(CanonicalEvent.id.in_(event_ids)))).all())
+        list(
+            (
+                await session.scalars(
+                    select(CanonicalEvent).where(CanonicalEvent.id.in_(event_ids))
+                )
+            ).all()
+        )
         if event_ids
         else []
     )
@@ -361,7 +369,9 @@ async def _map_summary_payloads(
     )
     result_by_map_id = {item.canonical_map_id: item for item in all_results}
 
-    series_scores: dict[UUID, dict[str, int]] = {s.id: {"team_a": 0, "team_b": 0} for s in series_rows}
+    series_scores: dict[UUID, dict[str, int]] = {
+        s.id: {"team_a": 0, "team_b": 0} for s in series_rows
+    }
     maps_by_series: dict[UUID, list[CanonicalMap]] = {}
     for sm in all_series_maps:
         if sm.series_id is not None:
@@ -508,7 +518,11 @@ async def _map_summary_payloads(
         series = series_by_id.get(canonical_map.series_id)
         team_a = team_by_id.get(series.team_a_id) if series is not None else None
         team_b = team_by_id.get(series.team_b_id) if series is not None else None
-        event = event_by_id.get(series.event_id) if series is not None and series.event_id is not None else None
+        event = (
+            event_by_id.get(series.event_id)
+            if series is not None and series.event_id is not None
+            else None
+        )
         provider_match_id = provider_match_by_series.get(canonical_map.series_id)
         raybet_match = raybet_by_id.get(provider_match_id)
         stages = set(
@@ -554,8 +568,16 @@ async def _map_summary_payloads(
             market_max_pair_skew_seconds=market_max_pair_skew_seconds,
         )
         display_market = list(selected_legs) if selected_legs is not None else current_market
-        s_maps = maps_by_series.get(canonical_map.series_id, [canonical_map]) if canonical_map.series_id else [canonical_map]
-        s_score = series_scores.get(canonical_map.series_id, {"team_a": 0, "team_b": 0}) if canonical_map.series_id else {"team_a": 0, "team_b": 0}
+        s_maps = (
+            maps_by_series.get(canonical_map.series_id, [canonical_map])
+            if canonical_map.series_id
+            else [canonical_map]
+        )
+        s_score = (
+            series_scores.get(canonical_map.series_id, {"team_a": 0, "team_b": 0})
+            if canonical_map.series_id
+            else {"team_a": 0, "team_b": 0}
+        )
         payloads.append(
             {
                 "entity_type": "MAP",
@@ -572,7 +594,9 @@ async def _map_summary_payloads(
                         "canonical_map_id": str(m.id),
                         "map_number": m.map_number,
                         "valve_match_id": m.valve_match_id,
-                        "winner_team_id": str(result_by_map_id[m.id].winner_team_id) if m.id in result_by_map_id and result_by_map_id[m.id].winner_team_id else None,
+                        "winner_team_id": str(result_by_map_id[m.id].winner_team_id)
+                        if m.id in result_by_map_id and result_by_map_id[m.id].winner_team_id
+                        else None,
                     }
                     for m in s_maps
                 ],
@@ -585,8 +609,12 @@ async def _map_summary_payloads(
                     live_state_max_age_seconds=live_state_max_age_seconds,
                 ),
                 "provider_match_id": provider_match_id,
-                "tournament_name": raybet_match.tournament_name if raybet_match else (event.name if event else None),
-                "round": raybet_match.round if raybet_match else (f"BO{series.best_of}" if series and series.best_of else None),
+                "tournament_name": raybet_match.tournament_name
+                if raybet_match
+                else (event.name if event else None),
+                "round": raybet_match.round
+                if raybet_match
+                else (f"BO{series.best_of}" if series and series.best_of else None),
                 "raw_status": raybet_match.raw_status if raybet_match else None,
                 "provider_observed_at": raybet_match.observed_at if raybet_match else None,
                 "team_a": {"id": team_a.id, "name": team_a.name} if team_a else None,
@@ -854,7 +882,9 @@ async def _map_payload(
         list(
             (
                 await session.scalars(
-                    select(MapResultRecord).where(MapResultRecord.canonical_map_id.in_(sibling_map_ids))
+                    select(MapResultRecord).where(
+                        MapResultRecord.canonical_map_id.in_(sibling_map_ids)
+                    )
                 )
             ).all()
         )
@@ -1138,15 +1168,21 @@ async def _map_payload(
                 "canonical_map_id": str(m.id),
                 "map_number": m.map_number,
                 "valve_match_id": m.valve_match_id,
-                "winner_team_id": str(sibling_result_by_id[m.id].winner_team_id) if m.id in sibling_result_by_id and sibling_result_by_id[m.id].winner_team_id else None,
+                "winner_team_id": str(sibling_result_by_id[m.id].winner_team_id)
+                if m.id in sibling_result_by_id and sibling_result_by_id[m.id].winner_team_id
+                else None,
             }
             for m in sibling_maps
         ],
         "scheduled_at": scheduled_at,
         "phase": phase,
         "provider_match_id": raybet_match.provider_match_id if raybet_match else None,
-        "tournament_name": raybet_match.tournament_name if raybet_match else (event.name if event else None),
-        "round": raybet_match.round if raybet_match else (f"BO{series.best_of}" if series and series.best_of else None),
+        "tournament_name": raybet_match.tournament_name
+        if raybet_match
+        else (event.name if event else None),
+        "round": raybet_match.round
+        if raybet_match
+        else (f"BO{series.best_of}" if series and series.best_of else None),
         "raw_status": raybet_match.raw_status if raybet_match else None,
         "provider_observed_at": raybet_match.observed_at if raybet_match else None,
         "team_a": {"id": team_a.id, "name": team_a.name} if team_a else None,
@@ -1437,8 +1473,12 @@ async def _pending_series_payload(
             else "UNKNOWN"
         ),
         "provider_match_id": raybet_match.provider_match_id if raybet_match else None,
-        "tournament_name": raybet_match.tournament_name if raybet_match else (event.name if event else None),
-        "round": raybet_match.round if raybet_match else (f"BO{series.best_of}" if series.best_of else None),
+        "tournament_name": raybet_match.tournament_name
+        if raybet_match
+        else (event.name if event else None),
+        "round": raybet_match.round
+        if raybet_match
+        else (f"BO{series.best_of}" if series.best_of else None),
         "raw_status": raybet_match.raw_status if raybet_match else None,
         "provider_observed_at": raybet_match.observed_at if raybet_match else None,
         "team_a": {"id": team_a.id, "name": team_a.name} if team_a else None,
@@ -1491,7 +1531,9 @@ async def _pending_series_payload(
         "decisions": [],
         "historical_prewarm": {
             "team_strength_ready_count": sum(
-                item.get("base_rating") is not None for item in (team_a_history, team_b_history) if item
+                item.get("base_rating") is not None
+                for item in (team_a_history, team_b_history)
+                if item
             ),
             "player_form_ready_count": 0,
             "player_hero_ready_count": 0,
