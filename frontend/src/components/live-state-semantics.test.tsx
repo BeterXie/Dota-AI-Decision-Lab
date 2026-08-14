@@ -14,9 +14,9 @@ test("effective state age controls stale presentation", () => {
       first_blood: "dire",
       received_at: "2026-08-13T12:00:00Z",
       last_message_received_at: "2026-08-13T12:00:00Z",
-      last_state_change_received_at: "2026-08-13T11:59:00Z",
+      last_state_change_received_at: "2026-08-13T11:57:00Z",
       message_age_seconds: 1,
-      effective_state_age_seconds: 60,
+      effective_state_age_seconds: 130,
       connection_id: "fixture",
       reconnect_generation: 0
     },

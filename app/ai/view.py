@@ -91,10 +91,13 @@ def build_ai_view(
         "quality": _quality_view(payload.get("quality") or {}),
     }
     draft = view["draft"]
-    live = view["live"]
-    if isinstance(draft, dict) and isinstance(live, dict):
-        view["draft_live_agreement"] = _draft_live_agreement(draft, live, team_a_side)
     view["live"] = _exclude_delayed_live(view["live"], data_lag, max_live_data_lag_seconds)
+    live = view["live"]
+    # The agreement derives from the live lead, so it must be computed AFTER
+    # delayed live data is excluded; otherwise it smuggles delayed evidence
+    # back into the view.
+    if isinstance(draft, dict) and isinstance(live, dict) and not live.get("delayed_live_excluded"):
+        view["draft_live_agreement"] = _draft_live_agreement(draft, live, team_a_side)
     return _round_floats(view)
 
 
@@ -167,11 +170,14 @@ def _market_view(market: dict[str, Any], team_a_id: str | None, decision_at: str
             "implied_probability": observation.get("implied_probability"),
         }
     team_a_leg = legs.get("team_a") or {}
-    edge_pp = None
+    # fair_probability is the same market price with the vig removed, so
+    # fair - implied is the vig adjustment, NOT a model edge.  Name it
+    # honestly so the model cannot read it as mispricing.
+    vig_adjustment_pp = None
     fair = team_a_leg.get("fair_probability")
     implied = team_a_leg.get("implied_probability")
     if isinstance(fair, (int, float)) and isinstance(implied, (int, float)):
-        edge_pp = (fair - implied) * 100.0
+        vig_adjustment_pp = (fair - implied) * 100.0
     quality = _dict(market.get("quality"))
     return {
         "market_type": market.get("market_type"),
@@ -180,7 +186,7 @@ def _market_view(market: dict[str, Any], team_a_id: str | None, decision_at: str
         "pair_skew_seconds": quality.get("pair_skew_seconds"),
         "team_a": team_a_leg or None,
         "team_b": legs.get("team_b") or None,
-        "team_a_edge_pp": edge_pp,
+        "team_a_vig_adjustment_pp": vig_adjustment_pp,
         "eligible": quality.get("eligible"),
         "warnings": quality.get("warnings") or [],
         "odds_drift": _odds_drift_view(market.get("odds_trajectory"), decision_at),
@@ -191,8 +197,16 @@ def _odds_drift_view(trajectory: Any, decision_at: str) -> dict[str, Any] | None
     """Derive odds drift from the stored price-change path (team A implied pp)."""
     if not isinstance(trajectory, list) or len(trajectory) < 2:
         return None
-    first = _dict(trajectory[0])
-    last = _dict(trajectory[-1])
+    # Trajectory points are paired (price_a and price_b both present once the
+    # slower side has been observed once); skip points that predate team A's
+    # first observation.
+    paired = [
+        _dict(point) for point in trajectory if _float(_dict(point).get("price_a")) is not None
+    ]
+    if len(paired) < 2:
+        return None
+    first = paired[0]
+    last = paired[-1]
 
     def implied(price: Any) -> float | None:
         value = _float(price)
@@ -212,10 +226,10 @@ def _odds_drift_view(trajectory: Any, decision_at: str) -> dict[str, Any] | None
     if decision_time is not None:
         horizon = decision_time - timedelta(minutes=5)
         candidates = [
-            implied(_dict(point).get("price_a"))
-            for point in trajectory
-            if _parse_time(_dict(point).get("received_at")) is not None
-            and _parse_time(_dict(point).get("received_at")) <= horizon
+            implied(point.get("price_a"))
+            for point in paired
+            if _parse_time(point.get("received_at")) is not None
+            and _parse_time(point.get("received_at")) <= horizon
         ]
         five_min_ago_a = candidates[-1] if candidates else None
     drift_pp = (last_a - first_a) * 100.0
@@ -278,6 +292,15 @@ def _draft_view(
             return None
         return value if team_a_is_radiant else -value
 
+    def decomposition_side(value: float | None) -> float | None:
+        # R.O.S.H. decomposition components are Radiant-relative; map them to
+        # Team A exactly like the top-level edges so signs stay consistent.
+        if value is None:
+            return None
+        if mapped:
+            return value if team_a_is_radiant else -value
+        return value
+
     points = []
     for point in curve_points:
         if not isinstance(point, dict):
@@ -334,22 +357,42 @@ def _draft_view(
             "curve_slope_5m": to_team(features.get("curve_slope_5m"))
             if mapped
             else features.get("curve_slope_5m"),
-            "adjustment_delta": features.get("adjustment_delta"),
+            "adjustment_delta": decomposition_side(features.get("adjustment_delta")),
             "fell_back_to_pure_score": features.get("fell_back_to_pure_score"),
             "decomposition": {
                 "current": {
-                    "hero_base": (decomposition.get("current") or {}).get("hero_base_adjustment"),
-                    "hero_tempo": (decomposition.get("current") or {}).get("hero_tempo_adjustment"),
-                    "synergy": (decomposition.get("current") or {}).get("synergy_adjustment"),
-                    "player": (decomposition.get("current") or {}).get("player_adjustment"),
-                    "hero": (decomposition.get("current") or {}).get("hero_adjustment"),
+                    "hero_base": decomposition_side(
+                        (decomposition.get("current") or {}).get("hero_base_adjustment")
+                    ),
+                    "hero_tempo": decomposition_side(
+                        (decomposition.get("current") or {}).get("hero_tempo_adjustment")
+                    ),
+                    "synergy": decomposition_side(
+                        (decomposition.get("current") or {}).get("synergy_adjustment")
+                    ),
+                    "player": decomposition_side(
+                        (decomposition.get("current") or {}).get("player_adjustment")
+                    ),
+                    "hero": decomposition_side(
+                        (decomposition.get("current") or {}).get("hero_adjustment")
+                    ),
                 },
                 "peak": {
-                    "hero_base": (decomposition.get("peak") or {}).get("hero_base_adjustment"),
-                    "hero_tempo": (decomposition.get("peak") or {}).get("hero_tempo_adjustment"),
-                    "synergy": (decomposition.get("peak") or {}).get("synergy_adjustment"),
-                    "player": (decomposition.get("peak") or {}).get("player_adjustment"),
-                    "hero": (decomposition.get("peak") or {}).get("hero_adjustment"),
+                    "hero_base": decomposition_side(
+                        (decomposition.get("peak") or {}).get("hero_base_adjustment")
+                    ),
+                    "hero_tempo": decomposition_side(
+                        (decomposition.get("peak") or {}).get("hero_tempo_adjustment")
+                    ),
+                    "synergy": decomposition_side(
+                        (decomposition.get("peak") or {}).get("synergy_adjustment")
+                    ),
+                    "player": decomposition_side(
+                        (decomposition.get("peak") or {}).get("player_adjustment")
+                    ),
+                    "hero": decomposition_side(
+                        (decomposition.get("peak") or {}).get("hero_adjustment")
+                    ),
                 },
             },
         },
@@ -641,6 +684,13 @@ def _bans_view(
     bans = enrichment.get("bans")
     if not isinstance(bans, dict):
         return None
+    if bans.get("sides_resolved") is False or "radiant" not in bans:
+        # Provider ordering is NOT side evidence; keep bans unbound.
+        first = [_hero_name(hero) for hero in bans.get("first_team") or [] if isinstance(hero, int)]
+        second = [
+            _hero_name(hero) for hero in bans.get("second_team") or [] if isinstance(hero, int)
+        ]
+        return {"first_team": first, "second_team": second, "sides_resolved": False}
     radiant = [_hero_name(hero) for hero in bans.get("radiant") or [] if isinstance(hero, int)]
     dire = [_hero_name(hero) for hero in bans.get("dire") or [] if isinstance(hero, int)]
     if not mapped:

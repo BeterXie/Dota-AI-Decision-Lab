@@ -587,18 +587,27 @@ async def _odds_trajectory(
     team_order = {team_id: index for index, team_id in enumerate(expected_team_ids)}
     points: list[dict[str, Any]] = []
     last_pair: tuple[object, object] | None = None
+    current_a: object = None
+    current_b: object = None
     for record in rows:
-        price_a = record.price if team_order.get(record.selection_team_id) == 0 else None
-        price_b = record.price if team_order.get(record.selection_team_id) == 1 else None
-        pair = (price_a, price_b)
+        # Each observation row belongs to ONE selection; carry the other
+        # side's latest price forward so every point is a complete A/B pair.
+        side_index = team_order.get(record.selection_team_id)
+        if side_index == 0:
+            current_a = record.price
+        elif side_index == 1:
+            current_b = record.price
+        else:
+            continue
+        pair = (current_a, current_b)
         if pair == last_pair and points:
             continue
         last_pair = pair
         points.append(
             {
                 "received_at": record.received_at.isoformat(),
-                "price_a": price_a,
-                "price_b": price_b,
+                "price_a": current_a,
+                "price_b": current_b,
             }
         )
         if len(points) >= 12:

@@ -14,6 +14,9 @@ class Settings(BaseSettings):
         "https://iminfo.esportsworldlink.com/v2,"
         "https://cfinfo.365raylines.com/v2"
     )
+    # Legacy singular spelling kept for backward compatibility with existing
+    # .env files; used only when the plural list is empty.
+    raybet_info_base_url: str | None = None
     raybet_socket_url: str = "wss://cfsocket.365raylinks.com/socketcluster/"
     raybet_origin: str = "https://www.ray086.com"
     raybet_dota_game_id: int = 151
@@ -116,11 +119,10 @@ class Settings(BaseSettings):
 
     @property
     def raybet_http_hosts(self) -> tuple[str, ...]:
-        return tuple(
-            value.strip().rstrip("/")
-            for value in self.raybet_info_base_urls.split(",")
-            if value.strip()
-        )
+        raw = self.raybet_info_base_urls.strip()
+        if not raw and self.raybet_info_base_url:
+            raw = self.raybet_info_base_url
+        return tuple(value.strip().rstrip("/") for value in raw.split(",") if value.strip())
 
     @property
     def future_odds_horizons(self) -> tuple[int, ...]:

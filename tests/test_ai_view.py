@@ -6,7 +6,11 @@ from app.domain.snapshot import DecisionSnapshot
 
 
 def _snapshot(
-    identity: dict, *, live: dict | None = None, market: dict | None = None
+    identity: dict,
+    *,
+    live: dict | None = None,
+    market: dict | None = None,
+    draft: dict | None = None,
 ) -> DecisionSnapshot:
     return DecisionSnapshot(
         snapshot_id=uuid4(),
@@ -15,7 +19,7 @@ def _snapshot(
         mode="LIVE_BASIC",
         identity=identity,
         market=market or {},
-        draft=None,
+        draft=draft,
         history={},
         live=live,
         quality={
@@ -23,12 +27,52 @@ def _snapshot(
             "blockers": [],
             "warnings": [],
             "live_anchors": {
-                "real_start_anchor": "2026-08-14T02:02:47Z",
+                "real_start_anchor": "2026-08-14T02:17:14Z",
                 "data_lag_seconds": 900.0,
             },
         },
         snapshot_hash="fixture-hash",
     )
+
+
+def _draft() -> dict:
+    return {
+        "complete": True,
+        "warnings": [],
+        "statistics_cutoff": "2026-08-14T02:17:22Z",
+        "curve": {
+            "model_version": "rosh-v2",
+            "points": [],
+            "derived_features": {
+                "current_edge": 3.0,
+                "next_5m_edge": 2.0,
+                "next_10m_edge": 1.0,
+                "peak_edge": 5.0,
+                "peak_minute": 35,
+                "cross_over_minute": 54,
+                "curve_slope_5m": 0.4,
+                "adjustment_delta": 1.2,
+                "fell_back_to_pure_score": False,
+                "decomposition": {
+                    "current": {
+                        "hero_base_adjustment": 1.0,
+                        "hero_tempo_adjustment": -0.5,
+                        "synergy_adjustment": 0.3,
+                        "player_adjustment": 0.2,
+                        "hero_adjustment": -0.1,
+                    },
+                    "peak": {
+                        "hero_base_adjustment": -2.0,
+                        "hero_tempo_adjustment": -1.5,
+                        "synergy_adjustment": 0.5,
+                        "player_adjustment": 0.1,
+                        "hero_adjustment": 0.2,
+                    },
+                },
+            },
+        },
+        "slots": [],
+    }
 
 
 def _resolved_identity(radiant_team_id: str) -> dict:
@@ -140,7 +184,7 @@ def test_view_maps_sides_when_team_a_is_radiant() -> None:
     assert view["live"]["trend_windows"]["5m"]["team_a_nw_delta"] == 1500
     assert view["live"]["buildings_lost"]["team_a"] == {"towers_lost": 1, "barracks_lost": 0}
     assert view["live"]["buildings_lost"]["team_b"] == {"towers_lost": 2, "barracks_lost": 1}
-    assert view["market"]["team_a_edge_pp"] == 3.7
+    assert view["market"]["team_a_vig_adjustment_pp"] == 3.7
     assert view["market"]["odds_drift"]["direction"] == "SHORTENED"
     assert view["market"]["odds_drift"]["price_a_first"] == 2.1
     assert view["market"]["odds_drift"]["price_a_now"] == 1.8
@@ -217,7 +261,7 @@ def test_view_handles_minimal_snapshot_without_crashing() -> None:
     )
     assert view["live"] is None
     assert view["draft"] is None
-    assert view["market"]["team_a_edge_pp"] is None
+    assert view["market"]["team_a_vig_adjustment_pp"] is None
 
 
 def test_delayed_live_data_is_excluded_from_ai_input_by_default() -> None:
@@ -244,3 +288,24 @@ def test_near_real_time_live_data_is_kept() -> None:
     assert "delayed_live_excluded" not in view["live"]
     assert view["live"]["team_a_nw_lead"] == 5144
     assert view["live"]["live_data_lag_minutes"] == 1.0
+
+
+def test_delayed_live_exclusion_also_drops_draft_live_agreement() -> None:
+    view = build_ai_view(_snapshot(_resolved_identity("team-a"), live=_live(), draft=_draft()))
+
+    assert view["live"]["delayed_live_excluded"] is True
+    assert "draft_live_agreement" not in view
+
+
+def test_decomposition_maps_to_team_a_when_team_a_is_dire() -> None:
+    view = build_ai_view(
+        _snapshot(_resolved_identity("team-b"), live=_live(), draft=_draft()),
+        max_live_data_lag_seconds=10_000,
+    )
+
+    current = view["draft"]["derived_features"]["decomposition"]["current"]
+    assert current["hero_base"] == -1.0
+    assert current["synergy"] == -0.3
+    assert current["hero_tempo"] == 0.5
+    assert view["draft"]["derived_features"]["adjustment_delta"] == -1.2
+    assert view["draft"]["derived_features"]["current_edge"] == -3.0

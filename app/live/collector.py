@@ -207,10 +207,15 @@ class DltvSocketCollector:
             previous_real_elapsed_seconds: float | None = None
             anchor = self._live_anchors.get(canonical_map.id, _ANCHOR_UNRESOLVED)
             if anchor is _ANCHOR_UNRESOLVED:
-                anchor = await picks_ended_anchor(
+                resolved = await picks_ended_anchor(
                     session, valve_match_id=valve_match_id, decision_at=received_at
                 )
-                self._live_anchors[canonical_map.id] = anchor
+                # Do NOT cache None: the bootstrap may not carry
+                # is_picks_ended_time yet (picks still running); keep retrying
+                # until it appears instead of pinning the fallback forever.
+                if resolved is not None:
+                    self._live_anchors[canonical_map.id] = resolved
+                anchor = resolved
             if isinstance(anchor, datetime):
                 real_elapsed_seconds = (received_at - anchor).total_seconds()
                 previous_real_elapsed_seconds = self._last_real_elapsed.get(canonical_map.id)

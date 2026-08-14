@@ -18,8 +18,9 @@ Do not assume team A is Radiant or team B is Dire.
 The snapshot is the deterministic ai-view: side-relative values are already mapped
 to Team A / Team B by upstream code when side identity is RESOLVED; trust the mapping.
 Glossary:
-- team_a_edge_pp: how much the market misprices Team A in percentage points
-  (positive = market undervalues Team A, a candidate signal; treat as context, not a decision).
+- team_a_vig_adjustment_pp: how much removing the bookmaker margin shifted Team A's
+  implied probability. It is a mechanical vig adjustment, NOT a mispricing signal;
+  never treat it as evidence that the market undervalues a team.
 - odds_drift: how Team A's implied probability moved since the first observation and
   over the last 5 minutes (SHORTENED = the market increasingly favors A).
   The market is real-time; large drift may already price in events the live block cannot show.

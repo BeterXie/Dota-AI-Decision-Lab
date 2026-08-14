@@ -271,25 +271,52 @@ def parse_live_enrichment(payload: dict[str, Any]) -> dict[str, Any]:
             enrichment["full_stats"] = players
     database = payload.get("db")
     if isinstance(database, dict):
-        bans: dict[str, list[int]] = {}
-        for side, key in (("radiant", "first_team"), ("dire", "second_team")):
-            team = database.get(key)
-            if not isinstance(team, dict):
-                continue
-            raw_bans = team.get("bans")
-            ban_ids: list[int] = []
-            for ban in raw_bans if isinstance(raw_bans, list) else []:
-                if not isinstance(ban, dict):
-                    continue
-                hero_id = _optional_int(ban.get("hero_id"))
-                if hero_id is None and isinstance(ban.get("hero"), dict):
-                    hero_id = _optional_int(ban["hero"].get("steam_id"))
-                if hero_id is not None and hero_id > 0:
-                    ban_ids.append(hero_id)
-            bans[side] = ban_ids
-        if bans:
-            enrichment["bans"] = bans
+        first_team = database.get("first_team")
+        second_team = database.get("second_team")
+        first_bans = _ban_ids(first_team)
+        second_bans = _ban_ids(second_team)
+        # db.first_team / second_team are provider ordering, NOT Radiant/Dire
+        # (see the reversed fixture).  Only the explicit is_radiant booleans
+        # map bans to sides; otherwise keep them provider-keyed and unresolved.
+        first_radiant = isinstance(first_team, dict) and isinstance(
+            first_team.get("is_radiant"), bool
+        )
+        second_radiant = isinstance(second_team, dict) and isinstance(
+            second_team.get("is_radiant"), bool
+        )
+        if (
+            first_radiant
+            and second_radiant
+            and first_team["is_radiant"] != second_team["is_radiant"]
+        ):
+            bans = {
+                "radiant": first_bans if first_team["is_radiant"] else second_bans,
+                "dire": second_bans if first_team["is_radiant"] else first_bans,
+            }
+        else:
+            bans = {
+                "first_team": first_bans,
+                "second_team": second_bans,
+                "sides_resolved": False,
+            }
+        enrichment["bans"] = bans
     return enrichment
+
+
+def _ban_ids(team: object) -> list[int]:
+    if not isinstance(team, dict):
+        return []
+    raw_bans = team.get("bans")
+    ban_ids: list[int] = []
+    for ban in raw_bans if isinstance(raw_bans, list) else []:
+        if not isinstance(ban, dict):
+            continue
+        hero_id = _optional_int(ban.get("hero_id"))
+        if hero_id is None and isinstance(ban.get("hero"), dict):
+            hero_id = _optional_int(ban["hero"].get("steam_id"))
+        if hero_id is not None and hero_id > 0:
+            ban_ids.append(hero_id)
+    return ban_ids
 
 
 def _parse_canvas(value: object) -> dict[str, list[str]] | None:

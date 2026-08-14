@@ -62,7 +62,10 @@ def test_live_enrichment_parses_full_stats_and_bans() -> None:
 
     enrichment = parse_live_enrichment(payload)
 
-    assert enrichment["bans"] == {"radiant": [83, 121], "dire": [25]}
+    # The fixture's first_team is DIRE (is_radiant False) and second_team is
+    # RADIANT (is_radiant True): bans must follow the explicit side evidence,
+    # never provider ordering.
+    assert enrichment["bans"] == {"radiant": [25], "dire": [83, 121]}
     player = enrichment["full_stats"][0]
     assert player["account_id"] == 1001
     assert player["kda"] == {"kills": 4, "deaths": 2, "assists": 9}
@@ -90,7 +93,29 @@ def test_live_enrichment_ignores_malformed_entries() -> None:
         }
     )
 
-    assert enrichment["bans"] == {"radiant": [], "dire": []}
+    assert enrichment["bans"] == {
+        "first_team": [],
+        "second_team": [],
+        "sides_resolved": False,
+    }
     assert len(enrichment["full_stats"]) == 1
     assert enrichment["full_stats"][0]["account_id"] == 1002
     assert enrichment["full_stats"][0]["kda"] is None
+
+
+def test_bans_without_side_evidence_stay_provider_keyed() -> None:
+    enrichment = parse_live_enrichment(
+        {
+            "db": {
+                "first_team": {"bans": [{"hero_id": 83}]},
+                "second_team": {"bans": [{"hero_id": 25}]},
+            }
+        }
+    )
+
+    # No is_radiant booleans: bans must NOT be bound to radiant/dire.
+    assert enrichment["bans"] == {
+        "first_team": [83],
+        "second_team": [25],
+        "sides_resolved": False,
+    }

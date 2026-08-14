@@ -20,7 +20,10 @@ export const LiveStateCard: React.FC<LiveStateCardProps> = ({ match }) => {
     : `${Math.floor(gameTime / 60)}:${String(gameTime % 60).padStart(2, "0")}`;
   const effectiveAge = freshness.effectiveAgeSeconds;
   const messageAge = live?.message_age_seconds;
-  const isStale = freshness.complete === false || (effectiveAge != null && effectiveAge > 45);
+  // Keep in sync with the backend live_state_max_age_seconds (currently 120s:
+  // DLTV state is event-driven every ~40-60s, so 45s falsely flags staleness).
+  const liveMaxAgeSeconds = 120;
+  const isStale = freshness.complete === false || (effectiveAge != null && effectiveAge > liveMaxAgeSeconds);
   const syncStatus = isStale ? "LIVE_STALE" : match.sync?.status || "UNKNOWN";
   const syncIsSafe = syncStatus === "SAFE";
   const dataLagSeconds = match.latest_snapshot?.quality?.live_anchors?.data_lag_seconds ?? null;
