@@ -40,7 +40,7 @@ jobs:
       - run: uv run alembic upgrade head
       - run: uv run alembic check
       - run: uv run ruff format --check app migrations tests tools
-      - run: uv run ruff check --fix --diff app/web/player_hero_recent.py
+      - run: uv run ruff check app migrations tests tools
       - run: uv run pytest
 
   frontend:
