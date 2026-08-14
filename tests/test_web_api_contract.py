@@ -805,3 +805,118 @@ async def test_map_detail_exposes_checkpoint_decisions_beyond_the_latest_snapsho
         first.decision_at.isoformat()[:16]
     )
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_deciding_map_prefers_live_final_winner_market_over_delisted_r3() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    now = datetime.now(UTC)
+    async with factory.begin() as session:
+        team_a = CanonicalTeam(name="VG")
+        team_b = CanonicalTeam(name="GamerLegion")
+        session.add_all((team_a, team_b))
+        await session.flush()
+        series = CanonicalSeries(team_a_id=team_a.id, team_b_id=team_b.id, best_of=3)
+        session.add(series)
+        await session.flush()
+        deciding_map = CanonicalMap(series_id=series.id, map_number=3)
+        other_map = CanonicalMap(series_id=series.id, map_number=2)
+        session.add_all((deciding_map, other_map))
+        await session.flush()
+
+        def add_odds(*, odds_id, team_id, price, stage, status, received_at, canonical_map):
+            session.add(
+                OddsObservationRecord(
+                    provider_match_id=1,
+                    odds_id=odds_id,
+                    canonical_series_id=series.id,
+                    canonical_map_id=canonical_map.id,
+                    market_type="Winner",
+                    match_stage=stage,
+                    selection_team_id=team_id,
+                    price=price,
+                    implied_probability=0.5,
+                    normalized_status=status,
+                    metadata_version="v1",
+                    received_at=received_at,
+                    raw_event_id=uuid4(),
+                )
+            )
+
+        # Delisted deciding-map market: closed and stale.
+        add_odds(
+            odds_id=100,
+            team_id=team_a.id,
+            price="1.50",
+            stage="r3",
+            status="SUSPENDED",
+            received_at=now - timedelta(minutes=10),
+            canonical_map=deciding_map,
+        )
+        add_odds(
+            odds_id=101,
+            team_id=team_b.id,
+            price="2.56",
+            stage="r3",
+            status="SUSPENDED",
+            received_at=now - timedelta(minutes=10),
+            canonical_map=deciding_map,
+        )
+        # Live series winner market, which IS the map winner for the deciding map.
+        add_odds(
+            odds_id=200,
+            team_id=team_a.id,
+            price="1.80",
+            stage="final",
+            status="OPEN_CONFIRMED",
+            received_at=now - timedelta(seconds=2),
+            canonical_map=deciding_map,
+        )
+        add_odds(
+            odds_id=201,
+            team_id=team_b.id,
+            price="1.94",
+            stage="final",
+            status="OPEN_CONFIRMED",
+            received_at=now - timedelta(seconds=2),
+            canonical_map=deciding_map,
+        )
+        # Non-deciding map keeps a healthy per-map market.
+        add_odds(
+            odds_id=300,
+            team_id=team_a.id,
+            price="1.35",
+            stage="r2",
+            status="OPEN_CONFIRMED",
+            received_at=now - timedelta(seconds=2),
+            canonical_map=other_map,
+        )
+        add_odds(
+            odds_id=301,
+            team_id=team_b.id,
+            price="3.10",
+            stage="r2",
+            status="OPEN_CONFIRMED",
+            received_at=now - timedelta(seconds=2),
+            canonical_map=other_map,
+        )
+
+    app = create_app(factory, HealthRegistry())
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        deciding = (await client.get(f"/api/maps/{deciding_map.id}")).json()
+        other = (await client.get(f"/api/maps/{other_map.id}")).json()
+
+    assert [item["odds_id"] for item in deciding["market"]] == [200, 201]
+    assert {item["match_stage"] for item in deciding["market"]} == {"final"}
+    assert deciding["market_quality"]["eligible"] is True
+    view = deciding["current_market_view"]
+    assert view["team_a"]["price"] == "1.80000"
+    assert view["team_b"]["fair_probability"] is not None
+    assert view["overround"] is not None
+    # The non-deciding map never falls back to the series winner market.
+    assert [item["odds_id"] for item in other["market"]] == [300, 301]
+    assert {item["match_stage"] for item in other["market"]} == {"r2"}
+    await engine.dispose()

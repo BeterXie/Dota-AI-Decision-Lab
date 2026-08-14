@@ -440,7 +440,12 @@ async def _map_summary_payloads(
         team_b = team_by_id.get(series.team_b_id) if series is not None else None
         provider_match_id = provider_match_by_series.get(canonical_map.series_id)
         raybet_match = raybet_by_id.get(provider_match_id)
-        stages = set(_map_market_stages(canonical_map.map_number))
+        stages = set(
+            _map_market_stages(
+                canonical_map.map_number,
+                best_of=series.best_of if series is not None else None,
+            )
+        )
         current_market = [
             item
             for item in market_rows
@@ -469,7 +474,7 @@ async def _map_summary_payloads(
         )
         snapshot_market = snapshot.canonical_payload.get("market", {}) if snapshot else {}
         snapshot_quality = snapshot.canonical_payload.get("quality", {}) if snapshot else {}
-        current_market_view = _current_market_view(
+        current_market_view, selected_legs = _current_market_payload(
             current_market,
             series=series,
             canonical_map_id=canonical_map.id,
@@ -477,6 +482,7 @@ async def _map_summary_payloads(
             live_market_max_age_seconds=live_market_max_age_seconds,
             market_max_pair_skew_seconds=market_max_pair_skew_seconds,
         )
+        display_market = list(selected_legs) if selected_legs is not None else current_market
         payloads.append(
             {
                 "entity_type": "MAP",
@@ -502,7 +508,7 @@ async def _map_summary_payloads(
                 "team_a": {"id": team_a.id, "name": team_a.name} if team_a else None,
                 "team_b": {"id": team_b.id, "name": team_b.name} if team_b else None,
                 "market": [
-                    _market_payload(item, observed_at=observed_at) for item in current_market
+                    _market_payload(item, observed_at=observed_at) for item in display_market
                 ],
                 "market_quality": (
                     current_market_view.get("quality") if current_market_view is not None else None
@@ -570,7 +576,7 @@ def _current_market_evaluation(
     evaluated: list[
         tuple[float, tuple[OddsObservationRecord, OddsObservationRecord], MarketPairQuality]
     ] = []
-    for by_team in grouped.values():
+    for (_provider_match_id, _market_type, match_stage), by_team in grouped.items():
         if set(by_team) != team_ids:
             continue
         legs = (
@@ -580,7 +586,10 @@ def _current_market_evaluation(
         quality = evaluate_market_pair(
             tuple(_market_pair_leg(record) for record in legs),
             expected_series_id=series.id,
-            expected_map_id=canonical_map_id,
+            # The deciding-map fallback uses the series-scoped "final" market
+            # whose observations carry no map identity; map checks are skipped
+            # for that stage by design.
+            expected_map_id=None if match_stage == "final" else canonical_map_id,
             expected_team_ids=team_ids,
             decision_at=observed_at,
             max_age_seconds=live_market_max_age_seconds,
@@ -590,11 +599,15 @@ def _current_market_evaluation(
         evaluated.append((freshness, legs, quality))
     if not evaluated:
         return None
-    _, legs, quality = max(evaluated, key=lambda item: item[0])
+    # Prefer an eligible pair (open, fresh) over a stale/suspended candidate;
+    # this is what lets the live "final" market of a deciding map replace the
+    # delisted per-map r{n} market.
+    eligible = [candidate for candidate in evaluated if candidate[2].eligible]
+    _, legs, quality = max(eligible or evaluated, key=lambda item: item[0])
     return legs, quality
 
 
-def _current_market_view(
+def _current_market_payload(
     rows: Sequence[OddsObservationRecord],
     *,
     series: CanonicalSeries | None,
@@ -602,12 +615,14 @@ def _current_market_view(
     observed_at: datetime,
     live_market_max_age_seconds: float,
     market_max_pair_skew_seconds: float,
-) -> dict | None:
-    """Derived current-market view: raw observations plus vig-removed fair
-    probabilities, evaluated live at request time.
+) -> tuple[dict | None, tuple[OddsObservationRecord, OddsObservationRecord] | None]:
+    """Derived current-market view plus the selected pair legs.
 
-    Raw Observation (market list) != Derived Current Market (this block) !=
-    Frozen Snapshot Market (snapshot_market_quality / latest_snapshot.market).
+    The view carries raw observations with vig-removed fair probabilities
+    evaluated live at request time; the legs are the canonical pair the UI
+    should display.  Raw Observation (market list) != Derived Current Market
+    (this block) != Frozen Snapshot Market (snapshot_market_quality /
+    latest_snapshot.market).
     """
     evaluated = _current_market_evaluation(
         rows,
@@ -618,19 +633,22 @@ def _current_market_view(
         market_max_pair_skew_seconds=market_max_pair_skew_seconds,
     )
     if evaluated is None:
-        return None
+        return None, None
     legs, quality = evaluated
     fair_a = fair_b = None
     overround = None
     if quality.eligible:
         fair_a, fair_b, implied_total = remove_vig(float(legs[0].price), float(legs[1].price))
         overround = implied_total - 1.0
-    return {
-        "team_a": _current_market_leg(legs[0], fair_a),
-        "team_b": _current_market_leg(legs[1], fair_b),
-        "overround": overround,
-        "quality": quality.model_dump(mode="json"),
-    }
+    return (
+        {
+            "team_a": _current_market_leg(legs[0], fair_a),
+            "team_b": _current_market_leg(legs[1], fair_b),
+            "overround": overround,
+            "quality": quality.model_dump(mode="json"),
+        },
+        legs,
+    )
 
 
 def _current_market_leg(record: OddsObservationRecord, fair_probability: float | None) -> dict:
@@ -736,7 +754,12 @@ async def _map_payload(
             OddsObservationRecord.canonical_series_id == canonical_map.series_id,
         ),
         OddsObservationRecord.market_type == "Winner",
-        OddsObservationRecord.match_stage.in_(_map_market_stages(canonical_map.map_number)),
+        OddsObservationRecord.match_stage.in_(
+            _map_market_stages(
+                canonical_map.map_number,
+                best_of=series.best_of if series is not None else None,
+            )
+        ),
     )
     latest_market_times = (
         select(
@@ -953,7 +976,7 @@ async def _map_payload(
         observed_at=observed_at,
         live_state_max_age_seconds=live_state_max_age_seconds,
     )
-    current_market_view = _current_market_view(
+    current_market_view, selected_legs = _current_market_payload(
         current_market,
         series=series,
         canonical_map_id=canonical_map.id,
@@ -961,6 +984,7 @@ async def _map_payload(
         live_market_max_age_seconds=live_market_max_age_seconds,
         market_max_pair_skew_seconds=market_max_pair_skew_seconds,
     )
+    display_market = list(selected_legs) if selected_legs is not None else current_market
     payload = {
         "entity_type": "MAP",
         "identity_status": "RESOLVED",
@@ -978,7 +1002,7 @@ async def _map_payload(
         "provider_observed_at": raybet_match.observed_at if raybet_match else None,
         "team_a": {"id": team_a.id, "name": team_a.name} if team_a else None,
         "team_b": {"id": team_b.id, "name": team_b.name} if team_b else None,
-        "market": [_market_payload(item, observed_at=observed_at) for item in current_market],
+        "market": [_market_payload(item, observed_at=observed_at) for item in display_market],
         "market_quality": (
             current_market_view.get("quality") if current_market_view is not None else None
         ),
@@ -1238,7 +1262,7 @@ async def _pending_series_payload(
     ]
     observed_at = datetime.now(UTC)
     scheduled_at = series.scheduled_at or raybet_match.scheduled_at
-    current_market_view = _current_market_view(
+    current_market_view, selected_legs = _current_market_payload(
         current_market,
         series=series,
         canonical_map_id=None,
@@ -1246,6 +1270,7 @@ async def _pending_series_payload(
         live_market_max_age_seconds=live_market_max_age_seconds,
         market_max_pair_skew_seconds=market_max_pair_skew_seconds,
     )
+    display_market = list(selected_legs) if selected_legs is not None else current_market
     return {
         "entity_type": "SERIES",
         "identity_status": "PENDING_MAP_IDENTITY",
@@ -1282,7 +1307,7 @@ async def _pending_series_payload(
                 "market_type": item.market_type,
                 "match_stage": item.match_stage,
             }
-            for item in current_market
+            for item in display_market
         ],
         "market_quality": (
             current_market_view.get("quality") if current_market_view is not None else None
@@ -1345,16 +1370,23 @@ async def _latest_raybet_match(session: AsyncSession, series_id: UUID | None) ->
     )
 
 
-def _map_market_stages(map_number: int | None) -> tuple[str, ...]:
+def _map_market_stages(map_number: int | None, *, best_of: int | None = None) -> tuple[str, ...]:
     if map_number is None:
         return ()
-    return (
+    stages = (
         f"r{map_number}",
         f"Map r{map_number}",
         f"map r{map_number}",
         f"Map {map_number}",
         f"map {map_number}",
     )
+    if best_of is not None and map_number == best_of:
+        # RayBet withdraws the per-map winner market of the DECIDING map (the
+        # r{n} odds stop updating and are delisted, status 4) and keeps only
+        # the series winner ("final") market live; for the deciding map that
+        # market IS the map winner, so it must be a candidate stage.
+        stages += ("final",)
+    return stages
 
 
 def _series_market_rows(rows):

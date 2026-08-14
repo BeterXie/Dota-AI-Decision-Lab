@@ -87,7 +87,12 @@ class Settings(BaseSettings):
     live_sync_nw_signal_threshold: int = 500
     live_sync_ambiguity_margin_seconds: float = 0.5
     live_sync_min_accepted_pair_ratio: float = 0.6
-    live_market_max_age_seconds: float = 30.0
+    # RayBet socket batches arrive ~20-50s apart even for an active match
+    # (odds publish on change; the deciding map's series market updates on a
+    # ~40-50s cadence), so a 30s window makes live markets intermittently
+    # STALE_LEG. 90s covers the cadence plus one missed batch while still
+    # rejecting genuinely dead feeds.
+    live_market_max_age_seconds: float = 90.0
     market_max_pair_skew_seconds: float = 5.0
     # DLTV fast-state updates every ~40-60s (event driven, not per second), so
     # a 45s freshness window would falsely age out live fields between updates.

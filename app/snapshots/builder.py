@@ -220,6 +220,9 @@ class BaseSnapshotBuilder:
             if canonical_map_id is not None
             else None
         )
+        best_of = await session.scalar(
+            select(CanonicalSeries.best_of).where(CanonicalSeries.id == canonical_series_id)
+        )
         criteria = [
             or_(
                 (
@@ -233,7 +236,11 @@ class BaseSnapshotBuilder:
             OddsObservationRecord.market_type == "Winner",
         ]
         if canonical_map_id is not None:
-            criteria.append(OddsObservationRecord.match_stage.in_(_map_market_stages(map_number)))
+            criteria.append(
+                OddsObservationRecord.match_stage.in_(
+                    _map_market_stages(map_number, best_of=best_of)
+                )
+            )
         latest_times = (
             select(
                 OddsObservationRecord.odds_id,
@@ -263,15 +270,17 @@ class BaseSnapshotBuilder:
         for record in latest_by_odds_id.values():
             key = (record.provider_match_id, record.market_type, record.match_stage)
             grouped.setdefault(key, []).append(record)
-        candidates = list(grouped.values())
-        if not candidates:
+        if not grouped:
             return None, None, False, (), ()
         evaluated = []
-        for items in candidates:
+        for (_provider_match_id, _market_type, match_stage), items in grouped.items():
             quality = evaluate_market_pair(
                 tuple(_market_pair_leg(item) for item in items),
                 expected_series_id=canonical_series_id,
-                expected_map_id=canonical_map_id,
+                # The deciding-map fallback uses the series-scoped "final"
+                # market whose observations carry no map identity; map checks
+                # are skipped for that stage by design.
+                expected_map_id=None if match_stage == "final" else canonical_map_id,
                 expected_team_ids=frozenset(expected_team_ids),
                 decision_at=decision_at,
                 max_age_seconds=self._settings.live_market_max_age_seconds,
@@ -608,16 +617,24 @@ def _sync_payload(record: LiveSyncEstimateRecord | None) -> dict[str, Any] | Non
     }
 
 
-def _map_market_stages(map_number: int | None) -> tuple[str, ...]:
+def _map_market_stages(map_number: int | None, *, best_of: int | None = None) -> tuple[str, ...]:
     if map_number is None:
         return ()
-    return (
+    stages = (
         f"r{map_number}",
         f"Map r{map_number}",
         f"map r{map_number}",
         f"Map {map_number}",
         f"map {map_number}",
     )
+    if best_of is not None and map_number == best_of:
+        # The deciding map's per-map winner market is withdrawn by RayBet
+        # (r{n} goes stale, status 4) while the series winner ("final")
+        # market stays live; for the deciding map that market IS the map
+        # winner, so it joins the candidate stages and the freshest eligible
+        # pair wins.
+        stages += ("final",)
+    return stages
 
 
 class SnapshotBuilder(BaseSnapshotBuilder):
