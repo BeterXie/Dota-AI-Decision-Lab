@@ -1002,11 +1002,6 @@ async def _map_payload(
         if team_a_history is not None and team_b_history is not None
         else ()
     )
-    team_strength_ready_count = sum(
-        item.get("rating") is not None
-        for item in (team_a_history, team_b_history)
-        if series is not None
-    )
     for team_history in team_histories:
         if team_history["knowledge_cutoff"] is not None:
             player_feature_cutoffs.append(team_history["knowledge_cutoff"])
