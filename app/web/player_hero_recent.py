@@ -4,8 +4,8 @@ import fastapi
 import sqlalchemy
 import sqlalchemy.ext.asyncio
 
-import app.history.service
-import app.models
+from app import models
+from app.history import service as history_service
 
 
 HERO_RECENT_WINDOW = 10
@@ -18,14 +18,14 @@ def register_player_hero_recent_routes(
     @app.get("/api/maps/{canonical_map_id}/draft-hero-recent")
     async def draft_hero_recent(canonical_map_id: UUID) -> dict:
         async with session_factory() as session:
-            canonical_map = await session.get(app.models.CanonicalMap, canonical_map_id)
+            canonical_map = await session.get(models.CanonicalMap, canonical_map_id)
             if canonical_map is None:
                 raise fastapi.HTTPException(status_code=404, detail="map not found")
 
             draft = await session.scalar(
-                sqlalchemy.select(app.models.DraftSnapshotRecord)
-                .where(app.models.DraftSnapshotRecord.canonical_map_id == canonical_map_id)
-                .order_by(app.models.DraftSnapshotRecord.observed_at.desc())
+                sqlalchemy.select(models.DraftSnapshotRecord)
+                .where(models.DraftSnapshotRecord.canonical_map_id == canonical_map_id)
+                .order_by(models.DraftSnapshotRecord.observed_at.desc())
                 .limit(1)
             )
             if draft is None:
@@ -39,15 +39,13 @@ def register_player_hero_recent_routes(
             slots = list(
                 (
                     await session.scalars(
-                        sqlalchemy.select(app.models.DraftSlotRecord)
-                        .where(app.models.DraftSlotRecord.draft_snapshot_id == draft.id)
-                        .order_by(
-                            app.models.DraftSlotRecord.side, app.models.DraftSlotRecord.position
-                        )
+                        sqlalchemy.select(models.DraftSlotRecord)
+                        .where(models.DraftSlotRecord.draft_snapshot_id == draft.id)
+                        .order_by(models.DraftSlotRecord.side, models.DraftSlotRecord.position)
                     )
                 ).all()
             )
-            historical = app.history.service.HistoricalIntelligenceService()
+            historical = history_service.HistoricalIntelligenceService()
             payload_slots: list[dict] = []
             for slot in slots:
                 recent = None
