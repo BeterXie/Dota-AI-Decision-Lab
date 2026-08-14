@@ -114,6 +114,7 @@ class BacktestService:
 
             decision = AiDecision.model_validate(record.normalized_response)
             odds_a, odds_b, price_mapping = _initial_prices(snapshot.canonical_payload)
+            market_probability_a = _market_fair_probability_a(odds_a, odds_b)
             selected_odds = odds_a if decision.action == "BUY_A" else odds_b
             unit_return = _unit_return(decision.action, selected_odds, actual_winner)
             closing = closing_by_snapshot.get(snapshot.id)
@@ -136,11 +137,14 @@ class BacktestService:
                 "market_odds_a": odds_a,
                 "market_odds_b": odds_b,
                 "market_price_mapping": price_mapping,
+                "market_fair_probability_a": market_probability_a,
                 "actual_winner": actual_winner,
                 "result_correct": _result_correct(decision.action, actual_winner),
                 "unit_return": unit_return,
                 "brier_score": brier_score(decision.fair_probability_a, team_a_won),
                 "log_loss": log_loss(decision.fair_probability_a, team_a_won),
+                "market_brier_score": brier_score(market_probability_a, team_a_won),
+                "market_log_loss": log_loss(market_probability_a, team_a_won),
                 "closing_odds_a": closing_a,
                 "closing_odds_b": closing_b,
                 "clv": clv,
@@ -180,6 +184,22 @@ def summarize_backtest_rows(
         briers = _numbers(row.get("brier_score") for row in experiment_rows)
         losses = _numbers(row.get("log_loss") for row in experiment_rows)
         clvs = _numbers(row.get("clv") for row in bet_rows)
+        comparable = [
+            row
+            for row in experiment_rows
+            if _number(row.get("brier_score")) is not None
+            and _number(row.get("log_loss")) is not None
+            and _number(row.get("market_brier_score")) is not None
+            and _number(row.get("market_log_loss")) is not None
+        ]
+        comparable_ai_briers = _numbers(row.get("brier_score") for row in comparable)
+        comparable_ai_losses = _numbers(row.get("log_loss") for row in comparable)
+        market_briers = _numbers(row.get("market_brier_score") for row in comparable)
+        market_losses = _numbers(row.get("market_log_loss") for row in comparable)
+        ai_brier_comparable = _average(comparable_ai_briers)
+        ai_loss_comparable = _average(comparable_ai_losses)
+        market_brier = _average(market_briers)
+        market_loss = _average(market_losses)
         calibration = _calibration(experiment_rows, calibration_bins)
         summaries.append(
             {
@@ -201,6 +221,19 @@ def summarize_backtest_rows(
                 "decision_level_roi": _ratio(sum(returns), len(bet_rows)),
                 "average_brier_score": _average(briers),
                 "average_log_loss": _average(losses),
+                "market_comparison": {
+                    "sample_count": len(comparable),
+                    "ai_average_brier_score": ai_brier_comparable,
+                    "market_average_brier_score": market_brier,
+                    "brier_improvement_vs_market": _difference(
+                        market_brier, ai_brier_comparable
+                    ),
+                    "ai_average_log_loss": ai_loss_comparable,
+                    "market_average_log_loss": market_loss,
+                    "log_loss_improvement_vs_market": _difference(
+                        market_loss, ai_loss_comparable
+                    ),
+                },
                 "average_clv": _average(clvs),
                 "clv_sample_count": len(clvs),
                 "calibration": calibration,
@@ -217,6 +250,7 @@ def _report(
         "assumptions": {
             "stake_policy": "1 unit per BUY decision",
             "return_price": "decimal odds frozen in the immutable decision snapshot",
+            "market_baseline": "vig-removed two-way probability derived from the same frozen snapshot odds",
             "repeated_snapshots": "each BUY decision is a separate paper bet",
             "costs_and_limits": "fees, slippage, rejection, liquidity and stake limits are ignored",
             "settlement": "only non-conflicted maps with a resolved winner are included",
@@ -282,6 +316,15 @@ def _initial_prices(payload: dict[str, Any]) -> tuple[float | None, float | None
     if len(legacy_prices) >= 2:
         return legacy_prices[0], legacy_prices[1], "LEGACY_OBSERVATION_ORDER"
     return odds_a, odds_b, "INCOMPLETE"
+
+
+def _market_fair_probability_a(odds_a: float | None, odds_b: float | None) -> float | None:
+    if odds_a is None or odds_b is None or odds_a <= 0 or odds_b <= 0:
+        return None
+    implied_a = 1.0 / odds_a
+    implied_b = 1.0 / odds_b
+    total = implied_a + implied_b
+    return implied_a / total if total > 0 else None
 
 
 def _same_market(payload: dict[str, Any], closing: DecisionFutureOdds) -> bool:
@@ -374,6 +417,12 @@ def _ratio(numerator: float, denominator: int) -> float | None:
 
 def _average(values: list[float]) -> float | None:
     return round(sum(values) / len(values), 6) if values else None
+
+
+def _difference(left: float | None, right: float | None) -> float | None:
+    if left is None or right is None:
+        return None
+    return round(left - right, 6)
 
 
 def _numbers(values: Any) -> list[float]:
