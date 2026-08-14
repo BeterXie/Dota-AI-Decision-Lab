@@ -26,11 +26,16 @@ function getMatchDecisionBadge(match: MapSummary): { text: string; kind: "buy-a"
   );
   if (buys.length > 0) {
     const best = buys[0];
-    const prob = best.decision?.fair_probability_a ? Math.round(best.decision.fair_probability_a * 100) : null;
-    const label = best.decision?.action === "BUY_A" ? "BUY A" : "BUY B";
+    const action = best.decision?.action;
+    const fairProbabilityA = best.decision?.fair_probability_a;
+    const selectedProbability = typeof fairProbabilityA === "number"
+      ? action === "BUY_B" ? 1 - fairProbabilityA : fairProbabilityA
+      : null;
+    const prob = selectedProbability === null ? null : Math.round(selectedProbability * 100);
+    const label = action === "BUY_A" ? "BUY A" : "BUY B";
     return {
-      text: prob ? `${label} ${prob}%` : label,
-      kind: best.decision?.action === "BUY_A" ? "buy-a" : "buy-b"
+      text: prob === null ? label : `${label} ${prob}%`,
+      kind: action === "BUY_A" ? "buy-a" : "buy-b"
     };
   }
   const anyDecision = match.decisions.find((d) => d.decision?.action);
