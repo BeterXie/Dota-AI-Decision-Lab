@@ -1,6 +1,6 @@
 from functools import lru_cache
 
-from pydantic import Field, SecretStr
+from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 DEFAULT_RAYBET_INFO_BASE_URLS = (
@@ -8,10 +8,15 @@ DEFAULT_RAYBET_INFO_BASE_URLS = (
     "https://iminfo.esportsworldlink.com/v2",
     "https://cfinfo.365raylines.com/v2",
 )
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
 class Settings(BaseSettings):
-    model_config = SettingsConfigDict(env_file=".env", extra="ignore")
+    model_config = SettingsConfigDict(
+        env_file=".env",
+        extra="ignore",
+        validate_assignment=True,
+    )
 
     database_url: str = "postgresql+asyncpg://postgres:postgres@localhost:5432/dota_ai_decision_lab"
 
@@ -120,11 +125,20 @@ class Settings(BaseSettings):
     metrics_enabled: bool = True
     otel_exporter_otlp_endpoint: str | None = None
     host: str = "127.0.0.1"
-    # Set when binding a non-loopback host; the runtime refuses to start on a
-    # non-loopback address without it. CORS is not an auth boundary.
+    # Reserved for a future authenticated remote-access mode. It does not
+    # unlock non-loopback binding while the dashboard has no auth layer.
     api_token: SecretStr | None = None
     port: int = Field(default=8000, ge=1, le=65_535)
     log_level: str = "INFO"
+
+    @field_validator("host")
+    @classmethod
+    def require_loopback_host(cls, value: str) -> str:
+        if value not in _LOOPBACK_HOSTS:
+            raise ValueError(
+                "HOST must be loopback until HTTP and WebSocket authentication are implemented"
+            )
+        return value
 
     @property
     def checkpoint_minutes(self) -> tuple[int, ...]:
