@@ -3,7 +3,7 @@ from collections.abc import Awaitable, Callable
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.domain.jobs import DurableJob, JobType
+from app.domain.jobs import DurableJob, JobType, LeaseOwnershipLost
 from app.jobs.repository import JobRepository
 
 JobHandler = Callable[[DurableJob], Awaitable[None]]
@@ -59,6 +59,7 @@ class JobRunner:
         if handler is None:
             await self._mark_failed(job, f"no handler registered for {job.job_type.value}")
             return
+        lease_lost = False
         try:
             renewal_stop = asyncio.Event()
             renewal = asyncio.create_task(self._renew_lease(job, renewal_stop))
@@ -66,12 +67,21 @@ class JobRunner:
                 await handler(job)
             finally:
                 renewal_stop.set()
-                await renewal
+                try:
+                    await renewal
+                except LeaseOwnershipLost:
+                    lease_lost = True
         except asyncio.CancelledError:
-            await self._mark_failed(job, "worker shutdown during job execution")
+            if not lease_lost:
+                await self._mark_failed(job, "worker shutdown during job execution")
             raise
         except Exception as exc:
-            await self._mark_failed(job, f"{type(exc).__name__}: {exc}")
+            if not lease_lost:
+                await self._mark_failed(job, f"{type(exc).__name__}: {exc}")
+            return
+        if lease_lost:
+            # The job was reclaimed by reconciliation and belongs to another
+            # worker now; this worker must not mark it succeeded or failed.
             return
         async with self._session_factory() as session, session.begin():
             await self._repository.succeed(
@@ -103,4 +113,4 @@ class JobRunner:
                         worker_id=self._worker_id,
                     )
                 if not renewed:
-                    raise RuntimeError("durable job lease ownership was lost") from None
+                    raise LeaseOwnershipLost("durable job lease ownership was lost") from None

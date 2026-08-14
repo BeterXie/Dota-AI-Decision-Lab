@@ -7,7 +7,8 @@ const runtime = {
   overall: "ACTION_REQUIRED",
   workers: {},
   dependencies: {},
-  observed_at: "2026-08-12T12:00:00Z"
+  observed_at: "2026-08-12T12:00:00Z",
+  live_state_max_age_seconds: 120
 };
 
 const jobs = { by_status: {}, by_type: [], oldest_pending_at: null, recent_failures: [] };
@@ -31,25 +32,8 @@ function response(payload: unknown) {
   return new Response(JSON.stringify(payload), { status: 200, headers: { "Content-Type": "application/json" } });
 }
 
-test("renders operational empty state and persists locale", async () => {
-  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
-    const url = String(input);
-    return response(url.endsWith("/api/matches") ? [] : url.endsWith("/api/jobs/summary") ? jobs : runtime);
-  }));
-
-  const first = renderApp();
-  expect((await screen.findAllByText("No discovered matches")).length).toBeGreaterThan(0);
-  expect(screen.getByText("Dota AI Decision Lab")).toBeInTheDocument();
-  fireEvent.click(screen.getByRole("button", { name: "中文" }));
-  expect(window.localStorage.getItem("dota-ai-decision-lab-locale")).toBe("zh-CN");
-  first.unmount();
-
-  renderApp();
-  expect(await screen.findByRole("button", { name: "中文" })).toHaveAttribute("aria-pressed", "true");
-});
-
-test("renders player-first match intelligence and explicit R.O.S.H. side advantage", async () => {
-  const match = {
+function liveMatchFixture() {
+  return {
     entity_type: "MAP",
     identity_status: "RESOLVED",
     phase: "LIVE",
@@ -71,6 +55,7 @@ test("renders player-first match intelligence and explicit R.O.S.H. side advanta
       { odds_id: 20, selection_team_id: "team-b", price: "2.18", fair_probability: 0.44, raw_status: 1, normalized_status: "UNKNOWN", metadata_version: "v1.4.2", market_type: "match_winner", match_stage: "Map 2", received_at: "2026-08-12T12:18:40Z", age_seconds: 2 }
     ],
     market_quality: { eligible: true, blockers: [], warnings: [], metadata_version: "v1.4.2", paired_at: "2026-08-12T12:18:40Z", pair_skew_seconds: 0 },
+    snapshot_market_quality: null,
     draft: {
       complete: true,
       blockers: [], warnings: [], observed_at: "2026-08-12T12:00:00Z", statistics_cutoff: "2026-08-01T00:00:00Z",
@@ -99,6 +84,27 @@ test("renders player-first match intelligence and explicit R.O.S.H. side advanta
     ],
     market_timeline: [], live_timeline: [], snapshot_payload: { history: {}, quality: {} }, future_odds: [], result: null, result_evidence: []
   };
+}
+
+test("renders operational empty state and persists locale", async () => {
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    return response(url.endsWith("/api/matches") ? [] : url.endsWith("/api/jobs/summary") ? jobs : runtime);
+  }));
+
+  const first = renderApp();
+  expect((await screen.findAllByText("No discovered matches")).length).toBeGreaterThan(0);
+  expect(screen.getByText("Dota AI Decision Lab")).toBeInTheDocument();
+  fireEvent.click(screen.getByRole("button", { name: "中文" }));
+  expect(window.localStorage.getItem("dota-ai-decision-lab-locale")).toBe("zh-CN");
+  first.unmount();
+
+  renderApp();
+  expect(await screen.findByRole("button", { name: "中文" })).toHaveAttribute("aria-pressed", "true");
+});
+
+test("renders player-first match intelligence and explicit R.O.S.H. side advantage", async () => {
+  const match = liveMatchFixture();
 
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
@@ -123,4 +129,38 @@ test("renders player-first match intelligence and explicit R.O.S.H. side advanta
 
   fireEvent.click(screen.getByTitle("Open Engineering Diagnostics"));
   expect(await screen.findByText("System Diagnostics & Engineering Audit")).toBeInTheDocument();
+});
+
+test("default-selects the LIVE match instead of the first list row", async () => {
+  const prematch = {
+    ...liveMatchFixture(),
+    id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    canonical_map_id: "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa",
+    phase: "PREMATCH",
+    scheduled_at: "2026-08-13T12:00:00Z",
+    team_a: { id: "team-a2", name: "Prematch Team" },
+    team_b: { id: "team-b2", name: "Prematch Foe" }
+  };
+  const live = {
+    ...liveMatchFixture(),
+    id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb",
+    canonical_map_id: "bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb"
+  };
+  const requestedDetails: string[] = [];
+
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/api/matches")) return response([prematch, live]);
+    if (url.includes("/api/maps/")) {
+      requestedDetails.push(url);
+      return response(url.includes(live.canonical_map_id) ? live : prematch);
+    }
+    if (url.endsWith("/api/jobs/summary")) return response({ ...jobs, by_status: { COMPLETED: 15 } });
+    return response(runtime);
+  }));
+
+  renderApp();
+  expect(await screen.findByText("Decision data ready")).toBeInTheDocument();
+  expect(requestedDetails.some((url) => url.includes(`/api/maps/${live.canonical_map_id}`))).toBe(true);
+  expect(requestedDetails.some((url) => url.includes(`/api/maps/${prematch.canonical_map_id}`))).toBe(false);
 });

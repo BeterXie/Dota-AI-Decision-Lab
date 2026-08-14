@@ -34,6 +34,10 @@ function DashboardApp() {
     if (selectedMapId && maps.data?.some((match) => match.id === selectedMapId)) {
       return selectedMapId;
     }
+    // Prefer the live match over the first row so the dashboard opens on the
+    // active game instead of an arbitrary pre-match entry.
+    const live = maps.data?.find((match) => match.phase === "LIVE");
+    if (live) return live.id;
     return maps.data?.[0]?.id ?? null;
   }, [selectedMapId, maps.data]);
 

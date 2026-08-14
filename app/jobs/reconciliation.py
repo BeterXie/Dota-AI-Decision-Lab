@@ -210,13 +210,6 @@ class ReconciliationService:
                 map_id_value = UUID(canonical_map_id)
             except ValueError:
                 continue
-            snapshot_exists = await session.scalar(
-                select(DecisionSnapshotRecord.id)
-                .where(DecisionSnapshotRecord.canonical_map_id == map_id_value)
-                .limit(1)
-            )
-            if snapshot_exists is not None:
-                continue
             live_at = await session.scalar(
                 select(DltvLiveObservationRecord.received_at)
                 .where(DltvLiveObservationRecord.canonical_map_id == map_id_value)
@@ -235,6 +228,18 @@ class ReconciliationService:
                         else ensure_utc(event.occurred_at)
                     )
                 except ValueError:
+                    continue
+                # Per-checkpoint reconciliation: a snapshot for one checkpoint
+                # must not hide a later checkpoint that still has no snapshot.
+                checkpoint_snapshot = await session.scalar(
+                    select(DecisionSnapshotRecord.id)
+                    .where(
+                        DecisionSnapshotRecord.canonical_map_id == map_id_value,
+                        DecisionSnapshotRecord.decision_at == decision_at_value,
+                    )
+                    .limit(1)
+                )
+                if checkpoint_snapshot is not None:
                     continue
                 market_team_count = await session.scalar(
                     select(

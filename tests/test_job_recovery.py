@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
@@ -7,10 +8,11 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db import Base
 from app.domain.events import DomainEventType
-from app.domain.jobs import JobStatus, JobType
+from app.domain.jobs import DurableJob, JobStatus, JobType, LeaseOwnershipLost
 from app.events.dispatcher import DomainEventDispatcher
 from app.jobs.reconciliation import ReconciliationService
 from app.jobs.repository import JobRepository
+from app.jobs.runner import JobRunner
 from app.models import (
     CanonicalMap,
     CanonicalSeries,
@@ -424,6 +426,201 @@ async def test_reconciliation_replays_processed_snapshot_trigger_without_snapsho
             "decision_at": now.isoformat(),
             "reconciliation_event_id": str(event_id),
         }
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_replays_later_checkpoint_when_earlier_has_snapshot() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    jobs = JobRepository()
+    now = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
+    later = now + timedelta(minutes=10)
+    canonical_map_id = uuid4()
+
+    async with factory() as session, session.begin():
+        team_a_id = uuid4()
+        team_b_id = uuid4()
+        event_10 = DomainEventRecord(
+            event_type=DomainEventType.DECISION_CHECKPOINT_DUE.value,
+            aggregate_type="canonical_map",
+            aggregate_id=str(canonical_map_id),
+            dedupe_key=f"checkpoint:{canonical_map_id}:10",
+            payload={
+                "canonical_map_id": str(canonical_map_id),
+                "decision_at": now.isoformat(),
+                "checkpoint_minute": 10,
+            },
+            occurred_at=now,
+            processed_at=now,
+        )
+        event_20 = DomainEventRecord(
+            event_type=DomainEventType.DECISION_CHECKPOINT_DUE.value,
+            aggregate_type="canonical_map",
+            aggregate_id=str(canonical_map_id),
+            dedupe_key=f"checkpoint:{canonical_map_id}:20",
+            payload={
+                "canonical_map_id": str(canonical_map_id),
+                "decision_at": later.isoformat(),
+                "checkpoint_minute": 20,
+            },
+            occurred_at=later,
+            processed_at=later,
+        )
+        session.add_all((event_10, event_20))
+        session.add(
+            DecisionSnapshotRecord(
+                id=uuid4(),
+                canonical_map_id=canonical_map_id,
+                decision_at=now,
+                created_at=now,
+                mode="LIVE_BASIC",
+                canonical_payload={},
+                snapshot_hash="fixture-snapshot-10",
+            )
+        )
+        session.add_all(
+            [
+                DltvLiveObservationRecord(
+                    canonical_map_id=canonical_map_id,
+                    valve_match_id=1,
+                    game_time_seconds=1200,
+                    radiant_kills=1,
+                    dire_kills=1,
+                    radiant_nw_lead=0,
+                    first_blood=None,
+                    source_game_time=1200,
+                    received_at=later,
+                    payload_hash="fixture-live",
+                    last_message_received_at=later,
+                    last_state_change_received_at=later,
+                    raw_event_id=uuid4(),
+                ),
+                OddsObservationRecord(
+                    provider_match_id=1,
+                    odds_id=10,
+                    canonical_map_id=canonical_map_id,
+                    market_type="Winner",
+                    match_stage="r1",
+                    selection_team_id=team_a_id,
+                    price=2.0,
+                    implied_probability=0.5,
+                    received_at=now,
+                    raw_event_id=uuid4(),
+                ),
+                OddsObservationRecord(
+                    provider_match_id=1,
+                    odds_id=11,
+                    canonical_map_id=canonical_map_id,
+                    market_type="Winner",
+                    match_stage="r1",
+                    selection_team_id=team_b_id,
+                    price=2.0,
+                    implied_probability=0.5,
+                    received_at=now,
+                    raw_event_id=uuid4(),
+                ),
+            ]
+        )
+        await session.flush()
+        event_20_id = event_20.id
+
+    reconciliation = ReconciliationService(
+        jobs,
+        lease_seconds=120,
+        ai_experiments=(),
+        future_odds_horizons=(),
+    )
+    async with factory() as session, session.begin():
+        first = await reconciliation.run(session, now=later)
+        assert first.snapshot_jobs == 1
+    async with factory() as session, session.begin():
+        second = await reconciliation.run(session, now=later)
+        assert second.snapshot_jobs == 0
+
+    async with factory() as session:
+        record = await session.scalar(
+            select(DurableJobRecord).where(
+                DurableJobRecord.job_type == JobType.BUILD_SNAPSHOT.value,
+                DurableJobRecord.dedupe_key == f"reconcile-snapshot-v2:{event_20_id}",
+            )
+        )
+        assert record is not None
+        assert record.payload["decision_at"] == later.isoformat()
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_job_runner_stops_touching_job_when_lease_is_lost() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    class LostLeaseRepository(JobRepository):
+        def __init__(self) -> None:
+            super().__init__()
+            self.fail_calls: list[str] = []
+            self.succeed_calls: list[object] = []
+
+        async def renew_lease(self, session, *, job_id, worker_id, renewed_at=None) -> bool:
+            return False
+
+        async def fail(self, session, *, job_id, worker_id, error, failed_at=None):
+            self.fail_calls.append(error)
+            await super().fail(
+                session, job_id=job_id, worker_id=worker_id, error=error, failed_at=failed_at
+            )
+
+        async def succeed(self, session, *, job_id, worker_id, completed_at=None):
+            self.succeed_calls.append(job_id)
+            await super().succeed(
+                session, job_id=job_id, worker_id=worker_id, completed_at=completed_at
+            )
+
+    repository = LostLeaseRepository()
+    now = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
+    async with factory() as session, session.begin():
+        await repository.enqueue(
+            session,
+            job_type=JobType.BUILD_SNAPSHOT,
+            dedupe_key="lease-lost-job",
+            payload={"canonical_map_id": str(uuid4())},
+            not_before=now,
+        )
+    async with factory() as session, session.begin():
+        claimed = await repository.claim(session, worker_id="worker-1", now=now)
+        job = claimed[0]
+    assert job is not None
+
+    async def _slow_handler(_job: DurableJob) -> None:
+        # Outlive the renewal interval (lease_seconds/3 -> min 1s) so the
+        # renewal task actually attempts to renew and discovers the lost lease.
+        await asyncio.sleep(1.2)
+
+    runner = JobRunner(
+        worker_id="worker-1",
+        session_factory=factory,
+        repository=repository,
+        handlers={JobType.BUILD_SNAPSHOT: _slow_handler},
+        poll_seconds=1.0,
+        lease_seconds=0.01,
+    )
+    await runner._execute(job)
+
+    assert repository.fail_calls == []
+    assert repository.succeed_calls == []
+    async with factory() as session:
+        record = await session.get(DurableJobRecord, job.id)
+        # The job stays RUNNING: the losing worker must not mutate it; the
+        # reclaiming reconciliation assigns it to the next worker.
+        assert record is not None
+        assert record.status == JobStatus.RUNNING.value
+        assert record.locked_by == "worker-1"
 
     await engine.dispose()
 

@@ -14,6 +14,7 @@ from app.models import (
     CanonicalPlayer,
     CanonicalSeries,
     CanonicalTeam,
+    DecisionSnapshotRecord,
     DltvLiveObservationRecord,
     DraftSlotRecord,
     DraftSnapshotRecord,
@@ -190,6 +191,213 @@ async def test_map_api_uses_map_winner_market_beyond_recent_observation_window()
         ("r2", "1.01000"),
         ("r2", "13.34000"),
     ]
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_map_detail_exposes_real_market_timeline_and_separated_market_quality() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    now = datetime.now(UTC)
+    async with factory.begin() as session:
+        team_a = CanonicalTeam(name="Team Falcons")
+        team_b = CanonicalTeam(name="LGD Gaming")
+        session.add_all((team_a, team_b))
+        await session.flush()
+        series = CanonicalSeries(team_a_id=team_a.id, team_b_id=team_b.id)
+        session.add(series)
+        await session.flush()
+        canonical_map = CanonicalMap(series_id=series.id, map_number=1)
+        session.add(canonical_map)
+        await session.flush()
+        session.add(
+            ProviderMatchMapping(
+                provider="raybet",
+                provider_match_id="38423248",
+                canonical_series_id=series.id,
+                resolved_by="PROVIDER_DISCOVERY",
+                confidence=1.0,
+            )
+        )
+        for odds_id, team_id, price, seconds_ago in (
+            (10, team_a.id, "1.72", 2),
+            (11, team_b.id, "2.18", 1),
+        ):
+            session.add(
+                OddsObservationRecord(
+                    provider_match_id=38423248,
+                    odds_id=odds_id,
+                    canonical_series_id=series.id,
+                    canonical_map_id=canonical_map.id,
+                    market_type="Winner",
+                    match_stage="r1",
+                    selection_team_id=team_id,
+                    price=price,
+                    implied_probability=0.5,
+                    normalized_status="OPEN_CONFIRMED",
+                    metadata_version="live-v1",
+                    received_at=now - timedelta(seconds=seconds_ago),
+                    raw_event_id=uuid4(),
+                )
+            )
+        # An older observation for team A: the market timeline must be real
+        # history, not only the latest row per selection.
+        session.add(
+            OddsObservationRecord(
+                provider_match_id=38423248,
+                odds_id=10,
+                canonical_series_id=series.id,
+                canonical_map_id=canonical_map.id,
+                market_type="Winner",
+                match_stage="r1",
+                selection_team_id=team_a.id,
+                price="1.65",
+                implied_probability=0.5,
+                normalized_status="OPEN_CONFIRMED",
+                metadata_version="live-v1",
+                received_at=now - timedelta(minutes=2),
+                raw_event_id=uuid4(),
+            )
+        )
+        snapshot_market_quality = {
+            "eligible": True,
+            "blockers": [],
+            "warnings": [],
+            "metadata_version": "frozen-v1",
+            "paired_at": (now - timedelta(minutes=1)).isoformat(),
+            "pair_skew_seconds": 0.5,
+        }
+        session.add(
+            DecisionSnapshotRecord(
+                id=uuid4(),
+                canonical_map_id=canonical_map.id,
+                decision_at=now - timedelta(minutes=1),
+                created_at=now - timedelta(minutes=1),
+                mode="LIVE_BASIC",
+                canonical_payload={
+                    "market": {"quality": snapshot_market_quality},
+                    "history": {},
+                    "quality": {},
+                },
+                snapshot_hash="fixture-market-separation",
+            )
+        )
+
+    app = create_app(factory, HealthRegistry())
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        payload = (await client.get(f"/api/maps/{canonical_map.id}")).json()
+
+    # Real timeline: chronological history for the pair's odds ids.
+    assert [(item["odds_id"], item["price"]) for item in payload["market_timeline"]] == [
+        (10, "1.65000"),
+        (10, "1.72000"),
+        (11, "2.18000"),
+    ]
+    # Current quality is evaluated from live observations, not the snapshot.
+    current = payload["market_quality"]
+    assert current is not None
+    assert current["eligible"] is True
+    assert current["metadata_version"] == "live-v1"
+    assert payload["snapshot_market_quality"] == snapshot_market_quality
+    assert payload["latest_snapshot"]["market_quality"] == snapshot_market_quality
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_match_feed_separates_current_and_snapshot_market_quality() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    now = datetime.now(UTC)
+    async with factory.begin() as session:
+        team_a = CanonicalTeam(name="Spirit")
+        team_b = CanonicalTeam(name="Xtreme Gaming")
+        session.add_all((team_a, team_b))
+        await session.flush()
+        series = CanonicalSeries(team_a_id=team_a.id, team_b_id=team_b.id)
+        session.add(series)
+        await session.flush()
+        canonical_map = CanonicalMap(series_id=series.id, map_number=1)
+        session.add(canonical_map)
+        await session.flush()
+        session.add_all(
+            (
+                ProviderMatchMapping(
+                    provider="raybet",
+                    provider_match_id="38423260",
+                    canonical_series_id=series.id,
+                    resolved_by="PROVIDER_DISCOVERY",
+                    confidence=1.0,
+                ),
+                RayBetMatch(
+                    provider_match_id=38423260,
+                    game_id=4,
+                    team_a_provider_id=1,
+                    team_a_name="Spirit",
+                    team_b_provider_id=2,
+                    team_b_name="Xtreme Gaming",
+                    scheduled_at=now - timedelta(hours=1),
+                    observed_at=now,
+                    raw_event_id=uuid4(),
+                ),
+            )
+        )
+        for odds_id, team_id, price in ((10, team_a.id, "1.80"), (11, team_b.id, "2.05")):
+            session.add(
+                OddsObservationRecord(
+                    provider_match_id=38423260,
+                    odds_id=odds_id,
+                    canonical_series_id=series.id,
+                    canonical_map_id=canonical_map.id,
+                    market_type="Winner",
+                    match_stage="r1",
+                    selection_team_id=team_id,
+                    price=price,
+                    implied_probability=0.5,
+                    normalized_status="OPEN_CONFIRMED",
+                    metadata_version="live-v1",
+                    received_at=now - timedelta(seconds=1),
+                    raw_event_id=uuid4(),
+                )
+            )
+        snapshot_market_quality = {
+            "eligible": True,
+            "blockers": [],
+            "warnings": [],
+            "metadata_version": "frozen-v1",
+            "paired_at": now.isoformat(),
+            "pair_skew_seconds": 0.0,
+        }
+        session.add(
+            DecisionSnapshotRecord(
+                id=uuid4(),
+                canonical_map_id=canonical_map.id,
+                decision_at=now,
+                created_at=now,
+                mode="LIVE_BASIC",
+                canonical_payload={
+                    "market": {"quality": snapshot_market_quality},
+                    "history": {},
+                    "quality": {},
+                },
+                snapshot_hash="fixture-summary-separation",
+            )
+        )
+
+    app = create_app(factory, HealthRegistry())
+
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/api/matches")
+
+    payload = response.json()
+    assert len(payload) == 1
+    assert payload[0]["market_quality"]["metadata_version"] == "live-v1"
+    assert payload[0]["snapshot_market_quality"]["metadata_version"] == "frozen-v1"
+    assert payload[0]["latest_snapshot"]["market_quality"]["metadata_version"] == "frozen-v1"
     await engine.dispose()
 
 

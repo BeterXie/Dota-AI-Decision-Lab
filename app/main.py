@@ -505,6 +505,8 @@ async def run() -> None:
         health,
         frontend_dist=frontend_dist,
         live_state_max_age_seconds=settings.live_state_max_age_seconds,
+        live_market_max_age_seconds=settings.live_market_max_age_seconds,
+        market_max_pair_skew_seconds=settings.market_max_pair_skew_seconds,
     )
     workers.append(
         WebServerWorker(

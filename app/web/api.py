@@ -1,4 +1,5 @@
 import asyncio
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
 from uuid import UUID
@@ -12,7 +13,9 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.domain.market import MarketPairQuality
 from app.history.service import HistoricalIntelligenceService
+from app.market.pairing import MarketPairLeg, evaluate_market_pair
 from app.models import (
     AiDecisionRecord,
     CanonicalHero,
@@ -46,8 +49,18 @@ def create_app(
     *,
     frontend_dist: Path | None = None,
     live_state_max_age_seconds: float = 45.0,
+    live_market_max_age_seconds: float = 30.0,
+    market_max_pair_skew_seconds: float = 5.0,
 ) -> FastAPI:
     app = FastAPI(title="Dota AI Decision Lab", version="0.1.0")
+
+    async def runtime_payload() -> dict:
+        snapshot = await health.snapshot()
+        return {
+            **snapshot,
+            "live_state_max_age_seconds": live_state_max_age_seconds,
+            "live_market_max_age_seconds": live_market_max_age_seconds,
+        }
     app.add_middleware(
         CORSMiddleware,
         allow_origins=["http://127.0.0.1:5173", "http://localhost:5173"],
@@ -68,7 +81,7 @@ def create_app(
 
     @app.get("/api/runtime")
     async def runtime() -> dict:
-        return await health.snapshot()
+        return await runtime_payload()
 
     @app.get("/api/matches")
     async def matches() -> list[dict]:
@@ -118,9 +131,16 @@ def create_app(
                 session,
                 map_records,
                 live_state_max_age_seconds=live_state_max_age_seconds,
+                live_market_max_age_seconds=live_market_max_age_seconds,
+                market_max_pair_skew_seconds=market_max_pair_skew_seconds,
             )
             for series in pending_series:
-                payload = await _pending_series_payload(session, series)
+                payload = await _pending_series_payload(
+                    session,
+                    series,
+                    live_market_max_age_seconds=live_market_max_age_seconds,
+                    market_max_pair_skew_seconds=market_max_pair_skew_seconds,
+                )
                 if payload is not None:
                     payloads.append(payload)
             payloads.sort(
@@ -142,6 +162,8 @@ def create_app(
                 record,
                 detailed=True,
                 live_state_max_age_seconds=live_state_max_age_seconds,
+                live_market_max_age_seconds=live_market_max_age_seconds,
+                market_max_pair_skew_seconds=market_max_pair_skew_seconds,
             )
 
     @app.get("/api/snapshots/{snapshot_id}")
@@ -235,7 +257,7 @@ def create_app(
         await websocket.accept()
         try:
             while True:
-                await websocket.send_json(jsonable_encoder(await health.snapshot()))
+                await websocket.send_json(jsonable_encoder(await runtime_payload()))
                 await asyncio.sleep(2)
         except WebSocketDisconnect:
             return
@@ -260,6 +282,8 @@ async def _map_summary_payloads(
     maps: list[CanonicalMap],
     *,
     live_state_max_age_seconds: float,
+    live_market_max_age_seconds: float,
+    market_max_pair_skew_seconds: float,
 ) -> list[dict]:
     if not maps:
         return []
@@ -470,7 +494,15 @@ async def _map_summary_payloads(
                 "market": [
                     _market_payload(item, observed_at=observed_at) for item in current_market
                 ],
-                "market_quality": (
+                "market_quality": _current_market_quality(
+                    current_market,
+                    series=series,
+                    canonical_map_id=canonical_map.id,
+                    observed_at=observed_at,
+                    live_market_max_age_seconds=live_market_max_age_seconds,
+                    market_max_pair_skew_seconds=market_max_pair_skew_seconds,
+                ),
+                "snapshot_market_quality": (
                     snapshot_market.get("quality") if isinstance(snapshot_market, dict) else None
                 ),
                 "draft": None,
@@ -482,6 +514,78 @@ async def _map_summary_payloads(
             }
         )
     return payloads
+
+
+def _market_pair_leg(record: OddsObservationRecord) -> MarketPairLeg:
+    return MarketPairLeg(
+        provider_match_id=record.provider_match_id,
+        odds_id=record.odds_id,
+        canonical_series_id=record.canonical_series_id,
+        canonical_map_id=record.canonical_map_id,
+        market_type=record.market_type,
+        match_stage=record.match_stage,
+        selection_team_id=record.selection_team_id,
+        price=record.price,
+        normalized_status=record.normalized_status,
+        metadata_version=record.metadata_version,
+        received_at=record.received_at,
+    )
+
+
+def _current_market_quality(
+    rows: Sequence[OddsObservationRecord],
+    *,
+    series: CanonicalSeries | None,
+    canonical_map_id: UUID | None,
+    observed_at: datetime,
+    live_market_max_age_seconds: float,
+    market_max_pair_skew_seconds: float,
+) -> dict | None:
+    """Evaluate the CURRENT market pair quality from the live observations.
+
+    Mirrors the snapshot builder's pairing rules: candidate legs are grouped
+    by (provider match, market type, match stage) and the freshest pair wins.
+    The frozen quality at snapshot time stays separate (snapshot_market_quality).
+    """
+    if series is None or series.team_a_id is None or series.team_b_id is None:
+        return None
+    team_ids = frozenset({series.team_a_id, series.team_b_id})
+    latest_by_odds: dict[int, OddsObservationRecord] = {}
+    for row in rows:
+        current = latest_by_odds.get(row.odds_id)
+        if current is None or row.received_at > current.received_at:
+            latest_by_odds[row.odds_id] = row
+    grouped: dict[tuple[int, str | None, str | None], dict[UUID, OddsObservationRecord]] = {}
+    for row in latest_by_odds.values():
+        if row.selection_team_id not in team_ids:
+            continue
+        grouped.setdefault((row.provider_match_id, row.market_type, row.match_stage), {})[
+            row.selection_team_id
+        ] = row
+    evaluated: list[tuple[float, MarketPairQuality]] = []
+    for by_team in grouped.values():
+        if set(by_team) != team_ids:
+            continue
+        legs = tuple(
+            _market_pair_leg(by_team[team_id]) for team_id in (series.team_a_id, series.team_b_id)
+        )
+        quality = evaluate_market_pair(
+            legs,
+            expected_series_id=series.id,
+            expected_map_id=canonical_map_id,
+            expected_team_ids=team_ids,
+            decision_at=observed_at,
+            max_age_seconds=live_market_max_age_seconds,
+            max_pair_skew_seconds=market_max_pair_skew_seconds,
+        )
+        freshness = max(
+            by_team[series.team_a_id].received_at, by_team[series.team_b_id].received_at
+        )
+        evaluated.append((freshness, quality))
+    if not evaluated:
+        return None
+    _, quality = max(evaluated, key=lambda item: item[0])
+    return quality.model_dump(mode="json")
 
 
 def _market_payload(item: OddsObservationRecord, *, observed_at: datetime) -> dict:
@@ -552,6 +656,8 @@ async def _map_payload(
     *,
     detailed: bool = False,
     live_state_max_age_seconds: float = 45.0,
+    live_market_max_age_seconds: float = 30.0,
+    market_max_pair_skew_seconds: float = 5.0,
 ) -> dict:
     series = (
         await session.get(CanonicalSeries, canonical_map.series_id)
@@ -604,6 +710,16 @@ async def _map_payload(
     current_market = sorted(
         latest_odds.values(),
         key=lambda item: (team_order.get(item.selection_team_id, 2), item.odds_id),
+    )
+    market_timeline_rows = list(
+        (
+            await session.scalars(
+                select(OddsObservationRecord)
+                .where(*market_criteria)
+                .order_by(OddsObservationRecord.received_at.desc())
+                .limit(300)
+            )
+        ).all()
     )
     draft = await session.scalar(
         select(DraftSnapshotRecord)
@@ -771,24 +887,16 @@ async def _map_payload(
         "provider_observed_at": raybet_match.observed_at if raybet_match else None,
         "team_a": {"id": team_a.id, "name": team_a.name} if team_a else None,
         "team_b": {"id": team_b.id, "name": team_b.name} if team_b else None,
-        "market": [
-            {
-                "odds_id": item.odds_id,
-                "selection_team_id": item.selection_team_id,
-                "price": item.price,
-                "fair_probability": item.fair_probability,
-                "raw_status": item.raw_status,
-                "received_at": item.received_at,
-                "normalized_status": item.normalized_status,
-                "metadata_version": item.metadata_version,
-                "provider_updated_at": item.provider_updated_at,
-                "age_seconds": elapsed_seconds(observed_at, item.received_at),
-                "market_type": item.market_type,
-                "match_stage": item.match_stage,
-            }
-            for item in current_market
-        ],
-        "market_quality": (
+        "market": [_market_payload(item, observed_at=observed_at) for item in current_market],
+        "market_quality": _current_market_quality(
+            current_market,
+            series=series,
+            canonical_map_id=canonical_map.id,
+            observed_at=observed_at,
+            live_market_max_age_seconds=live_market_max_age_seconds,
+            market_max_pair_skew_seconds=market_max_pair_skew_seconds,
+        ),
+        "snapshot_market_quality": (
             snapshot_market.get("quality") if isinstance(snapshot_market, dict) else None
         ),
         "draft": (
@@ -879,21 +987,8 @@ async def _map_payload(
         payload["future_odds"] = []
     if detailed:
         payload["market_timeline"] = [
-            {
-                "odds_id": item.odds_id,
-                "selection_team_id": item.selection_team_id,
-                "price": item.price,
-                "fair_probability": item.fair_probability,
-                "raw_status": item.raw_status,
-                "normalized_status": item.normalized_status,
-                "metadata_version": item.metadata_version,
-                "market_type": item.market_type,
-                "match_stage": item.match_stage,
-                "provider_updated_at": item.provider_updated_at,
-                "received_at": item.received_at,
-                "age_seconds": elapsed_seconds(observed_at, item.received_at),
-            }
-            for item in reversed(odds)
+            _market_payload(item, observed_at=observed_at)
+            for item in reversed(market_timeline_rows)
         ]
         payload["live_timeline"] = [
             {
@@ -981,7 +1076,13 @@ async def _draft_slot_payload(session: AsyncSession, slot: DraftSlotRecord) -> d
     }
 
 
-async def _pending_series_payload(session: AsyncSession, series: CanonicalSeries) -> dict | None:
+async def _pending_series_payload(
+    session: AsyncSession,
+    series: CanonicalSeries,
+    *,
+    live_market_max_age_seconds: float,
+    market_max_pair_skew_seconds: float,
+) -> dict | None:
     raybet_match = await _latest_raybet_match(session, series.id)
     if raybet_match is None:
         return None
@@ -1073,7 +1174,17 @@ async def _pending_series_payload(session: AsyncSession, series: CanonicalSeries
             }
             for item in current_market
         ],
-        "market_quality": None,
+        "market_quality": _current_market_quality(
+            current_market,
+            series=series,
+            canonical_map_id=None,
+            observed_at=observed_at,
+            live_market_max_age_seconds=live_market_max_age_seconds,
+            market_max_pair_skew_seconds=market_max_pair_skew_seconds,
+        ),
+        "snapshot_market_quality": (
+            snapshot_market.get("quality") if isinstance(snapshot_market, dict) else None
+        ),
         "draft": None,
         "live": None,
         "sync": None,

@@ -33,6 +33,9 @@ export interface RuntimeSnapshot {
   workers: Record<string, WorkerHealth>;
   dependencies: Record<string, DependencyHealth>;
   observed_at: string;
+  /** Backend live_state_max_age_seconds — the single source for live-stale thresholds. */
+  live_state_max_age_seconds?: number;
+  live_market_max_age_seconds?: number;
 }
 
 export interface MarketObservation {
@@ -146,7 +149,10 @@ export interface MapSummary {
   team_a: { id: string; name: string } | null;
   team_b: { id: string; name: string } | null;
   market: MarketObservation[];
+  /** CURRENT market pair quality evaluated from the live observations. */
   market_quality: MarketQuality | null;
+  /** Market quality frozen inside the latest DecisionSnapshot. */
+  snapshot_market_quality?: MarketQuality | null;
   draft: {
     complete: boolean;
     blockers: string[];

@@ -15,6 +15,14 @@ class JobStatus(StrEnum):
     CANCELLED = "CANCELLED"
 
 
+class LeaseOwnershipLost(RuntimeError):
+    """Raised when a running job's lease was reclaimed while it executed.
+
+    The job was handed to another worker by reconciliation, so the losing
+    worker must stop touching it: no fail, no succeed, no further renewal.
+    """
+
+
 class JobType(StrEnum):
     REFRESH_ODDS_REGISTRY = "REFRESH_ODDS_REGISTRY"
     BOOTSTRAP_DLTV_MATCH = "BOOTSTRAP_DLTV_MATCH"

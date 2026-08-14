@@ -75,40 +75,44 @@ class AiProvider(Protocol):
 
 
 def decision_json_schema() -> dict[str, Any]:
-    nullable_number = {"type": ["number", "null"]}
-    string_array = {"type": "array", "items": {"type": "string"}}
+    """Provider-facing structured-output schema derived from AiDecision.
+
+    AiDecision is the single source of truth for field names, enums, and
+    constraints. Pydantic emits `anyOf` unions for optional fields, which
+    OpenAI's strict structured outputs reject; those are normalized to the
+    `type: [..., "null"]` form. Every property is marked required because
+    strict providers demand it (the model-level default still applies when
+    the JSON is parsed back into AiDecision).
+    """
+    schema = AiDecision.model_json_schema()
+    properties: dict[str, Any] = schema.get("properties", {})
+    normalized = {
+        name: _strict_schema_type(prop)
+        for name, prop in properties.items()
+    }
     return {
         "type": "object",
-        "properties": {
-            "action": {
-                "type": "string",
-                "enum": ["BUY_A", "BUY_B", "NO_BUY", "INSUFFICIENT_DATA"],
-            },
-            "fair_probability_a": nullable_number,
-            "confidence": {"type": "number"},
-            "market_assessment": {
-                "type": "string",
-                "enum": ["UNDERPRICED", "FAIR", "OVERPRICED", "UNKNOWN"],
-            },
-            "minimum_acceptable_odds_a": nullable_number,
-            "primary_reasons": string_array,
-            "counter_arguments": string_array,
-            "data_quality_concerns": string_array,
-            "blockers": string_array,
-        },
-        "required": [
-            "action",
-            "fair_probability_a",
-            "confidence",
-            "market_assessment",
-            "minimum_acceptable_odds_a",
-            "primary_reasons",
-            "counter_arguments",
-            "data_quality_concerns",
-            "blockers",
-        ],
+        "properties": normalized,
+        "required": list(properties),
         "additionalProperties": False,
     }
+
+
+def _strict_schema_type(node: dict[str, Any]) -> dict[str, Any]:
+    branches = node.get("anyOf")
+    if isinstance(branches, list) and len(branches) == 2:
+        first, second = branches
+        if (
+            isinstance(first, dict)
+            and isinstance(first.get("type"), str)
+            and isinstance(second, dict)
+            and second.get("type") == "null"
+            and set(second) <= {"type"}
+        ):
+            merged = {key: value for key, value in first.items() if key != "title"}
+            merged["type"] = [first["type"], "null"]
+            return merged
+    return {key: value for key, value in node.items() if key != "title"}
 
 
 def parse_decision(text: str, raw_response: dict[str, Any]) -> AiDecision:

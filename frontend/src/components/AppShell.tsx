@@ -79,7 +79,7 @@ export const AppShell: React.FC<AppShellProps> = ({ runtime, jobs, matches, sele
                       </div>
                       <LineupCard match={activeMatch} />
                       <div className="secondary-analysis-row">
-                        <LiveStateCard match={activeMatch} />
+                        <LiveStateCard match={activeMatch} liveMaxAgeSeconds={runtime?.live_state_max_age_seconds} />
                         <HistoricalSummaryCard match={activeMatch} />
                       </div>
                     </div>

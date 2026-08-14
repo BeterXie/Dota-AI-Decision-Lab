@@ -6,9 +6,11 @@ import { resolveVerifiedMapSides } from "../utils/mapSides";
 
 interface LiveStateCardProps {
   match: MapSummary | MapDetail;
+  /** Stale threshold from the backend runtime snapshot (live_state_max_age_seconds). */
+  liveMaxAgeSeconds?: number;
 }
 
-export const LiveStateCard: React.FC<LiveStateCardProps> = ({ match }) => {
+export const LiveStateCard: React.FC<LiveStateCardProps> = ({ match, liveMaxAgeSeconds = 120 }) => {
   const { locale, t } = useI18n();
   const live = match.live;
   const sides = resolveVerifiedMapSides(match);
@@ -20,9 +22,6 @@ export const LiveStateCard: React.FC<LiveStateCardProps> = ({ match }) => {
     : `${Math.floor(gameTime / 60)}:${String(gameTime % 60).padStart(2, "0")}`;
   const effectiveAge = freshness.effectiveAgeSeconds;
   const messageAge = live?.message_age_seconds;
-  // Keep in sync with the backend live_state_max_age_seconds (currently 120s:
-  // DLTV state is event-driven every ~40-60s, so 45s falsely flags staleness).
-  const liveMaxAgeSeconds = 120;
   const isStale = freshness.complete === false || (effectiveAge != null && effectiveAge > liveMaxAgeSeconds);
   const syncStatus = isStale ? "LIVE_STALE" : match.sync?.status || "UNKNOWN";
   const syncIsSafe = syncStatus === "SAFE";
