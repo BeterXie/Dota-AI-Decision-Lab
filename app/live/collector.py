@@ -1,5 +1,6 @@
 from datetime import UTC, datetime
 from typing import Any
+from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -7,11 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.domain.events import DomainEvent, DomainEventType
 from app.domain.live import DltvFastState
 from app.events.outbox import EventRepository
+from app.live.anchor import picks_ended_anchor
 from app.models import CanonicalMap, DltvLiveObservationRecord, ProviderRawEvent
 from app.providers.dltv.parser import PARSER_VERSION, parse_fast_patch, parse_series_frame
 from app.providers.dltv.reducer import reduce_fast_state
 from app.repositories.raw import RawEventRepository
 from app.snapshots.triggers import record_crossed_checkpoints
+
+_ANCHOR_UNRESOLVED = object()
 
 
 class DltvSocketCollector:
@@ -27,6 +31,8 @@ class DltvSocketCollector:
         self._raw_events = raw_events
         self._events = events
         self._checkpoint_minutes = checkpoint_minutes
+        self._live_anchors: dict[UUID, datetime | None | object] = {}
+        self._last_real_elapsed: dict[UUID, float] = {}
 
     async def collect(
         self,
@@ -169,6 +175,8 @@ class DltvSocketCollector:
                     dire_kills=state.dire_kills,
                     radiant_nw_lead=state.radiant_nw_lead,
                     first_blood=state.first_blood,
+                    canvas=state.canvas,
+                    charts=state.charts,
                     source_game_time=state.source_game_time,
                     received_at=received_at,
                     payload_hash=state.state_hash,
@@ -195,6 +203,18 @@ class DltvSocketCollector:
                         occurred_at=received_at,
                     ),
                 )
+            real_elapsed_seconds: float | None = None
+            previous_real_elapsed_seconds: float | None = None
+            anchor = self._live_anchors.get(canonical_map.id, _ANCHOR_UNRESOLVED)
+            if anchor is _ANCHOR_UNRESOLVED:
+                anchor = await picks_ended_anchor(
+                    session, valve_match_id=valve_match_id, decision_at=received_at
+                )
+                self._live_anchors[canonical_map.id] = anchor
+            if isinstance(anchor, datetime):
+                real_elapsed_seconds = (received_at - anchor).total_seconds()
+                previous_real_elapsed_seconds = self._last_real_elapsed.get(canonical_map.id)
+                self._last_real_elapsed[canonical_map.id] = real_elapsed_seconds
             await record_crossed_checkpoints(
                 session,
                 self._events,
@@ -203,6 +223,8 @@ class DltvSocketCollector:
                 current_game_time=state.game_time_seconds,
                 checkpoint_minutes=self._checkpoint_minutes,
                 observed_at=received_at,
+                real_elapsed_seconds=real_elapsed_seconds,
+                previous_real_elapsed_seconds=previous_real_elapsed_seconds,
             )
 
 
@@ -227,6 +249,8 @@ def _state_from_record(record: DltvLiveObservationRecord) -> DltvFastState:
         dire_kills=record.dire_kills,
         radiant_nw_lead=record.radiant_nw_lead,
         first_blood=record.first_blood,
+        canvas=record.canvas,
+        charts=record.charts,
         source_game_time=record.source_game_time,
         last_message_received_at=record.last_message_received_at,
         last_state_change_received_at=record.last_state_change_received_at,

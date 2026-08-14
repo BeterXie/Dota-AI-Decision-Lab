@@ -85,8 +85,11 @@ def test_single_live_event_cannot_match_multiple_market_events() -> None:
     )
 
     assert estimate.sample_size == 1
-    assert estimate.accepted_pair_ratio == 0.5
-    assert estimate.status == "CALIBRATING"
+    # The second market event has no forward DLTV candidate (cadence mismatch,
+    # not a pairing failure): ratio is measured over pairs that had a candidate.
+    assert estimate.accepted_pair_ratio == 1.0
+    # One clean pair with a sub-second lag satisfies the safe threshold.
+    assert estimate.status == "SAFE"
 
 
 def test_high_jitter_never_becomes_safe() -> None:

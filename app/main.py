@@ -180,7 +180,11 @@ async def run() -> None:
         repository=snapshots,
     )
     ai_providers = _ai_providers(settings)
-    ai = AiCoordinator(ai_providers, timeout_seconds=settings.ai_timeout_seconds)
+    ai = AiCoordinator(
+        ai_providers,
+        timeout_seconds=settings.ai_timeout_seconds,
+        max_live_data_lag_seconds=settings.ai_max_live_data_lag_seconds,
+    )
     email_notifications = _email_notifications(
         settings,
         session_factory=session_factory,
@@ -541,7 +545,7 @@ async def run() -> None:
 def _job_workers(*, settings, session_factory, jobs, handlers, health) -> list[ServiceWorker]:
     groups = {
         "RayBetRegistryRefreshWorker": (JobType.REFRESH_ODDS_REGISTRY,),
-        "DltvBootstrapWorker": (JobType.BOOTSTRAP_DLTV_MATCH,),
+        "DltvBootstrapWorker": (JobType.BOOTSTRAP_DLTV_MATCH, JobType.REPAIR_LEGACY_DRAFT),
         "HistoricalSyncWorker": (JobType.SYNC_HISTORICAL,),
         "DraftCoordinator": (JobType.BUILD_DRAFT_CURVE,),
         "SnapshotCoordinator": (JobType.BUILD_SNAPSHOT,),
@@ -633,15 +637,16 @@ def _ai_providers(settings: Settings):
             )
         )
     if settings.deepseek_api_key:
-        providers.append(
-            DeepSeekDecisionProvider(
-                api_key=settings.deepseek_api_key,
-                model=settings.deepseek_model,
-                base_url=settings.deepseek_base_url,
-                reasoning_effort=settings.deepseek_reasoning_effort,
-                timeout_seconds=settings.ai_timeout_seconds,
+        if settings.deepseek_flash_decisions_enabled:
+            providers.append(
+                DeepSeekDecisionProvider(
+                    api_key=settings.deepseek_api_key,
+                    model=settings.deepseek_model,
+                    base_url=settings.deepseek_base_url,
+                    reasoning_effort=settings.deepseek_reasoning_effort,
+                    timeout_seconds=settings.ai_timeout_seconds,
+                )
             )
-        )
         providers.append(
             DeepSeekDecisionProvider(
                 api_key=settings.deepseek_api_key,

@@ -136,11 +136,18 @@ def _calibrate(
         p90 = _nearest_rank(absolute_lags, 0.90)
         jitter = pstdev(lags) if sample_size > 1 else 0.0
 
-    total_pairs = len(pairs)
+    # RayBet signals arrive far more often than DLTV state changes, so most
+    # RayBet signals have no forward DLTV candidate inside the pairing window.
+    # That is a cadence mismatch, not a pairing-quality failure: ratio metrics
+    # are computed over pairs that HAD a candidate.
+    candidate_pairs = [pair for pair in pairs if pair.reject_reason != "NO_FORWARD_CANDIDATE"]
+    total_pairs = len(candidate_pairs)
     accepted_ratio = sample_size / total_pairs if total_pairs else 0.0
-    ambiguous_count = sum(pair.reject_reason == "AMBIGUOUS_NEAREST" for pair in pairs)
+    ambiguous_count = sum(pair.reject_reason == "AMBIGUOUS_NEAREST" for pair in candidate_pairs)
     ambiguous_ratio = ambiguous_count / total_pairs if total_pairs else 0.0
-    outlier_count = sum(pair.reject_reason not in {None, "AMBIGUOUS_NEAREST"} for pair in pairs)
+    outlier_count = sum(
+        pair.reject_reason not in {None, "AMBIGUOUS_NEAREST"} for pair in candidate_pairs
+    )
     outlier_ratio = outlier_count / total_pairs if total_pairs else 0.0
 
     if total_pairs == 0:
@@ -264,6 +271,10 @@ class TemporalAligner:
             )
         )
         for pair in pairs:
+            if pair.reject_reason == "NO_FORWARD_CANDIDATE":
+                # Cadence-mismatch noise: no DLTV signal id, no lag, nothing to
+                # audit.  Persisting thousands of these per live match is bloat.
+                continue
             session.add(
                 LiveCalibrationPairRecord(
                     canonical_map_id=canonical_map_id,

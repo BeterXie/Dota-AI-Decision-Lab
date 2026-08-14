@@ -71,6 +71,26 @@ class SuccessfulProvider:
         return None
 
 
+class BuyProvider(SuccessfulProvider):
+    async def decide(self, _snapshot_input: str) -> AiProviderResponse:
+        self.calls += 1
+        return AiProviderResponse(
+            raw_response={"model": self.model},
+            decision=AiDecision(
+                action="BUY_A",
+                fair_probability_a=0.55,
+                confidence=0.8,
+                market_assessment="UNDERPRICED",
+                minimum_acceptable_odds_a=1.9,
+                primary_reasons=["Verified draft edge"],
+                counter_arguments=["Late crossover"],
+                data_quality_concerns=[],
+                blockers=[],
+            ),
+            model_version=self.model,
+        )
+
+
 async def _snapshot_and_decisions(session):
     decision_at = datetime(2026, 8, 13, 1, 2, 3, tzinfo=UTC)
     snapshot = await SnapshotRepository().persist(
@@ -521,7 +541,7 @@ async def test_ai_handler_atomically_enqueues_one_email_batch() -> None:
         subject_prefix="[Decision]",
     )
     snapshots = SnapshotRepository()
-    provider = SuccessfulProvider()
+    provider = BuyProvider()
     async with factory() as session, session.begin():
         snapshot = await snapshots.persist(
             session,
@@ -581,6 +601,81 @@ async def test_ai_handler_atomically_enqueues_one_email_batch() -> None:
         )
     assert sender.messages == []
     assert provider.calls == 1
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_ai_handler_skips_email_when_no_buy_decision() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    email_service = DecisionEmailNotificationService(
+        session_factory=factory,
+        jobs=JobRepository(),
+        sender=RecordingSender(),
+        sender_from="Decision Lab <alerts@example.com>",
+        recipients=("owner@example.com",),
+        subject_prefix="[Decision]",
+    )
+    snapshots = SnapshotRepository()
+    provider = SuccessfulProvider()
+    async with factory() as session, session.begin():
+        snapshot = await snapshots.persist(
+            session,
+            canonical_map_id=None,
+            decision_at=datetime(2026, 8, 13, tzinfo=UTC),
+            mode="LIVE_BASIC",
+            identity={
+                "team_a": {"id": "team-a", "name": "A"},
+                "team_b": {"id": "team-b", "name": "B"},
+            },
+            market={},
+            draft=None,
+            history={},
+            live={"game_time_seconds": 600},
+            quality={"eligible": True, "blockers": [], "warnings": []},
+        )
+    handler = ApplicationJobHandlers(
+        SimpleNamespace(
+            settings=SimpleNamespace(ai_min_game_time_seconds=600),
+            session_factory=factory,
+            snapshots=snapshots,
+            ai=AiCoordinator([provider], timeout_seconds=1),
+            health=HealthRegistry(),
+            email_notifications=email_service,
+        )
+    )
+    job = DurableJob(
+        id=uuid4(),
+        job_type=JobType.RUN_AI_PROVIDER,
+        dedupe_key="ai-fixture-no-buy",
+        payload={"snapshot_id": str(snapshot.snapshot_id)},
+        status=JobStatus.RUNNING,
+        priority=100,
+        not_before=datetime(2026, 8, 13, tzinfo=UTC),
+        attempt_count=1,
+        max_attempts=8,
+        locked_by="fixture",
+        locked_at=datetime(2026, 8, 13, tzinfo=UTC),
+    )
+
+    await handler.run_ai(job)
+
+    async with factory() as session:
+        assert await session.scalar(select(func.count()).select_from(AiDecisionRecord)) == 1
+        assert (
+            await session.scalar(select(func.count()).select_from(DecisionEmailNotificationRecord))
+            == 0
+        )
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(DurableJobRecord)
+                .where(DurableJobRecord.job_type == JobType.SEND_DECISION_EMAIL.value)
+            )
+            == 0
+        )
     await engine.dispose()
 
 

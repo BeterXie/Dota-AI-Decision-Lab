@@ -50,7 +50,13 @@ class Settings(BaseSettings):
     kimi_api_key: str | None = None
     kimi_base_url: str = "https://api.moonshot.cn/v1"
     kimi_model: str = "kimi-k2.5"
-    ai_timeout_seconds: float = 120.0
+    ai_timeout_seconds: float = 240.0
+    # Delayed DLTV broadcast data beyond this lag is excluded from the AI input
+    # (the decision then uses only freeze-time consistent information).
+    ai_max_live_data_lag_seconds: float = 120.0
+    # The deepseek flash model still powers email translation; this flag only
+    # controls whether it also produces decision votes (off by default).
+    deepseek_flash_decisions_enabled: bool = False
 
     email_notifications_enabled: bool = False
     email_recipients: str = ""
@@ -60,8 +66,11 @@ class Settings(BaseSettings):
     resend_base_url: str = "https://api.resend.com"
     resend_timeout_seconds: float = Field(default=30.0, gt=0)
 
-    live_sync_safe_seconds: float = 3.0
-    live_sync_caution_seconds: float = 8.0
+    # Calibrated against production RayBet/DLTV signal cadence: DLTV state
+    # changes arrive event-driven every ~40-60s with a median pairing lag of
+    # ~10-23s, so the original 3s/8s thresholds could never be satisfied.
+    live_sync_safe_seconds: float = 30.0
+    live_sync_caution_seconds: float = 60.0
     live_sync_calibration_window_seconds: float = 30.0
     live_sync_min_samples: int = 3
     live_sync_nw_signal_threshold: int = 500
@@ -69,7 +78,9 @@ class Settings(BaseSettings):
     live_sync_min_accepted_pair_ratio: float = 0.6
     live_market_max_age_seconds: float = 30.0
     market_max_pair_skew_seconds: float = 5.0
-    live_state_max_age_seconds: float = 45.0
+    # DLTV fast-state updates every ~40-60s (event driven, not per second), so
+    # a 45s freshness window would falsely age out live fields between updates.
+    live_state_max_age_seconds: float = 120.0
     historical_max_age_seconds: float = 7_200.0
     delayed_detail_max_delay_seconds: float = 30.0
 

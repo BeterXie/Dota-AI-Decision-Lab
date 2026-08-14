@@ -31,9 +31,10 @@ async def test_configured_openai_deepseek_and_kimi_are_registered() -> None:
     providers = _ai_providers(settings)
 
     assert {provider.name for provider in providers} == {"openai", "deepseek", "kimi"}
+    # deepseek flash decisions are disabled by default (flash still powers
+    # email translation); only the pro model votes.
     assert [provider.model for provider in providers] == [
         "gpt-5.6-terra",
-        "deepseek-v4-flash",
         "deepseek-v4-pro",
         "kimi-k2.5",
     ]
@@ -41,7 +42,7 @@ async def test_configured_openai_deepseek_and_kimi_are_registered() -> None:
         provider.reasoning_effort
         for provider in providers
         if provider.name in {"openai", "deepseek"}
-    ] == ["xhigh", "xhigh", "xhigh"]
+    ] == ["xhigh", "xhigh"]
     for provider in providers:
         await provider.close()
 

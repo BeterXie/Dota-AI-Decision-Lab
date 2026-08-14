@@ -31,6 +31,7 @@ from app.models import (
     HistoricalMapRecord,
     MapResultRecord,
     ProviderMatchMapping,
+    ProviderRawEvent,
     ProviderTeamMapping,
 )
 from app.notifications.email import DecisionEmailNotificationService
@@ -77,6 +78,7 @@ class ApplicationJobHandlers:
         return {
             JobType.REFRESH_ODDS_REGISTRY: self.refresh_odds_registry,
             JobType.BOOTSTRAP_DLTV_MATCH: self.bootstrap_dltv_match,
+            JobType.REPAIR_LEGACY_DRAFT: self.repair_legacy_draft,
             JobType.SYNC_HISTORICAL: self.sync_historical,
             JobType.BUILD_DRAFT_CURVE: self.build_draft_curve,
             JobType.BUILD_SNAPSHOT: self.build_snapshot,
@@ -115,6 +117,48 @@ class ApplicationJobHandlers:
                 session,
                 valve_match_id=valve_match_id,
                 dltv_series_id=series_id,
+            )
+            await self._d.health.dependency(
+                "DLTV_DRAFT",
+                "READY" if result.draft.complete else "DEGRADED",
+                message=None if result.draft.complete else "DLTV draft is not complete yet",
+                canonical_map_id=str(result.resolved.canonical_map_id),
+                valve_match_id=valve_match_id,
+                roster_ready_count=sum(slot.account_id is not None for slot in result.draft.slots),
+                hero_ready_count=sum(slot.hero_id is not None for slot in result.draft.slots),
+                blockers=list(result.draft.blockers),
+            )
+
+    async def repair_legacy_draft(self, job: DurableJob) -> None:
+        """Re-resolve a legacy draft from its archived raw bootstrap payload.
+
+        Legacy drafts stored the DLTV provider ``team_slot`` ordering as Dota
+        positions.  Replaying the original archived payload through the current
+        position resolver appends a corrected draft snapshot without touching the
+        legacy rows and without depending on DLTV still serving the match.
+        """
+        valve_match_id = _required_int(job.payload, "valve_match_id")
+        async with self._d.session_factory() as session, session.begin():
+            event = await session.scalar(
+                select(ProviderRawEvent)
+                .where(
+                    ProviderRawEvent.provider == "dltv",
+                    ProviderRawEvent.event_type == "DLTV_BOOTSTRAP",
+                    ProviderRawEvent.provider_key == str(valve_match_id),
+                )
+                .order_by(ProviderRawEvent.received_at.desc())
+                .limit(1)
+            )
+            if event is None:
+                raise RuntimeError(
+                    f"no archived DLTV bootstrap payload to repair legacy draft "
+                    f"for valve match {valve_match_id}"
+                )
+            result = await self._d.dltv_bootstrap.rebuild_draft_from_stored_payload(
+                session,
+                valve_match_id=valve_match_id,
+                payload=event.payload,
+                raw_event_id=event.id,
             )
             await self._d.health.dependency(
                 "DLTV_DRAFT",
@@ -388,13 +432,21 @@ class ApplicationJobHandlers:
                         for record in dependency_records
                     },
                 )
-            if self._d.email_notifications is not None and any(
-                record.id not in existing_ids for record in records
-            ):
+            # Emails are only sent when a NEW buy decision (BUY_A/BUY_B) was
+            # produced; NO_BUY / INSUFFICIENT_DATA checkpoints stay silent.
+            buy_decisions = [
+                record
+                for record in records
+                if record.id not in existing_ids
+                and record.parse_status == "SUCCESS"
+                and isinstance(record.normalized_response, dict)
+                and record.normalized_response.get("action") in {"BUY_A", "BUY_B"}
+            ]
+            if self._d.email_notifications is not None and buy_decisions:
                 await self._d.email_notifications.prepare(
                     session,
                     snapshot=snapshot,
-                    decisions=records,
+                    decisions=buy_decisions,
                 )
 
     async def send_decision_email(self, job: DurableJob) -> None:

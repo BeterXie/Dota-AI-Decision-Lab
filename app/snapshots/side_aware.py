@@ -5,6 +5,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.live.anchor import dltv_broadcast_start, picks_ended_anchor
 from app.live.freshness import load_live_basic_field_freshness
 from app.models import (
     CanonicalMap,
@@ -13,7 +14,10 @@ from app.models import (
     DltvLiveObservationRecord,
     LiveSyncEstimateRecord,
     MapResultRecord,
+    OddsObservationRecord,
+    ProviderRawEvent,
 )
+from app.providers.dltv.parser import parse_live_enrichment
 from app.providers.dltv.side_identity import (
     MapSideAssignment,
     project_map_sides,
@@ -172,6 +176,11 @@ class SideAwareSnapshotBuilder(SnapshotBuilder):
                 )
                 live_age = live_field_freshness.effective_age_seconds
                 live["field_freshness"] = live_field_freshness.payload()
+                live["enrichment"] = await _live_enrichment(
+                    session,
+                    valve_match_id=canonical_map.valve_match_id,
+                    decision_at=decision_at,
+                )
             sync = await session.scalar(
                 select(LiveSyncEstimateRecord)
                 .where(
@@ -207,6 +216,21 @@ class SideAwareSnapshotBuilder(SnapshotBuilder):
         )
         if not gate.eligible:
             return SnapshotBuildOutcome(gate=gate, snapshot=None)
+        live_anchors = {"real_start_anchor": None, "data_lag_seconds": None}
+        if canonical_map_id is not None and canonical_map.valve_match_id is not None:
+            live_anchors = await _live_anchors_payload(
+                session,
+                canonical_map_id=canonical_map_id,
+                valve_match_id=canonical_map.valve_match_id,
+                decision_at=decision_at,
+            )
+        if market is not None and canonical_map_id is not None:
+            market["odds_trajectory"] = await _odds_trajectory(
+                session,
+                canonical_map_id=canonical_map_id,
+                expected_team_ids=(series.team_a_id, series.team_b_id),
+                decision_at=decision_at,
+            )
         quality = {
             "eligible": gate.eligible,
             "blockers": list(gate.blockers),
@@ -218,6 +242,7 @@ class SideAwareSnapshotBuilder(SnapshotBuilder):
                 live_field_freshness.payload() if live_field_freshness is not None else None
             ),
             "live_sync": _sync_payload(sync),
+            "live_anchors": live_anchors,
         }
         snapshot = await self._repository.persist(
             session,
@@ -460,3 +485,122 @@ def _remove_unassigned_roster_history(history: dict[str, Any]) -> None:
         ]
         coverage["earliest_knowledge_cutoff"] = min(cutoffs) if cutoffs else None
         coverage["latest_knowledge_cutoff"] = max(cutoffs) if cutoffs else None
+
+
+async def _live_enrichment(
+    session: AsyncSession,
+    *,
+    valve_match_id: int,
+    decision_at: datetime,
+) -> dict[str, Any]:
+    """Load bootstrap-only enrichment (per-player stats, bans).
+
+    The DLTV HTTP bootstrap payload (already archived Raw First) carries richer
+    data than the fast socket.  It is parsed deterministically from the newest
+    archived payload at or before decision_at; its own observed_at is carried so
+    downstream consumers can discount stale enrichment.  This block does NOT gate
+    LIVE_BASIC: the safety-critical freshness gate stays on the socket fields.
+    """
+    event = await session.scalar(
+        select(ProviderRawEvent)
+        .where(
+            ProviderRawEvent.provider == "dltv",
+            ProviderRawEvent.event_type == "DLTV_BOOTSTRAP",
+            ProviderRawEvent.provider_key == str(valve_match_id),
+            ProviderRawEvent.received_at <= decision_at,
+        )
+        .order_by(ProviderRawEvent.received_at.desc())
+        .limit(1)
+    )
+    if event is None:
+        return {"available": False, "observed_at": None}
+    parsed = parse_live_enrichment(event.payload)
+    parsed["available"] = True
+    parsed["observed_at"] = event.received_at.isoformat()
+    return parsed
+
+
+async def _live_anchors_payload(
+    session: AsyncSession,
+    *,
+    canonical_map_id: UUID,
+    valve_match_id: int,
+    decision_at: datetime,
+) -> dict[str, Any]:
+    """Real game-start anchor (picks ended) and broadcast clock-offset estimate.
+
+    Production evidence shows DLTV delivery is real-time and the payload's
+    is_picks_ended_time marks the real game start; the broadcast game clock may
+    or may not include the ban/pick phase, so the clock alone cannot schedule
+    real game-time decisions.  The offset between the derived broadcast clock
+    start and the picks-ended time is positive only when the broadcast itself
+    starts late (a true delay); negative offsets (BP-inclusive clocks) collapse
+    to unknown.  All values are deterministic from archived data at or before
+    decision_at.
+    """
+    picks_ended = await picks_ended_anchor(
+        session, valve_match_id=valve_match_id, decision_at=decision_at
+    )
+    broadcast_start = await dltv_broadcast_start(
+        session, canonical_map_id=canonical_map_id, decision_at=decision_at
+    )
+    lag = None
+    if picks_ended is not None and broadcast_start is not None:
+        lag = (broadcast_start - picks_ended).total_seconds()
+        if lag < 0 or lag > 7_200:
+            lag = None
+    return {
+        "real_start_anchor": picks_ended.isoformat() if picks_ended is not None else None,
+        "data_lag_seconds": lag,
+    }
+
+
+async def _odds_trajectory(
+    session: AsyncSession,
+    *,
+    canonical_map_id: UUID,
+    expected_team_ids: tuple[UUID, UUID],
+    decision_at: datetime,
+) -> list[dict[str, Any]] | None:
+    """Compact odds price-change path for the market block.
+
+    Samples distinct Winner price changes (consecutive identical prices are
+    collapsed) up to 12 points, always including the earliest observation, so
+    the AI view can derive odds drift deterministically.  All timestamps are at
+    or before decision_at.
+    """
+    rows = list(
+        (
+            await session.scalars(
+                select(OddsObservationRecord)
+                .where(
+                    OddsObservationRecord.canonical_map_id == canonical_map_id,
+                    OddsObservationRecord.market_type == "Winner",
+                    OddsObservationRecord.received_at <= decision_at,
+                )
+                .order_by(OddsObservationRecord.received_at)
+            )
+        ).all()
+    )
+    if not rows:
+        return None
+    team_order = {team_id: index for index, team_id in enumerate(expected_team_ids)}
+    points: list[dict[str, Any]] = []
+    last_pair: tuple[object, object] | None = None
+    for record in rows:
+        price_a = record.price if team_order.get(record.selection_team_id) == 0 else None
+        price_b = record.price if team_order.get(record.selection_team_id) == 1 else None
+        pair = (price_a, price_b)
+        if pair == last_pair and points:
+            continue
+        last_pair = pair
+        points.append(
+            {
+                "received_at": record.received_at.isoformat(),
+                "price_a": price_a,
+                "price_b": price_b,
+            }
+        )
+        if len(points) >= 12:
+            break
+    return points if len(points) >= 2 else None

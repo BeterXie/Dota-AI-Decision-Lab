@@ -12,20 +12,33 @@ from app.ai.base import (
     AiProvider,
     AiProviderFailure,
 )
+from app.ai.view import build_ai_view
 from app.canonical import canonical_bytes
 from app.domain.snapshot import DecisionSnapshot
 from app.models import AiDecisionRecord
 
 
 class AiCoordinator:
-    def __init__(self, providers: list[AiProvider], *, timeout_seconds: float) -> None:
+    def __init__(
+        self,
+        providers: list[AiProvider],
+        *,
+        timeout_seconds: float,
+        max_live_data_lag_seconds: float = 120.0,
+    ) -> None:
         self._providers = providers
         self._timeout_seconds = timeout_seconds
+        self._max_live_data_lag_seconds = max_live_data_lag_seconds
 
     async def run_all(
         self, session: AsyncSession, snapshot: DecisionSnapshot
     ) -> list[AiDecisionRecord]:
-        snapshot_input = canonical_bytes(snapshot.model_dump(mode="json")).decode("utf-8")
+        snapshot_input = canonical_bytes(
+            build_ai_view(
+                snapshot,
+                max_live_data_lag_seconds=self._max_live_data_lag_seconds,
+            )
+        ).decode("utf-8")
         existing = list(
             (
                 await session.scalars(
