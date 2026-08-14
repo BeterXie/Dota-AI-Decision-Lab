@@ -246,13 +246,17 @@ def _report(
         "assumptions": {
             "stake_policy": "1 unit per BUY decision",
             "return_price": "decimal odds frozen in the immutable decision snapshot",
-            "market_baseline": "vig-removed two-way probability derived from the same frozen snapshot odds",
+            "market_baseline": (
+                "vig-removed two-way probability derived from the same frozen "
+                "snapshot odds"
+            ),
             "repeated_snapshots": "each BUY decision is a separate paper bet",
             "costs_and_limits": "fees, slippage, rejection, liquidity and stake limits are ignored",
             "settlement": "only non-conflicted maps with a resolved winner are included",
             "input_audit": (
-                "ai_input_hash identifies exact provider input bytes; snapshot_payload is the immutable "
-                "source snapshot and can be included explicitly, but historical transformed inputs are "
+                "ai_input_hash identifies exact provider input bytes; "
+                "snapshot_payload is the immutable source snapshot and can be "
+                "included explicitly, but historical transformed inputs are "
                 "not reconstructed under newer ai-view code"
             ),
         },
