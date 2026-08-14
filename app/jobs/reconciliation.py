@@ -7,9 +7,12 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.eligibility import ai_record_is_game_time_eligible
 from app.ai.view import AI_VIEW_VERSION
+from app.domain.events import DomainEvent, DomainEventType
 from app.domain.jobs import JobType
 from app.draft.engine import MODEL_VERSION
+from app.events.outbox import EventRepository
 from app.jobs.repository import JobRepository
+from app.live.anchor import picks_ended_anchor
 from app.models import (
     AiDecisionRecord,
     CanonicalMap,
@@ -39,28 +42,38 @@ class ReconciliationResult:
     postmatch_jobs: int
     settlement_jobs: int
     evaluation_jobs: int
+    checkpoint_sweep_jobs: int = 0
 
 
 class ReconciliationService:
     def __init__(
         self,
         jobs: JobRepository,
+        events: EventRepository,
         *,
         lease_seconds: float,
         ai_experiments: tuple[tuple[str, str, str, str, str], ...],
         future_odds_horizons: tuple[int, ...],
         ai_min_game_time_seconds: int = 600,
+        checkpoint_minutes: tuple[int, ...] = (10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60),
+        live_state_max_age_seconds: float = 120.0,
+        checkpoint_sweep_grace_seconds: float = 300.0,
     ) -> None:
         self._jobs = jobs
+        self._events = events
         self._lease_seconds = lease_seconds
         self._ai_experiments = ai_experiments
         self._future_odds_horizons = future_odds_horizons
         self._ai_min_game_time_seconds = ai_min_game_time_seconds
+        self._checkpoint_minutes = checkpoint_minutes
+        self._live_state_max_age_seconds = live_state_max_age_seconds
+        self._checkpoint_sweep_grace_seconds = checkpoint_sweep_grace_seconds
 
     async def run(self, session: AsyncSession, *, now: datetime) -> ReconciliationResult:
         reclaimed = await self._jobs.reclaim_expired(
             session, lease_seconds=self._lease_seconds, now=now
         )
+        checkpoint_sweep_jobs = await self._reconcile_live_checkpoints(session, now=now)
         draft_jobs = await self._reconcile_drafts(session)
         snapshot_jobs = await self._reconcile_snapshots(session, now=now)
         ai_jobs = await self._reconcile_ai(session)
@@ -77,7 +90,98 @@ class ReconciliationService:
             postmatch_jobs=postmatch_jobs,
             settlement_jobs=settlement_jobs,
             evaluation_jobs=evaluation_jobs,
+            checkpoint_sweep_jobs=checkpoint_sweep_jobs,
         )
+
+    async def _reconcile_live_checkpoints(self, session: AsyncSession, *, now: datetime) -> int:
+        """Close the trigger gap when the DLTV fast socket goes quiet.
+
+        Checkpoints are normally recorded as DLTV fast-state messages arrive;
+        the socket is event-driven, so during quiet mid-game stretches it can
+        be minutes between messages and real-time checkpoints fire late. This
+        sweeper fires crossed checkpoint minutes that are still inside the
+        grace window for every LIVE map with a known real-start anchor. The
+        domain-event dedupe key is identical to the collector's, so the two
+        paths are idempotent with each other.
+        """
+        if not self._checkpoint_minutes:
+            return 0
+        cutoff = now - timedelta(seconds=self._live_state_max_age_seconds)
+        live_map_ids = set(
+            (
+                await session.scalars(
+                    select(DltvLiveObservationRecord.canonical_map_id)
+                    .where(
+                        DltvLiveObservationRecord.canonical_map_id.is_not(None),
+                        DltvLiveObservationRecord.valve_match_id.is_not(None),
+                        DltvLiveObservationRecord.received_at >= cutoff,
+                    )
+                    .distinct()
+                )
+            ).all()
+        )
+        created = 0
+        for canonical_map_id in live_map_ids:
+            canonical_map = await session.get(CanonicalMap, canonical_map_id)
+            if canonical_map is None or canonical_map.valve_match_id is None:
+                continue
+            anchor = await picks_ended_anchor(
+                session,
+                valve_match_id=canonical_map.valve_match_id,
+                decision_at=now,
+            )
+            if anchor is None:
+                continue
+            elapsed_seconds = (now - ensure_utc(anchor)).total_seconds()
+            if elapsed_seconds < self._checkpoint_minutes[0] * 60:
+                continue
+            recorded = list(
+                (
+                    await session.scalars(
+                        select(DomainEventRecord.payload).where(
+                            DomainEventRecord.event_type
+                            == DomainEventType.DECISION_CHECKPOINT_DUE.value,
+                            DomainEventRecord.aggregate_id == str(canonical_map.id),
+                        )
+                    )
+                ).all()
+            )
+            recorded_minutes = {
+                int(payload["checkpoint_minute"])
+                for payload in recorded
+                if isinstance(payload, dict) and isinstance(payload.get("checkpoint_minute"), int)
+            }
+            due_minutes = []
+            for minute in self._checkpoint_minutes:
+                if minute in recorded_minutes:
+                    continue
+                crossed_seconds = elapsed_seconds - minute * 60
+                if 0 <= crossed_seconds <= self._checkpoint_sweep_grace_seconds:
+                    due_minutes.append(minute)
+            # First sight of a map with a fresh anchor: only the latest
+            # crossed minute fires (mirrors the collector), so a map first
+            # seen at minute 30 does not retroactively fire 10-29.
+            if not recorded_minutes and due_minutes:
+                due_minutes = [due_minutes[-1]]
+            for minute in due_minutes:
+                await self._events.record(
+                    session,
+                    DomainEvent(
+                        event_type=DomainEventType.DECISION_CHECKPOINT_DUE,
+                        aggregate_type="canonical_map",
+                        aggregate_id=str(canonical_map.id),
+                        dedupe_key=f"checkpoint-real:{canonical_map.id}:{minute}",
+                        payload={
+                            "canonical_map_id": str(canonical_map.id),
+                            "decision_at": now.isoformat(),
+                            "checkpoint_minute": minute,
+                            "basis": "real_time",
+                        },
+                        occurred_at=now,
+                    ),
+                )
+                created += 1
+        return created
 
     async def _reconcile_drafts(self, session: AsyncSession) -> int:
         drafts = list(

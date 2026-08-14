@@ -8,9 +8,10 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db import Base
-from app.domain.events import DomainEventType
+from app.domain.events import DomainEvent, DomainEventType
 from app.domain.jobs import DurableJob, JobStatus, JobType
 from app.events.dispatcher import DomainEventDispatcher
+from app.events.outbox import EventRepository
 from app.jobs.reconciliation import ReconciliationService
 from app.jobs.repository import JobRepository
 from app.jobs.runner import JobRunner
@@ -25,6 +26,7 @@ from app.models import (
     HistoricalMapRecord,
     OddsObservationRecord,
     ProviderMatchMapping,
+    ProviderRawEvent,
 )
 from app.snapshots.repository import SnapshotRepository
 
@@ -122,6 +124,7 @@ async def test_reconciliation_enqueues_missing_settlement_idempotently() -> None
 
     reconciliation = ReconciliationService(
         jobs,
+        EventRepository(),
         lease_seconds=120,
         ai_experiments=(),
         future_odds_horizons=(30, 60),
@@ -194,6 +197,7 @@ async def test_reconciliation_rechecks_stale_live_map_in_time_buckets() -> None:
 
     reconciliation = ReconciliationService(
         jobs,
+        EventRepository(),
         lease_seconds=120,
         ai_experiments=(),
         future_odds_horizons=(),
@@ -251,6 +255,7 @@ async def test_reconciliation_ignores_historical_only_maps_for_settlement() -> N
 
     reconciliation = ReconciliationService(
         jobs,
+        EventRepository(),
         lease_seconds=120,
         ai_experiments=(),
         future_odds_horizons=(30, 60),
@@ -300,6 +305,7 @@ async def test_reconciliation_only_enqueues_ai_after_ten_minutes() -> None:
 
     reconciliation = ReconciliationService(
         jobs,
+        EventRepository(),
         lease_seconds=120,
         ai_experiments=(("openai", "fixture-model", "prompt-v1", "policy-v1", "ai-view-v2"),),
         future_odds_horizons=(),
@@ -406,6 +412,7 @@ async def test_reconciliation_replays_processed_snapshot_trigger_without_snapsho
 
     reconciliation = ReconciliationService(
         jobs,
+        EventRepository(),
         lease_seconds=120,
         ai_experiments=(),
         future_odds_horizons=(),
@@ -535,6 +542,7 @@ async def test_reconciliation_replays_later_checkpoint_when_earlier_has_snapshot
 
     reconciliation = ReconciliationService(
         jobs,
+        EventRepository(),
         lease_seconds=120,
         ai_experiments=(),
         future_odds_horizons=(),
@@ -673,5 +681,190 @@ async def test_market_discovery_dispatches_odds_and_historical_jobs() -> None:
             JobType.SYNC_HISTORICAL.value,
         }
         assert all(record.payload["provider_match_id"] == 38424223 for record in records)
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_sweeps_missed_real_time_checkpoints() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    jobs = JobRepository()
+    now = datetime(2026, 8, 12, 12, 20, 30, tzinfo=UTC)
+    anchor_ts = int((now - timedelta(minutes=10, seconds=30)).timestamp())
+
+    async with factory() as session, session.begin():
+        team_a = CanonicalTeam(name="A")
+        team_b = CanonicalTeam(name="B")
+        session.add_all((team_a, team_b))
+        await session.flush()
+        series = CanonicalSeries(team_a_id=team_a.id, team_b_id=team_b.id)
+        session.add(series)
+        await session.flush()
+        canonical_map = CanonicalMap(
+            series_id=series.id,
+            map_number=1,
+            valve_match_id=8940000009,
+        )
+        session.add(canonical_map)
+        await session.flush()
+        map_id = canonical_map.id
+        session.add_all(
+            (
+                ProviderRawEvent(
+                    provider="dltv",
+                    event_type="DLTV_BOOTSTRAP",
+                    provider_key="8940000009",
+                    payload={"is_picks_ended_time": anchor_ts},
+                    received_at=now,
+                    payload_hash="sweep-bootstrap",
+                    parser_version="fixture",
+                ),
+                DltvLiveObservationRecord(
+                    canonical_map_id=canonical_map.id,
+                    valve_match_id=8940000009,
+                    game_time_seconds=600,
+                    radiant_kills=1,
+                    dire_kills=1,
+                    radiant_nw_lead=0,
+                    source_game_time=600,
+                    received_at=now - timedelta(seconds=60),
+                    payload_hash="sweep-live",
+                    last_message_received_at=now - timedelta(seconds=60),
+                    last_state_change_received_at=now - timedelta(seconds=60),
+                    raw_event_id=uuid4(),
+                ),
+            )
+        )
+
+    reconciliation = ReconciliationService(
+        jobs,
+        EventRepository(),
+        lease_seconds=120,
+        ai_experiments=(),
+        future_odds_horizons=(),
+    )
+    async with factory() as session, session.begin():
+        first = await reconciliation.run(session, now=now)
+        assert first.checkpoint_sweep_jobs == 1
+    async with factory() as session, session.begin():
+        second = await reconciliation.run(session, now=now)
+        assert second.checkpoint_sweep_jobs == 0
+
+    async with factory() as session:
+        events = list(
+            (
+                await session.scalars(
+                    select(DomainEventRecord).where(
+                        DomainEventRecord.event_type
+                        == DomainEventType.DECISION_CHECKPOINT_DUE.value
+                    )
+                )
+            ).all()
+        )
+        assert len(events) == 1
+        assert events[0].payload["checkpoint_minute"] == 10
+        assert events[0].payload["basis"] == "real_time"
+        assert events[0].dedupe_key == f"checkpoint-real:{map_id}:10"
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_sweep_skips_checkpoints_missed_beyond_grace() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    now = datetime(2026, 8, 12, 12, 31, 0, tzinfo=UTC)
+    anchor_ts = int((now - timedelta(minutes=31)).timestamp())
+
+    async with factory() as session, session.begin():
+        team_a = CanonicalTeam(name="A")
+        team_b = CanonicalTeam(name="B")
+        session.add_all((team_a, team_b))
+        await session.flush()
+        series = CanonicalSeries(team_a_id=team_a.id, team_b_id=team_b.id)
+        session.add(series)
+        await session.flush()
+        canonical_map = CanonicalMap(
+            series_id=series.id,
+            map_number=1,
+            valve_match_id=8940000010,
+        )
+        session.add(canonical_map)
+        await session.flush()
+        session.add_all(
+            (
+                ProviderRawEvent(
+                    provider="dltv",
+                    event_type="DLTV_BOOTSTRAP",
+                    provider_key="8940000010",
+                    payload={"is_picks_ended_time": anchor_ts},
+                    received_at=now,
+                    payload_hash="sweep-bootstrap",
+                    parser_version="fixture",
+                ),
+                DltvLiveObservationRecord(
+                    canonical_map_id=canonical_map.id,
+                    valve_match_id=8940000010,
+                    game_time_seconds=1860,
+                    radiant_kills=1,
+                    dire_kills=1,
+                    radiant_nw_lead=0,
+                    source_game_time=1860,
+                    received_at=now - timedelta(seconds=30),
+                    payload_hash="sweep-live",
+                    last_message_received_at=now - timedelta(seconds=30),
+                    last_state_change_received_at=now - timedelta(seconds=30),
+                    raw_event_id=uuid4(),
+                ),
+            )
+        )
+        # Minute 10 was already recorded; minutes 15-25 were missed during a
+        # long feed stall (>5 minutes past their crossing) and must NOT fire
+        # retroactively. Minute 30 crossed 60s ago -> the sweep fires only it.
+        await EventRepository().record(
+            session,
+            DomainEvent(
+                event_type=DomainEventType.DECISION_CHECKPOINT_DUE,
+                aggregate_type="canonical_map",
+                aggregate_id=str(canonical_map.id),
+                dedupe_key=f"checkpoint-real:{canonical_map.id}:10",
+                payload={
+                    "canonical_map_id": str(canonical_map.id),
+                    "decision_at": (now - timedelta(minutes=21)).isoformat(),
+                    "checkpoint_minute": 10,
+                    "basis": "real_time",
+                },
+                occurred_at=now - timedelta(minutes=21),
+            ),
+        )
+
+    reconciliation = ReconciliationService(
+        JobRepository(),
+        EventRepository(),
+        lease_seconds=120,
+        ai_experiments=(),
+        future_odds_horizons=(),
+    )
+    async with factory() as session, session.begin():
+        result = await reconciliation.run(session, now=now)
+        assert result.checkpoint_sweep_jobs == 1
+
+    async with factory() as session:
+        events = list(
+            (
+                await session.scalars(
+                    select(DomainEventRecord).where(
+                        DomainEventRecord.event_type
+                        == DomainEventType.DECISION_CHECKPOINT_DUE.value
+                    )
+                )
+            ).all()
+        )
+        assert {event.payload["checkpoint_minute"] for event in events} == {10, 30}
 
     await engine.dispose()

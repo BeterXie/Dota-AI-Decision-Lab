@@ -242,10 +242,13 @@ async def run() -> None:
     ).mapping()
     reconciliation = ReconciliationService(
         jobs,
+        events,
         lease_seconds=settings.job_lease_seconds,
         ai_experiments=tuple(ai_experiment_key(item.name, item.model) for item in ai_providers),
         future_odds_horizons=settings.future_odds_horizons,
         ai_min_game_time_seconds=settings.ai_min_game_time_seconds,
+        checkpoint_minutes=settings.checkpoint_minutes,
+        live_state_max_age_seconds=settings.live_state_max_age_seconds,
     )
     async with session_factory() as session, session.begin():
         await reconciliation.run(session, now=datetime.now(UTC))
