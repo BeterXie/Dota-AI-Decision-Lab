@@ -54,7 +54,7 @@ class Settings(BaseSettings):
     deepseek_base_url: str = "https://api.deepseek.com"
     deepseek_model: str = "deepseek-v4-flash"
     deepseek_pro_model: str = "deepseek-v4-pro"
-    deepseek_reasoning_effort: str = "xhigh"
+    deepseek_reasoning_effort: str = "high"
     kimi_api_key: SecretStr | None = None
     kimi_base_url: str = "https://api.moonshot.cn/v1"
     kimi_model: str = "kimi-k2.5"
