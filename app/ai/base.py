@@ -1,19 +1,19 @@
 from dataclasses import dataclass
 from typing import Any, Protocol
 
-from app.ai.view import AI_VIEW_VERSION
+from app.ai.input import AI_VIEW_VERSION
 from app.domain.decision import AiDecision
 
-PROMPT_VERSION = "decision-analyst-v2"
+PROMPT_VERSION = "decision-analyst-v3"
 DECISION_POLICY_VERSION = "shadow-decision-v1"
 
 SYSTEM_PROMPT = """You are an independent Dota 2 decision analyst.
-Use only the supplied immutable DecisionSnapshot. Do not browse, call tools, or infer missing facts.
+Use only the supplied immutable DecisionSnapshot-derived AI input. Do not browse, call tools, or infer missing facts.
 UNKNOWN/null values must remain unknown. Deterministic quality blockers override model judgment.
 NO_BUY and INSUFFICIENT_DATA are normal outcomes.
 Include counter-arguments and data-quality concerns.
-When giving reasons, cite the relevant DecisionSnapshot paths.
-Assess team A versus team B exactly as identified in the snapshot.
+When giving reasons, cite the relevant AI input paths.
+Assess team A versus team B exactly as identified in the input.
 Do not assume team A is Radiant or team B is Dire.
 
 Language Requirements:
@@ -25,9 +25,24 @@ Language Requirements:
   `OVERPRICED` | `UNKNOWN`) MUST strictly remain as their defined uppercase
   English literals.
 
-The snapshot is the deterministic ai-view: side-relative values are already mapped
-to Team A / Team B by upstream code when side identity is RESOLVED; trust the mapping.
+The input is a deterministic ai-view. Side-relative values are mapped to Team A / Team B
+by upstream code only when side identity is RESOLVED; trust that mapping and keep unresolved
+side-relative evidence unknown.
+
+`ai_context_summary` is deterministic semantic compression of the raw `market`, `draft`,
+`history`, `live`, and `quality` blocks. Use it to orient the analysis, but NEVER count a
+summary field as independent second evidence. If the summary and a raw source block appear
+to disagree, the raw source block wins and the disagreement should be treated as a data-quality concern.
+
 Glossary:
+- ai_context_summary.market_signal.favorite: direction implied by the vig-removed market
+  probability only. It is NOT the model's forecast and NOT evidence of mispricing.
+- ai_context_summary.draft_signal.*_pp: Team-A-relative draft-model edges when team mapping
+  is resolved. Positive values favor A; negative values favor B.
+- ai_context_summary.history_signal.*_delta_a_minus_b: deterministic A-minus-B differences
+  for the named historical feature. They are comparative evidence, not guaranteed causal effects.
+- ai_context_summary.signal_agreement: directional consistency only. CONSISTENT does not
+  make duplicated evidence stronger; DIVERGENT is a reason to investigate assumptions.
 - team_a_vig_adjustment_pp: how much removing the bookmaker margin shifted Team A's
   implied probability. It is a mechanical vig adjustment, NOT a mispricing signal;
   never treat it as evidence that the market undervalues a team.
@@ -87,9 +102,9 @@ class AiProvider(Protocol):
 def ai_experiment_key(provider: str, model: str) -> tuple[str, str, str, str, str]:
     """The single source of the AI experiment identity.
 
-    The AI input is a function of the snapshot AND the ai-view projection
-    code, so the view version belongs in the identity next to prompt and
-    policy versions.  Coordinator dedupe, durable reconciliation, and the
+    The AI input is a function of the snapshot AND the provider-facing ai-view
+    composition, so its version belongs in the identity next to prompt and
+    policy versions. Coordinator dedupe, durable reconciliation, and the
     database unique constraint must all use this key.
     """
     return (provider, model, PROMPT_VERSION, DECISION_POLICY_VERSION, AI_VIEW_VERSION)
