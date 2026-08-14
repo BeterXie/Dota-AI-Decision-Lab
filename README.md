@@ -49,6 +49,8 @@ python -m app.main
 if ($LASTEXITCODE -ne 0) { throw "Runtime exited with code $LASTEXITCODE" }
 ```
 
+For a one-click start on Windows, run `start-app.cmd` (double-click or from a terminal). It stops any running instance of this project only, rotates the `.runtime` logs, starts the runtime detached, and waits for the API to become healthy before printing `OK`/`FAILED`.
+
 The dashboard and API are served from `http://127.0.0.1:8000` by default. Important operational endpoints are `/health`, `/ready`, `/metrics`, `/api/runtime`, `/api/maps`, and `/api/jobs/summary`.
 
 ## Configuration
