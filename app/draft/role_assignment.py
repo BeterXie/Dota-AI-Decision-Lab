@@ -18,7 +18,11 @@ from app.repositories.raw import RawEventRepository
 
 HISTORICAL_POSITION_RESOLVER_VERSION = "historical-dota-position-v1"
 MAX_HISTORY_MAPS_PER_PLAYER = 40
-MIN_HISTORY_MAPS_PER_PLAYER = 5
+# Four distinct pro maps are enough to establish a stable position share when
+# the other guards still hold (>=35% share, >=20pp margin over the runner-up,
+# and a full one-to-one assignment). Five maps previously blocked otherwise
+# resolvable live drafts (for example one roster member with 4 tracked maps).
+MIN_HISTORY_MAPS_PER_PLAYER = 4
 MIN_ASSIGNED_POSITION_SHARE = 0.35
 MIN_ASSIGNMENT_MARGIN = 0.20
 

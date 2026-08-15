@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db import Base
 from app.draft.coordinator import DltvBootstrapCoordinator
-from app.draft.role_assignment import DraftRoleAssignmentService
+from app.draft.role_assignment import DraftRoleAssignmentService, _resolve_side_from_history
 from app.events.outbox import EventRepository
 from app.identity.resolver import IdentityResolver
 from app.models import DraftSlotRecord, DraftSnapshotRecord, ProviderRawEvent
@@ -77,6 +77,58 @@ async def test_explicit_dota_positions_override_provider_ordering() -> None:
     assert by_account[1001].position != 1
     assert all(slot.source == "STRATZ_CURRENT_MATCH" for slot in result.draft.slots)
     await engine.dispose()
+
+
+def test_historical_position_resolver_accepts_four_map_evidence() -> None:
+    base = datetime(2026, 8, 14, 1, 0, tzinfo=UTC)
+    picks = tuple(
+        DltvProviderPick(
+            side="radiant",
+            provider_slot=position,
+            account_id=1000 + position,
+            hero_id=10 + position,
+        )
+        for position in range(1, 6)
+    )
+    evidence = {
+        pick.account_id: [(position, base - timedelta(days=index)) for index in range(5)]
+        for position, pick in enumerate(picks, start=1)
+    }
+    # Topson-style sparse roster member: only 4 distinct positioned maps.
+    evidence[1005] = [(5, base - timedelta(days=index)) for index in range(4)]
+
+    resolved = _resolve_side_from_history(picks, evidence)
+
+    assert resolved is not None
+    slots, _cutoff = resolved
+    assert [slot.position for slot in sorted(slots, key=lambda slot: slot.account_id)] == [
+        1,
+        2,
+        3,
+        4,
+        5,
+    ]
+    assert slots[4].confidence < slots[0].confidence
+
+
+def test_historical_position_resolver_rejects_three_map_evidence() -> None:
+    base = datetime(2026, 8, 14, 1, 0, tzinfo=UTC)
+    picks = tuple(
+        DltvProviderPick(
+            side="radiant",
+            provider_slot=position,
+            account_id=1000 + position,
+            hero_id=10 + position,
+        )
+        for position in range(1, 6)
+    )
+    evidence = {
+        pick.account_id: [(position, base - timedelta(days=index)) for index in range(5)]
+        for position, pick in enumerate(picks, start=1)
+    }
+    evidence[1005] = [(5, base - timedelta(days=index)) for index in range(3)]
+
+    assert _resolve_side_from_history(picks, evidence) is None
 
 
 class _FixtureStratzClient:
