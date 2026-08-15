@@ -90,6 +90,14 @@ jobs:
               raise RuntimeError("legacy TestClient websocket test not found")
           text = text.replace(old, new, 1)
           path.write_text(text, encoding="utf-8")
+
+          path = Path("app/runtime/supervisor.py")
+          text = path.read_text(encoding="utf-8")
+          old = '''        await asyncio.gather(*(worker.stop() for worker in self._workers), return_exceptions=True)\n        for task in self._tasks:\n            task.cancel()\n        await asyncio.gather(*self._tasks, return_exceptions=True)\n'''
+          new = '''        await asyncio.gather(*(worker.stop() for worker in self._workers), return_exceptions=True)\n        if self._tasks:\n            _done, pending = await asyncio.wait(self._tasks, timeout=5.0)\n            for task in pending:\n                task.cancel()\n            if pending:\n                await asyncio.gather(*pending, return_exceptions=True)\n'''
+          if old not in text:
+              raise RuntimeError("supervisor immediate-cancel shutdown block not found")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
           PY
       - name: Install backend
         run: uv sync --frozen --extra dev
