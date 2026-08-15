@@ -59,7 +59,7 @@ test("shows one fixed AI card per model and opens all rounds in one modal", () =
       fair_probability_a: 0.61,
       primary_reasons: ["Draft and price align"],
       counter_arguments: ["Crossover risk"],
-      data_quality_concerns: [],
+      data_quality_concerns: ["Legacy quality concern"],
       blockers: [],
       stake: 500
     }
@@ -106,6 +106,8 @@ test("shows one fixed AI card per model and opens all rounds in one modal", () =
     expect(screen.getByText("Final bankroll")).toBeInTheDocument();
   expect(screen.getByText("Draft and price align")).toBeInTheDocument();
   expect(screen.getByText("Momentum flipped")).toBeInTheDocument();
+  expect(screen.queryByText("Crossover risk")).not.toBeInTheDocument();
+  expect(screen.queryByText("Legacy quality concern")).not.toBeInTheDocument();
 });
 
 test("deduplicates repeated experiments on the same checkpoint", () => {

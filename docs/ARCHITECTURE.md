@@ -3849,18 +3849,14 @@ class AiDecision(BaseModel):
     stake: float | None
 
     primary_reasons: list[str]
-    counter_arguments: list[str]
-    data_quality_concerns: list[str]
     blockers: list[str]
 ```
 
-强制要求：
-
-```text
-counter_arguments
-```
-
-避免只生成单向解释。
+模型在形成最终概率、信心与 action 前，仍必须内部审查最强反方证据与数据质量限制；
+这些因素应体现在 `fair_probability_a`、`confidence` 以及必要时的 `primary_reasons` 中，
+但当前输出合同不再要求单独生成 `counter_arguments` 或 `data_quality_concerns` 文本数组。
+`blockers` 只用于会阻止可靠决策的条件。旧实验记录中的两个退役字段保留在历史 JSON 中用于审计，
+读取历史记录时兼容，但不会被当前模型重新输出。
 
 `minimum_acceptable_odds_a` 是 decimal odds 下限：只有 Team A 市场赔率大于等于该值才可认为值得买，禁止与 implied-probability 上限混用。`stake` 是模型自己选择的虚拟影子下注额（virtual shadow stake），不是真实资金、也不是自动执行指令：`BUY_A/BUY_B` 必须满足 `0 < stake <= virtual_bankroll.bankroll_before`；`NO_BUY/INSUFFICIENT_DATA` 必须为 null/0。上游校验违反该策略的模型输出为 `POLICY_FAILED`，保留 raw_response，不把 normalized decision 写入下游。
 
@@ -3872,7 +3868,6 @@ virtual_bankroll: {
     bankroll_before
     unsettled_stakes
     units
-    policy
 }
 prior_decisions: [
     该 AI 本场比赛此前的成功决策（最多 AI_PRIOR_DECISIONS_LIMIT 条）
@@ -3897,9 +3892,10 @@ AI 决策实验唯一身份为：
 ```text
 snapshot_id
 provider
-model_version
+model
 prompt_version
 decision_policy_version
+ai_view_version
 ```
 
 同一实验幂等；新 model/prompt/policy 可以在同一 immutable Snapshot 上重跑，并保留旧实验结果。
