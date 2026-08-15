@@ -85,6 +85,26 @@ button {
   gap: 16px;
 }
 
+.review-nav-btn {
+  display: inline-flex;
+  align-items: center;
+  padding: 6px 12px;
+  border-radius: var(--radius-pill);
+  border: 1px solid color-mix(in srgb, var(--ai-accent) 38%, transparent);
+  background: color-mix(in srgb, var(--ai-accent) 10%, transparent);
+  color: var(--text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+  text-decoration: none;
+  transition: all 0.2s ease;
+
+  &:hover {
+    color: var(--text-primary);
+    border-color: color-mix(in srgb, var(--ai-accent) 64%, transparent);
+    background: color-mix(in srgb, var(--ai-accent) 16%, transparent);
+  }
+}
+
 .system-status-btn {
   display: flex;
   align-items: center;

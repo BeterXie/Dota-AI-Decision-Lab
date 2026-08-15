@@ -43,6 +43,7 @@ from app.models import (
 )
 from app.runtime.health import HealthRegistry
 from app.time import elapsed_seconds, ensure_utc
+from app.web.review import create_review_router
 
 
 def create_app(
@@ -70,6 +71,8 @@ def create_app(
         allow_methods=["GET"],
         allow_headers=["*"],
     )
+
+    app.include_router(create_review_router(session_factory))
 
     @app.get("/health")
     async def process_health() -> dict:
