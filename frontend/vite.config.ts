@@ -26,6 +26,23 @@ export default defineConfig({
       }
     }
   },
+  build: {
+    rolldownOptions: {
+      output: {
+        codeSplitting: {
+          groups: [
+            {
+              name: "echarts-runtime",
+              test: /node_modules[\\/](echarts|zrender)[\\/]/,
+              minSize: 100_000,
+              maxSize: 300_000,
+              priority: 20
+            }
+          ]
+        }
+      }
+    }
+  },
   test: {
     environment: "jsdom",
     include: ["src/**/*.test.{ts,tsx}"],
