@@ -1,6 +1,7 @@
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
-from uuid import uuid4
+from types import SimpleNamespace
+from uuid import UUID, uuid4
 
 import pytest
 from httpx import ASGITransport, AsyncClient
@@ -19,6 +20,7 @@ from app.models import (
 )
 from app.runtime.health import HealthRegistry
 from app.web.api import create_app
+from app.web.review import _odds_review, _rosh_review, _snapshot_market_pair
 
 
 @pytest.mark.asyncio
@@ -68,6 +70,7 @@ async def test_review_api_uses_frozen_rosh_canonical_ai_rounds_and_closing_odds(
                     },
                 },
                 "market": {
+                    "quality": {"eligible": True, "blockers": [], "warnings": []},
                     "market_type": "Winner",
                     "match_stage": "r1",
                     "observations": [
@@ -75,6 +78,8 @@ async def test_review_api_uses_frozen_rosh_canonical_ai_rounds_and_closing_odds(
                         {"selection_team_id": str(team_b.id), "price": "1.70"},
                     ],
                 },
+                "quality": {"eligible": True, "blockers": [], "warnings": []},
+                "live": {"game_time_seconds": 1800},
                 "draft": {
                     "curve": {
                         "model_version": "rosh-v-test",
@@ -241,6 +246,172 @@ async def test_review_api_uses_frozen_rosh_canonical_ai_rounds_and_closing_odds(
     assert match["odds"]["team_a_fair_probability_change_pp"] > 0
 
     await engine.dispose()
+
+
+def _review_snapshot_record(
+    *,
+    decision_at: datetime,
+    team_a_id: UUID,
+    team_b_id: UUID,
+    game_time_seconds: int = 700,
+    snapshot_eligible: bool = True,
+    market_eligible: bool = True,
+    curve_points: list[dict] | None = None,
+) -> DecisionSnapshotRecord:
+    return DecisionSnapshotRecord(
+        id=uuid4(),
+        canonical_map_id=uuid4(),
+        decision_at=decision_at,
+        created_at=decision_at,
+        mode="LIVE_BASIC",
+        snapshot_hash=f"review-{uuid4()}",
+        canonical_payload={
+            "decision_at": decision_at.isoformat(),
+            "identity": {
+                "team_a": {"id": str(team_a_id), "name": "A"},
+                "team_b": {"id": str(team_b_id), "name": "B"},
+                "side_identity": {
+                    "status": "RESOLVED",
+                    "radiant_team_id": str(team_a_id),
+                    "dire_team_id": str(team_b_id),
+                },
+            },
+            "quality": {"eligible": snapshot_eligible, "blockers": [], "warnings": []},
+            "live": {"game_time_seconds": game_time_seconds},
+            "market": {
+                "quality": {"eligible": market_eligible, "blockers": [], "warnings": []},
+                "observations": [
+                    {"selection_team_id": str(team_a_id), "price": "2.20"},
+                    {"selection_team_id": str(team_b_id), "price": "1.70"},
+                ],
+            },
+            "draft": {
+                "curve": {
+                    "model_version": "rosh-test",
+                    "data_version": "data-test",
+                    "points": curve_points or [],
+                }
+            },
+        },
+    )
+
+
+def test_review_odds_start_requires_snapshot_market_and_ai_time_eligibility() -> None:
+    now = datetime(2026, 8, 15, 12, 0, tzinfo=UTC)
+    team_a_id, team_b_id = uuid4(), uuid4()
+    assert (
+        _snapshot_market_pair(
+            _review_snapshot_record(
+                decision_at=now,
+                team_a_id=team_a_id,
+                team_b_id=team_b_id,
+                game_time_seconds=599,
+            )
+        )
+        is None
+    )
+    assert (
+        _snapshot_market_pair(
+            _review_snapshot_record(
+                decision_at=now,
+                team_a_id=team_a_id,
+                team_b_id=team_b_id,
+                market_eligible=False,
+            )
+        )
+        is None
+    )
+    assert (
+        _snapshot_market_pair(
+            _review_snapshot_record(
+                decision_at=now,
+                team_a_id=team_a_id,
+                team_b_id=team_b_id,
+                snapshot_eligible=False,
+            )
+        )
+        is None
+    )
+    eligible = _snapshot_market_pair(
+        _review_snapshot_record(
+            decision_at=now,
+            team_a_id=team_a_id,
+            team_b_id=team_b_id,
+            game_time_seconds=600,
+        )
+    )
+    assert eligible is not None
+    assert eligible["odds_a"] == 2.2
+
+
+def test_rosh_review_keeps_earliest_frozen_curve_when_later_snapshot_changes() -> None:
+    now = datetime(2026, 8, 15, 12, 0, tzinfo=UTC)
+    team_a_id, team_b_id = uuid4(), uuid4()
+    early = _review_snapshot_record(
+        decision_at=now,
+        team_a_id=team_a_id,
+        team_b_id=team_b_id,
+        curve_points=[
+            {"minute": 20, "pure_radiant_edge": 2.0, "adjusted_radiant_edge": 1.0},
+            {"minute": 30, "pure_radiant_edge": 4.0, "adjusted_radiant_edge": -2.0},
+            {"minute": 40, "pure_radiant_edge": 1.0, "adjusted_radiant_edge": -3.0},
+        ],
+    )
+    late = _review_snapshot_record(
+        decision_at=now + timedelta(minutes=5),
+        team_a_id=team_a_id,
+        team_b_id=team_b_id,
+        curve_points=[
+            {"minute": 20, "pure_radiant_edge": -20.0, "adjusted_radiant_edge": 20.0},
+            {"minute": 30, "pure_radiant_edge": -30.0, "adjusted_radiant_edge": 30.0},
+            {"minute": 40, "pure_radiant_edge": -40.0, "adjusted_radiant_edge": 40.0},
+        ],
+    )
+    review = _rosh_review([early, late], winner_team_id=team_a_id)
+    assert review is not None
+    assert review["snapshot_id"] == str(early.id)
+    assert review["reference"]["pure"]["edge_pp"] == 4.0
+    assert review["reference"]["adjusted"]["edge_pp"] == -2.0
+
+
+def test_rosh_reference_requires_exact_30_minute_point() -> None:
+    now = datetime(2026, 8, 15, 12, 0, tzinfo=UTC)
+    team_a_id, team_b_id = uuid4(), uuid4()
+    snapshot = _review_snapshot_record(
+        decision_at=now,
+        team_a_id=team_a_id,
+        team_b_id=team_b_id,
+        curve_points=[
+            {"minute": 29, "pure_radiant_edge": 4.0, "adjusted_radiant_edge": 2.0},
+            {"minute": 31, "pure_radiant_edge": 5.0, "adjusted_radiant_edge": 3.0},
+        ],
+    )
+    review = _rosh_review([snapshot], winner_team_id=team_a_id)
+    assert review is not None
+    assert review["reference"] is None
+    assert (
+        next(item for item in review["points"] if item["minute"] == 30)["pure"]["edge_pp"] is None
+    )
+
+
+def test_review_odds_ignores_capture_without_any_timestamp() -> None:
+    now = datetime(2026, 8, 15, 12, 0, tzinfo=UTC)
+    team_a_id, team_b_id = uuid4(), uuid4()
+    snapshot = _review_snapshot_record(
+        decision_at=now,
+        team_a_id=team_a_id,
+        team_b_id=team_b_id,
+    )
+    invalid_closing = SimpleNamespace(
+        odds_a=Decimal("1.80"),
+        odds_b=Decimal("2.05"),
+        status="CAPTURED",
+        observed_at=None,
+        triggered_at=None,
+    )
+    review = _odds_review([snapshot], closings=[invalid_closing])
+    assert review is not None
+    assert review["end_kind"] == "LATEST_DECISION"
 
 
 @pytest.mark.asyncio

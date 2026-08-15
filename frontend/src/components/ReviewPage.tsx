@@ -18,7 +18,8 @@ export function ReviewPage() {
   const review = useQuery({
     queryKey: ["review-matches"],
     queryFn: () => fetchReviewMatches(100),
-    refetchInterval: 30_000
+    staleTime: 30_000,
+    refetchInterval: 60_000
   });
 
   const rows = useMemo(() => {

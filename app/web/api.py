@@ -54,6 +54,7 @@ def create_app(
     live_state_max_age_seconds: float = 45.0,
     live_market_max_age_seconds: float = 30.0,
     market_max_pair_skew_seconds: float = 5.0,
+    ai_min_game_time_seconds: int = 600,
 ) -> FastAPI:
     app = FastAPI(title="Dota AI Decision Lab", version="0.1.0")
 
@@ -72,7 +73,12 @@ def create_app(
         allow_headers=["*"],
     )
 
-    app.include_router(create_review_router(session_factory))
+    app.include_router(
+        create_review_router(
+            session_factory,
+            ai_min_game_time_seconds=ai_min_game_time_seconds,
+        )
+    )
 
     @app.get("/health")
     async def process_health() -> dict:

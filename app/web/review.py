@@ -1,5 +1,7 @@
+import asyncio
 from collections import defaultdict
 from statistics import mean
+from time import monotonic
 from typing import Any
 from uuid import UUID
 
@@ -7,6 +9,7 @@ from fastapi import APIRouter, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.ai.eligibility import ai_record_is_game_time_eligible
 from app.market.fair_probability import remove_vig
 from app.models import (
     AiDecisionRecord,
@@ -22,25 +25,51 @@ from app.models import (
 
 ROSH_REFERENCE_MINUTE = 30
 ROSH_REVIEW_MINUTES = (20, 30, 40)
+REVIEW_CACHE_TTL_SECONDS = 15.0
 _ROSH_EVEN_EPSILON = 0.05
 
 
 def create_review_router(
     session_factory: async_sessionmaker[AsyncSession],
+    *,
+    ai_min_game_time_seconds: int = 600,
+    cache_ttl_seconds: float = REVIEW_CACHE_TTL_SECONDS,
 ) -> APIRouter:
     router = APIRouter()
+    cache: dict[int, tuple[float, dict[str, Any]]] = {}
+    cache_lock = asyncio.Lock()
 
     @router.get("/api/review/matches")
     async def review_matches(
         limit: int = Query(default=100, ge=1, le=200),
     ) -> dict[str, Any]:
-        async with session_factory() as session:
-            return await build_review_payload(session, limit=limit)
+        now = monotonic()
+        cached = cache.get(limit)
+        if cached is not None and now - cached[0] < cache_ttl_seconds:
+            return cached[1]
+        async with cache_lock:
+            now = monotonic()
+            cached = cache.get(limit)
+            if cached is not None and now - cached[0] < cache_ttl_seconds:
+                return cached[1]
+            async with session_factory() as session:
+                payload = await build_review_payload(
+                    session,
+                    limit=limit,
+                    ai_min_game_time_seconds=ai_min_game_time_seconds,
+                )
+            cache[limit] = (monotonic(), payload)
+            return payload
 
     return router
 
 
-async def build_review_payload(session: AsyncSession, *, limit: int = 100) -> dict[str, Any]:
+async def build_review_payload(
+    session: AsyncSession,
+    *,
+    limit: int = 100,
+    ai_min_game_time_seconds: int = 600,
+) -> dict[str, Any]:
     """Build a post-match review projection from immutable/audited records.
 
     R.O.S.H. values come from the earliest immutable DecisionSnapshot that
@@ -225,6 +254,7 @@ async def build_review_payload(session: AsyncSession, *, limit: int = 100) -> di
                 "odds": _odds_review(
                     map_snapshots,
                     closings=closings_by_map.get(canonical_map.id, []),
+                    ai_min_game_time_seconds=ai_min_game_time_seconds,
                 ),
             }
         )
@@ -244,7 +274,7 @@ async def build_review_payload(session: AsyncSession, *, limit: int = 100) -> di
             "rosh_review_minutes": list(ROSH_REVIEW_MINUTES),
             "rosh_source": "EARLIEST_IMMUTABLE_DECISION_SNAPSHOT_WITH_RESOLVED_SIDES",
             "ai_round_rule": "LATEST_SUCCESS_PER_SNAPSHOT_PROVIDER_MODEL",
-            "odds_start": "EARLIEST_VALID_DECISION_SNAPSHOT_MARKET",
+            "odds_start": "EARLIEST_AI_ELIGIBLE_SNAPSHOT_WITH_ELIGIBLE_MARKET",
             "odds_end": "CLOSING_CAPTURE_OR_LATEST_VALID_DECISION_SNAPSHOT",
         },
     }
@@ -268,7 +298,7 @@ def _empty_payload() -> dict[str, Any]:
             "rosh_review_minutes": list(ROSH_REVIEW_MINUTES),
             "rosh_source": "EARLIEST_IMMUTABLE_DECISION_SNAPSHOT_WITH_RESOLVED_SIDES",
             "ai_round_rule": "LATEST_SUCCESS_PER_SNAPSHOT_PROVIDER_MODEL",
-            "odds_start": "EARLIEST_VALID_DECISION_SNAPSHOT_MARKET",
+            "odds_start": "EARLIEST_AI_ELIGIBLE_SNAPSHOT_WITH_ELIGIBLE_MARKET",
             "odds_end": "CLOSING_CAPTURE_OR_LATEST_VALID_DECISION_SNAPSHOT",
         },
     }
@@ -327,22 +357,19 @@ def _rosh_review(
     if not isinstance(points, list):
         return None
     review_points = []
+    reference = None
     for minute in ROSH_REVIEW_MINUTES:
         point = _curve_point(points, minute)
         pure = _number(point.get("pure_radiant_edge")) if point is not None else None
         adjusted = _number(point.get("adjusted_radiant_edge")) if point is not None else None
-        review_points.append(
-            {
-                "minute": minute,
-                "pure": _rosh_edge_payload(pure, side_identity, winner_team_id),
-                "adjusted": _rosh_edge_payload(adjusted, side_identity, winner_team_id),
-            }
-        )
-
-    reference = next(
-        (item for item in review_points if item["minute"] == ROSH_REFERENCE_MINUTE),
-        None,
-    )
+        review_point = {
+            "minute": minute,
+            "pure": _rosh_edge_payload(pure, side_identity, winner_team_id),
+            "adjusted": _rosh_edge_payload(adjusted, side_identity, winner_team_id),
+        }
+        review_points.append(review_point)
+        if minute == ROSH_REFERENCE_MINUTE and point is not None:
+            reference = review_point
     return {
         "snapshot_id": str(anchor.id),
         "decision_at": anchor.decision_at,
@@ -357,23 +384,14 @@ def _rosh_review(
 
 
 def _curve_point(points: list[Any], minute: int) -> dict[str, Any] | None:
-    candidates = [
-        item
-        for item in points
-        if isinstance(item, dict) and _number(item.get("minute")) is not None
-    ]
-    if not candidates:
-        return None
-    exact = next(
-        (item for item in candidates if _number(item.get("minute")) == float(minute)), None
+    return next(
+        (
+            item
+            for item in points
+            if isinstance(item, dict) and _number(item.get("minute")) == float(minute)
+        ),
+        None,
     )
-    if exact is not None:
-        return exact
-    nearest = min(candidates, key=lambda item: abs((_number(item.get("minute")) or 0.0) - minute))
-    nearest_minute = _number(nearest.get("minute"))
-    if nearest_minute is None or abs(nearest_minute - minute) > 1.0:
-        return None
-    return nearest
 
 
 def _rosh_edge_payload(
@@ -483,9 +501,18 @@ def _odds_review(
     snapshots: list[DecisionSnapshotRecord],
     *,
     closings: list[DecisionFutureOdds],
+    ai_min_game_time_seconds: int = 600,
 ) -> dict[str, Any] | None:
     pairs = [
-        pair for snapshot in snapshots if (pair := _snapshot_market_pair(snapshot)) is not None
+        pair
+        for snapshot in snapshots
+        if (
+            pair := _snapshot_market_pair(
+                snapshot,
+                min_game_time_seconds=ai_min_game_time_seconds,
+            )
+        )
+        is not None
     ]
     if not pairs:
         return None
@@ -499,6 +526,7 @@ def _odds_review(
         and item.odds_a > 1
         and item.odds_b > 1
         and item.status == "CAPTURED"
+        and (item.observed_at is not None or item.triggered_at is not None)
     ]
     if captured:
         closing = max(
@@ -527,11 +555,29 @@ def _odds_review(
     }
 
 
-def _snapshot_market_pair(snapshot: DecisionSnapshotRecord) -> dict[str, Any] | None:
+def _snapshot_market_pair(
+    snapshot: DecisionSnapshotRecord,
+    *,
+    min_game_time_seconds: int = 600,
+) -> dict[str, Any] | None:
     payload = snapshot.canonical_payload
     identity = payload.get("identity") if isinstance(payload, dict) else None
     market = payload.get("market") if isinstance(payload, dict) else None
-    if not isinstance(identity, dict) or not isinstance(market, dict):
+    snapshot_quality = payload.get("quality") if isinstance(payload, dict) else None
+    market_quality = market.get("quality") if isinstance(market, dict) else None
+    if (
+        not isinstance(identity, dict)
+        or not isinstance(market, dict)
+        or not isinstance(snapshot_quality, dict)
+        or snapshot_quality.get("eligible") is not True
+        or not isinstance(market_quality, dict)
+        or market_quality.get("eligible") is not True
+        or not ai_record_is_game_time_eligible(
+            payload,
+            decision_at=snapshot.decision_at,
+            min_game_time_seconds=min_game_time_seconds,
+        )
+    ):
         return None
     team_a = identity.get("team_a")
     team_b = identity.get("team_b")
