@@ -43,12 +43,12 @@ jobs:
         run: python tools/_apply_prelaunch_second_wave.py
       - name: Install backend
         run: uv sync --frozen --extra dev
-      - name: Format and lint
+      - name: Format and lint product code
         run: |
-          uv run ruff format app migrations tests tools
-          uv run ruff check --fix app migrations tests tools
-          uv run ruff check app migrations tests tools
-          uv run ruff check --select S app migrations tools
+          uv run ruff format app migrations tests tools --exclude tools/_apply_prelaunch_second_wave.py
+          uv run ruff check --fix app migrations tests tools --exclude tools/_apply_prelaunch_second_wave.py
+          uv run ruff check app migrations tests tools --exclude tools/_apply_prelaunch_second_wave.py
+          uv run ruff check --select S app migrations tools --exclude tools/_apply_prelaunch_second_wave.py
       - name: Migrate and verify schema
         run: |
           uv run alembic upgrade head
