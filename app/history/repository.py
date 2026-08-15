@@ -145,7 +145,7 @@ class HistoricalRepository:
         await session.flush()
         canonical_map = CanonicalMap(
             series_id=series.id,
-            map_number=1,
+            map_number=None,
             valve_match_id=valve_match_id,
             scheduled_at=bundle.match.started_at,
         )

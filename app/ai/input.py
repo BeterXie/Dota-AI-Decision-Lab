@@ -3,10 +3,9 @@
 from typing import Any
 
 from app.ai.context_summary import build_ai_context_summary
+from app.ai.versions import AI_VIEW_VERSION as AI_VIEW_VERSION
 from app.ai.view import build_ai_view
 from app.domain.snapshot import DecisionSnapshot
-
-AI_VIEW_VERSION = "ai-view-v6"
 
 
 def build_ai_input(

@@ -20,9 +20,8 @@ from typing import Any
 
 from app.ai.dota_heroes import DOTA_HERO_NAMES
 from app.ai.dota_items import DOTA_ITEM_NAMES
+from app.ai.versions import AI_VIEW_VERSION
 from app.domain.snapshot import DecisionSnapshot
-
-AI_VIEW_VERSION = "ai-view-v2"
 
 _MAJOR_ITEMS = {
     "Black King Bar",

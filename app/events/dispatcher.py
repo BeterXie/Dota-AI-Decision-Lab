@@ -82,7 +82,7 @@ class DomainEventDispatcher:
                     dedupe_key=f"event:{record.id}:{additional_job_type.value}",
                     payload={**record.payload, "domain_event_id": str(record.id)},
                 )
-            if event_type is DomainEventType.MAP_STARTED:
+            if event_type is DomainEventType.MAP_ENDED:
                 await self._enqueue_closing_captures(session, record)
             record.processed_at = utc_now()
         return len(records)

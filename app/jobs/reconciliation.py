@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.ai.eligibility import ai_record_is_game_time_eligible
 from app.ai.jobs import ai_job_dedupe_key_for_experiment, ai_job_payload
 from app.domain.events import DomainEvent, DomainEventType
-from app.domain.jobs import JobType
+from app.domain.jobs import JobStatus, JobType
 from app.draft.engine import MODEL_VERSION
 from app.evaluation.metrics import METRICS_VERSION
 from app.events.outbox import EventRepository
@@ -77,8 +77,8 @@ class ReconciliationService:
         checkpoint_sweep_jobs = await self._reconcile_live_checkpoints(session, now=now)
         draft_jobs = await self._reconcile_drafts(session)
         snapshot_jobs = await self._reconcile_snapshots(session, now=now)
-        ai_jobs = await self._reconcile_ai(session)
-        future_jobs = await self._reconcile_future_odds(session)
+        ai_jobs = await self._reconcile_ai(session, now=now)
+        future_jobs = await self._reconcile_future_odds(session, now=now)
         postmatch_jobs = await self._reconcile_postmatch(session, now=now)
         settlement_jobs = await self._reconcile_settlements(session)
         evaluation_jobs = await self._reconcile_evaluations(session)
@@ -168,7 +168,7 @@ class ReconciliationService:
                         event_type=DomainEventType.DECISION_CHECKPOINT_DUE,
                         aggregate_type="canonical_map",
                         aggregate_id=str(canonical_map.id),
-                        dedupe_key=f"checkpoint-real:{canonical_map.id}:{minute}",
+                        dedupe_key=f"checkpoint:{canonical_map.id}:{minute}",
                         payload={
                             "canonical_map_id": str(canonical_map.id),
                             "decision_at": now.isoformat(),
@@ -207,6 +207,7 @@ class ReconciliationService:
                     "canonical_map_id": str(draft.canonical_map_id),
                     "draft_snapshot_id": str(draft.id),
                 },
+                reopen_terminal=True,
             )
             created += 1
         return created
@@ -361,42 +362,51 @@ class ReconciliationService:
                         DurableJobRecord.dedupe_key == dedupe_key,
                     )
                 )
+                job_payload = {
+                    "canonical_map_id": canonical_map_id,
+                    "canonical_series_id": payload.get("canonical_series_id"),
+                    "decision_at": decision_at_value.isoformat(),
+                    "reconciliation_event_id": str(event.id),
+                }
                 if existing is not None:
                     if existing.status in {"PENDING", "RUNNING", "RETRY_WAIT"}:
+                        break
+                    if existing.status == JobStatus.FAILED_TERMINAL.value:
+                        await self._jobs.enqueue(
+                            session,
+                            job_type=JobType.BUILD_SNAPSHOT,
+                            dedupe_key=dedupe_key,
+                            payload=job_payload,
+                            reopen_terminal=True,
+                        )
+                        created += 1
                         break
                     continue
                 await self._jobs.enqueue(
                     session,
                     job_type=JobType.BUILD_SNAPSHOT,
                     dedupe_key=dedupe_key,
-                    payload={
-                        "canonical_map_id": canonical_map_id,
-                        "canonical_series_id": payload.get("canonical_series_id"),
-                        "decision_at": decision_at_value.isoformat(),
-                        "reconciliation_event_id": str(event.id),
-                    },
+                    payload=job_payload,
                 )
                 created += 1
                 break
         return created
 
-    async def _reconcile_ai(self, session: AsyncSession) -> int:
-        """Recover only snapshots that never entered the durable AI lane.
+    async def _reconcile_ai(self, session: AsyncSession, *, now: datetime) -> int:
+        """Recover virgin snapshots and terminal jobs for the current experiment only.
 
-        Experiment versions are deliberately *not* inferred here. If a snapshot
-        already has any AI record or RUN_AI_PROVIDER job, it has an audit trail
-        and reconciliation leaves it alone. A later prompt/policy/view version
-        therefore cannot silently replay historical snapshots. Historical
-        experiments must be scheduled explicitly through AiExperimentReplayService.
+        A snapshot with an AI record or a job for another experiment version is
+        still left alone. This preserves the no-implicit-historical-replay rule.
         """
         if not self._ai_experiments:
             return 0
         snapshots = list(
             (
                 await session.scalars(
-                    select(DecisionSnapshotRecord).order_by(
-                        DecisionSnapshotRecord.decision_at.asc()
-                    )
+                    select(DecisionSnapshotRecord)
+                    .where(DecisionSnapshotRecord.decision_at >= now - timedelta(hours=24))
+                    .order_by(DecisionSnapshotRecord.decision_at.asc())
+                    .limit(1000)
                 )
             ).all()
         )
@@ -414,15 +424,35 @@ class ReconciliationService:
             )
             if any_record is not None:
                 continue
-            any_job = await session.scalar(
-                select(DurableJobRecord.id)
-                .where(
-                    DurableJobRecord.job_type == JobType.RUN_AI_PROVIDER.value,
-                    DurableJobRecord.dedupe_key.like(f"ai:{snapshot.snapshot_hash}%"),
-                )
-                .limit(1)
+            existing_jobs = list(
+                (
+                    await session.scalars(
+                        select(DurableJobRecord).where(
+                            DurableJobRecord.job_type == JobType.RUN_AI_PROVIDER.value,
+                            DurableJobRecord.dedupe_key.like(f"ai:{snapshot.snapshot_hash}%"),
+                        )
+                    )
+                ).all()
             )
-            if any_job is not None:
+            if existing_jobs:
+                by_key = {job.dedupe_key: job for job in existing_jobs}
+                for experiment in self._ai_experiments:
+                    provider, model = experiment[:2]
+                    dedupe_key = ai_job_dedupe_key_for_experiment(
+                        snapshot.snapshot_hash, experiment
+                    )
+                    existing = by_key.get(dedupe_key)
+                    if existing is None or existing.status != JobStatus.FAILED_TERMINAL.value:
+                        continue
+                    await self._jobs.enqueue(
+                        session,
+                        job_type=JobType.RUN_AI_PROVIDER,
+                        dedupe_key=dedupe_key,
+                        payload=ai_job_payload(snapshot.id, provider, model),
+                        priority=150,
+                        reopen_terminal=True,
+                    )
+                    created += 1
                 continue
             for experiment in self._ai_experiments:
                 provider, model = experiment[:2]
@@ -439,68 +469,122 @@ class ReconciliationService:
                 created += 1
         return created
 
-    async def _reconcile_future_odds(self, session: AsyncSession) -> int:
-        snapshots = list((await session.scalars(select(DecisionSnapshotRecord))).all())
+    async def _reconcile_future_odds(self, session: AsyncSession, *, now: datetime) -> int:
+        """Recover recent live captures without turning MISSING into a permanent tombstone."""
+        snapshots = list(
+            (
+                await session.scalars(
+                    select(DecisionSnapshotRecord)
+                    .where(DecisionSnapshotRecord.decision_at >= now - timedelta(hours=12))
+                    .order_by(DecisionSnapshotRecord.decision_at.asc())
+                    .limit(1000)
+                )
+            ).all()
+        )
+        if not snapshots:
+            return 0
+        snapshot_ids = [item.id for item in snapshots]
+        rows = list(
+            (
+                await session.scalars(
+                    select(DecisionFutureOdds).where(
+                        DecisionFutureOdds.decision_snapshot_id.in_(snapshot_ids)
+                    )
+                )
+            ).all()
+        )
+        by_snapshot: dict[UUID, list[DecisionFutureOdds]] = {}
+        for row in rows:
+            by_snapshot.setdefault(row.decision_snapshot_id, []).append(row)
+
+        retry_window = timedelta(minutes=30)
+        bucket = int(now.timestamp()) // 300
+        map_end_cache: dict[UUID, datetime | None] = {}
         created = 0
         for snapshot in snapshots:
-            captured = set(
-                (
-                    await session.scalars(
-                        select(DecisionFutureOdds.horizon_seconds).where(
-                            DecisionFutureOdds.decision_snapshot_id == snapshot.id,
-                            DecisionFutureOdds.capture_type == "TIME_HORIZON",
-                        )
-                    )
-                ).all()
-            )
+            captures = by_snapshot.get(snapshot.id, [])
             for horizon in self._future_odds_horizons:
-                if horizon in captured:
-                    continue
                 due_at = snapshot.decision_at + timedelta(seconds=horizon)
+                existing = next(
+                    (
+                        item
+                        for item in captures
+                        if item.capture_type == "TIME_HORIZON"
+                        and item.horizon_seconds == horizon
+                        and item.due_at == due_at
+                    ),
+                    None,
+                )
+                if existing is not None and existing.status == "CAPTURED":
+                    continue
+                if now > due_at + retry_window:
+                    continue
+                dedupe_key = (
+                    f"future-odds-retry:{snapshot.id}:{horizon}:{bucket}"
+                    if existing is not None and existing.status == "MISSING" and now >= due_at
+                    else f"future-odds:{snapshot.id}:{horizon}"
+                )
                 await self._jobs.enqueue(
                     session,
                     job_type=JobType.CAPTURE_FUTURE_ODDS,
-                    dedupe_key=f"future-odds:{snapshot.id}:{horizon}",
+                    dedupe_key=dedupe_key,
                     payload={
                         "snapshot_id": str(snapshot.id),
                         "capture_type": "TIME_HORIZON",
                         "horizon_seconds": horizon,
                         "due_at": due_at.isoformat(),
                     },
-                    not_before=due_at,
+                    not_before=max(due_at, now) if existing is not None else due_at,
+                    reopen_terminal=True,
                 )
                 created += 1
+
             if snapshot.canonical_map_id is None:
                 continue
-            map_started_at = await session.scalar(
-                select(DomainEventRecord.occurred_at)
-                .where(
-                    DomainEventRecord.event_type == "MAP_STARTED",
-                    DomainEventRecord.aggregate_id == str(snapshot.canonical_map_id),
+            if snapshot.canonical_map_id not in map_end_cache:
+                map_ended_at = await session.scalar(
+                    select(DomainEventRecord.occurred_at)
+                    .where(
+                        DomainEventRecord.event_type == DomainEventType.MAP_ENDED.value,
+                        DomainEventRecord.aggregate_id == str(snapshot.canonical_map_id),
+                    )
+                    .order_by(DomainEventRecord.occurred_at.asc())
+                    .limit(1)
                 )
-                .order_by(DomainEventRecord.occurred_at)
-                .limit(1)
-            )
-            if map_started_at is None:
+                if map_ended_at is None:
+                    map_ended_at = await session.scalar(
+                        select(MapResultRecord.basic_first_usable_at).where(
+                            MapResultRecord.canonical_map_id == snapshot.canonical_map_id
+                        )
+                    )
+                map_end_cache[snapshot.canonical_map_id] = map_ended_at
+            triggered_at = map_end_cache[snapshot.canonical_map_id]
+            if triggered_at is None or triggered_at < snapshot.decision_at:
                 continue
-            closing_exists = await session.scalar(
-                select(DecisionFutureOdds.id).where(
-                    DecisionFutureOdds.decision_snapshot_id == snapshot.id,
-                    DecisionFutureOdds.capture_type == "CLOSING",
-                )
+            closing = next(
+                (item for item in captures if item.capture_type == "CLOSING"),
+                None,
             )
-            if closing_exists is not None:
+            if closing is not None and closing.status == "CAPTURED":
                 continue
+            if now < triggered_at or now > triggered_at + retry_window:
+                continue
+            dedupe_key = (
+                f"closing-odds-retry:{snapshot.id}:{bucket}"
+                if closing is not None and closing.status == "MISSING"
+                else f"closing-odds:{snapshot.id}"
+            )
             await self._jobs.enqueue(
                 session,
                 job_type=JobType.CAPTURE_FUTURE_ODDS,
-                dedupe_key=f"closing-odds:{snapshot.id}",
+                dedupe_key=dedupe_key,
                 payload={
                     "snapshot_id": str(snapshot.id),
                     "capture_type": "CLOSING",
-                    "triggered_at": map_started_at.isoformat(),
+                    "triggered_at": triggered_at.isoformat(),
                 },
-                not_before=map_started_at,
+                not_before=max(triggered_at, now),
+                reopen_terminal=True,
             )
             created += 1
         return created
@@ -538,6 +622,7 @@ class ReconciliationService:
                 job_type=JobType.SETTLE_MAP,
                 dedupe_key=f"reconcile-settlement:{fact.canonical_map_id}",
                 payload={"canonical_map_id": str(fact.canonical_map_id)},
+                reopen_terminal=True,
             )
             created += 1
         return created
@@ -568,6 +653,7 @@ class ReconciliationService:
                 job_type=JobType.EVALUATE_DECISION,
                 dedupe_key=f"reconcile-evaluation:{METRICS_VERSION}:{snapshot.id}",
                 payload={"snapshot_id": str(snapshot.id)},
+                reopen_terminal=True,
             )
             created_snapshots.add(snapshot.id)
         return len(created_snapshots)

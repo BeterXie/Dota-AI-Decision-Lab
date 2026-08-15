@@ -773,7 +773,7 @@ async def test_reconciliation_sweeps_missed_real_time_checkpoints() -> None:
         assert len(events) == 1
         assert events[0].payload["checkpoint_minute"] == 10
         assert events[0].payload["basis"] == "real_time"
-        assert events[0].dedupe_key == f"checkpoint-real:{map_id}:10"
+        assert events[0].dedupe_key == f"checkpoint:{map_id}:10"
 
     await engine.dispose()
 
@@ -873,4 +873,102 @@ async def test_reconciliation_sweep_skips_checkpoints_missed_beyond_grace() -> N
         )
         assert {event.payload["checkpoint_minute"] for event in events} == {10, 30}
 
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_terminal_job_can_be_explicitly_reopened_without_erasing_attempt_history() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    jobs = JobRepository()
+    now = datetime(2026, 8, 16, tzinfo=UTC)
+    async with factory() as session, session.begin():
+        job_id = await jobs.enqueue(
+            session,
+            job_type=JobType.SETTLE_MAP,
+            dedupe_key="terminal-reopen",
+            payload={"canonical_map_id": str(uuid4())},
+            max_attempts=1,
+            not_before=now,
+        )
+    async with factory() as session, session.begin():
+        claimed = (await jobs.claim(session, worker_id="worker", now=now))[0]
+        assert claimed.id == job_id
+        status = await jobs.fail(
+            session,
+            job_id=job_id,
+            worker_id="worker",
+            error="boom",
+            failed_at=now,
+        )
+        assert status == JobStatus.FAILED_TERMINAL
+    async with factory() as session, session.begin():
+        reopened_id = await jobs.enqueue(
+            session,
+            job_type=JobType.SETTLE_MAP,
+            dedupe_key="terminal-reopen",
+            payload={"canonical_map_id": str(uuid4())},
+            reopen_terminal=True,
+            not_before=now,
+        )
+        assert reopened_id == job_id
+    async with factory() as session:
+        record = await session.get(DurableJobRecord, job_id)
+        assert record is not None
+        assert record.status == JobStatus.PENDING.value
+        assert record.attempt_count == 1
+        assert record.max_attempts >= 4
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_job_runner_fast_fails_on_lease_renewal_error_without_misclassifying_loss() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    jobs = JobRepository()
+    now = datetime.now(UTC)
+    async with factory() as session, session.begin():
+        await jobs.enqueue(
+            session,
+            job_type=JobType.BUILD_SNAPSHOT,
+            dedupe_key="renewal-failure",
+            payload={},
+            not_before=now,
+        )
+    async with factory() as session, session.begin():
+        job = (await jobs.claim(session, worker_id="worker", now=now))[0]
+
+    cancelled = asyncio.Event()
+
+    async def handler(_: DurableJob) -> None:
+        try:
+            await asyncio.sleep(30)
+        finally:
+            cancelled.set()
+
+    runner = JobRunner(
+        worker_id="worker",
+        session_factory=factory,
+        repository=jobs,
+        handlers={JobType.BUILD_SNAPSHOT: handler},
+        poll_seconds=0.01,
+        lease_seconds=120,
+    )
+
+    async def broken_renewal(*_args, **_kwargs) -> None:
+        raise RuntimeError("database unavailable")
+
+    runner._renew_lease = broken_renewal  # type: ignore[method-assign]
+    await runner._execute(job, "worker")
+    assert cancelled.is_set()
+    async with factory() as session:
+        record = await session.get(DurableJobRecord, job.id)
+        assert record is not None
+        assert record.status == JobStatus.RETRY_WAIT.value
+        assert record.last_error is not None
+        assert "lease renewal failed" in record.last_error
     await engine.dispose()

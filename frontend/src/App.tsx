@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { lazy, Suspense, useState } from "react";
 import { useQueries, useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   fetchJobs,
@@ -12,13 +12,13 @@ import {
 } from "./api";
 import { I18nProvider } from "./i18n";
 import { AppShell } from "./components/AppShell";
-import { ReviewPage } from "./components/ReviewPage";
+const ReviewPage = lazy(() => import("./components/ReviewPage").then((module) => ({ default: module.ReviewPage })));
 
 export function App() {
   const reviewRoute = typeof window !== "undefined" && isReviewRoute(window.location.pathname);
   return (
     <I18nProvider>
-      {reviewRoute ? <ReviewPage /> : <DashboardApp />}
+      {reviewRoute ? <Suspense fallback={null}><ReviewPage /></Suspense> : <DashboardApp />}
     </I18nProvider>
   );
 }

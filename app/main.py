@@ -227,7 +227,6 @@ async def run() -> None:
         jobs,
         market_max_age_seconds=settings.live_market_max_age_seconds,
         market_max_pair_skew_seconds=settings.market_max_pair_skew_seconds,
-        ai_min_game_time_seconds=settings.ai_min_game_time_seconds,
     )
     rosh = RoshService(stratz_client, raw_events) if stratz_client is not None else None
     await _initialize_dependency_health(
@@ -555,6 +554,7 @@ async def run() -> None:
         live_state_max_age_seconds=settings.live_state_max_age_seconds,
         live_market_max_age_seconds=settings.live_market_max_age_seconds,
         market_max_pair_skew_seconds=settings.market_max_pair_skew_seconds,
+        ai_min_game_time_seconds=settings.ai_min_game_time_seconds,
     )
     workers.append(
         WebServerWorker(

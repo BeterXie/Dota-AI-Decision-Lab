@@ -4778,6 +4778,16 @@ docs/ARCHITECTURE.md -> WHAT TO BUILD
 
 ---
 
+## Pre-release Runtime Safety and Recovery
+
+- SPA static serving is containment-checked after path resolution; request paths and symlinks may never escape `frontend/dist`.
+- WeChat direct-chat commands are authorized to the account's bound `user_id`; server-directed iLink endpoints must stay inside the configured trust domain.
+- Future-odds `MISSING` is retryable evidence state, not a tombstone. MAP closing capture is anchored to `MAP_ENDED` (or result first-usable fallback during reconciliation), never `MAP_STARTED`, and late retry generations are bounded to the live recovery window.
+- Reconciliation may explicitly reopen `FAILED_TERMINAL` jobs for the same semantic intent while preserving `JobAttemptRecord` history. AI terminal recovery is limited to the exact current experiment key and must not become implicit historical replay.
+- Broadcast-clock and real-time checkpoint sources share one `(canonical_map_id, minute)` dedupe identity.
+- `app.main.run()` is covered by a PostgreSQL-backed startup smoke test that reaches the real HTTP `/health` and `/api/runtime` endpoints with provider workers disabled.
+
+
 ## Post-match Review Analytics
 
 Dashboard 提供独立 `/review` 复盘工作区，用于跨 Map 比较比赛结果、R.O.S.H.、AI 决策与赔率变化。统计必须保持可审计且禁止赛后信息回填：R.O.S.H. 只读取当时已冻结进 immutable DecisionSnapshot 且阵营映射已 RESOLVED 的曲线；主指标固定使用 30 分钟 pure/player-adjusted edge，并同时展示 20/30/40 分钟方向。AI 按 `(snapshot, provider, model)` 只保留最新成功实验，BUY 命中率只统计已结算 BUY_A/BUY_B，概率质量继续使用 Brier / log loss，风险偏好无关的收益比较使用 1-unit P&L / ROI。赔率起点定义为首个可决策 Snapshot 的 Winner market，而不是伪称 bookmaker open；这里的“可决策”必须同时满足 Snapshot `quality.eligible=true`、Winner market `quality.eligible=true`，以及与生产 AI 完全相同的 `AI_MIN_GAME_TIME_SECONDS` 时间门槛（有 real-start anchor 时按真实经过时间，否则回退到 broadcast game clock）。终点优先使用已捕获 CLOSING，否则明确降级为最后一个满足上述条件的 DecisionSnapshot market。

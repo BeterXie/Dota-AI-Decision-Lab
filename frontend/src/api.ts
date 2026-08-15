@@ -375,7 +375,11 @@ export function useRuntimeSocket(): void {
       const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
       socket = new WebSocket(`${protocol}//${window.location.host}/ws/status`);
       socket.onmessage = (event) => {
-        queryClient.setQueryData(queryKeys.runtime, JSON.parse(event.data));
+        try {
+          queryClient.setQueryData(queryKeys.runtime, JSON.parse(event.data));
+        } catch {
+          // Ignore one malformed frame; the next 2s runtime frame will recover the view.
+        }
       };
       socket.onclose = () => {
         if (!closed) retry = window.setTimeout(connect, 2000);
