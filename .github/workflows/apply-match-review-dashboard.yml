@@ -115,6 +115,7 @@ jobs:
         run: |
           uv sync --frozen --extra dev
           uv run ruff format app/web/api.py app/web/review.py tests/test_review_api.py
+          uv run ruff check --fix app/web/api.py app/web/review.py tests/test_review_api.py
           uv run ruff check app/web/api.py app/web/review.py tests/test_review_api.py
       - name: Run backend review contracts
         run: uv run pytest tests/test_review_api.py tests/test_web_api_contract.py
