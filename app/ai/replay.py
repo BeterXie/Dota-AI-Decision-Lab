@@ -8,7 +8,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.ai.jobs import ai_job_dedupe_key_for_experiment, ai_job_payload
 from app.domain.jobs import JobType
 from app.jobs.repository import JobRepository
-from app.models import DecisionSnapshotRecord, DurableJobRecord
+from app.models import AiDecisionRecord, DecisionSnapshotRecord, DurableJobRecord
 
 
 class AiExperimentReplayService:
@@ -19,6 +19,10 @@ class AiExperimentReplayService:
     callers choose the snapshots/range and the experiment identities to run.
     Replay jobs are marked so persistence remains auditable but runtime health
     and decision notifications are not affected by historical experiments.
+
+    Experiment identities must describe the currently configured code/provider
+    experiments. This service selects *which historical snapshots* to replay;
+    it does not emulate an old or future prompt implementation by itself.
     """
 
     def __init__(
@@ -80,18 +84,30 @@ class AiExperimentReplayService:
         created = 0
         for snapshot in snapshots:
             for experiment in self._experiments:
-                provider, model = experiment[:2]
+                provider, model, prompt_version, policy_version, ai_view_version = experiment
+                existing_record = await session.scalar(
+                    select(AiDecisionRecord.id).where(
+                        AiDecisionRecord.snapshot_id == snapshot.id,
+                        AiDecisionRecord.provider == provider,
+                        AiDecisionRecord.model == model,
+                        AiDecisionRecord.prompt_version == prompt_version,
+                        AiDecisionRecord.decision_policy_version == policy_version,
+                        AiDecisionRecord.ai_view_version == ai_view_version,
+                    )
+                )
+                if existing_record is not None:
+                    continue
                 dedupe_key = ai_job_dedupe_key_for_experiment(
                     snapshot.snapshot_hash,
                     experiment,
                 )
-                existing = await session.scalar(
+                existing_job = await session.scalar(
                     select(DurableJobRecord.id).where(
                         DurableJobRecord.job_type == JobType.RUN_AI_PROVIDER.value,
                         DurableJobRecord.dedupe_key == dedupe_key,
                     )
                 )
-                if existing is not None:
+                if existing_job is not None:
                     continue
                 payload = ai_job_payload(snapshot.id, provider, model)
                 payload["experiment_replay"] = True
