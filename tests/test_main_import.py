@@ -96,6 +96,25 @@ async def test_kimi_is_excluded_when_decisions_are_disabled() -> None:
 
 
 @pytest.mark.asyncio
+async def test_deepseek_flash_can_replace_pro_in_decision_votes() -> None:
+    from app.config import Settings
+    from app.main import _ai_providers
+
+    settings = Settings(
+        _env_file=None,
+        deepseek_api_key="deepseek-test",
+        deepseek_flash_decisions_enabled=True,
+        deepseek_pro_decisions_enabled=False,
+    )
+    providers = _ai_providers(settings)
+
+    assert {provider.name for provider in providers} == {"deepseek"}
+    assert [provider.model for provider in providers] == ["deepseek-v4-flash"]
+    for provider in providers:
+        await provider.close()
+
+
+@pytest.mark.asyncio
 async def test_email_readiness_distinguishes_disabled_missing_and_configured() -> None:
     from app.config import Settings
     from app.main import _initialize_dependency_health

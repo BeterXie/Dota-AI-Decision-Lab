@@ -70,9 +70,17 @@ class Settings(BaseSettings):
     # Delayed DLTV broadcast data beyond this lag is excluded from the AI input
     # (the decision then uses only freeze-time consistent information).
     ai_max_live_data_lag_seconds: float = 120.0
+    # Each provider/model owns an independent virtual shadow bankroll per match.
+    # Models choose a virtual stake within the available bankroll; no real money
+    # and no automatic execution exist in V1.
+    ai_virtual_bankroll: float = Field(default=10_000.0, gt=0)
+    ai_prior_decisions_limit: int = Field(default=10, ge=1)
     # The deepseek flash model still powers email translation; this flag only
     # controls whether it also produces decision votes (off by default).
     deepseek_flash_decisions_enabled: bool = False
+    # Pro votes by default; set false to temporarily switch decision votes to
+    # flash without touching credentials or the email translator.
+    deepseek_pro_decisions_enabled: bool = True
     email_translation_reasoning_effort: str = "low"
 
     email_notifications_enabled: bool = False
@@ -82,6 +90,14 @@ class Settings(BaseSettings):
     resend_from: str | None = None
     resend_base_url: str = "https://api.resend.com"
     resend_timeout_seconds: float = Field(default=30.0, gt=0)
+
+    # Official WeChat ClawBot channel (direct iLink HTTP API, no OpenClaw).
+    wechat_clawbot_enabled: bool = False
+    wechat_clawbot_base_url: str = "https://ilinkai.weixin.qq.com"
+    wechat_clawbot_state_dir: str = ".runtime/wechat-clawbot"
+    wechat_clawbot_bot_agent: str = "Dota-AI-Decision-Lab/0.1.0"
+    wechat_clawbot_timeout_seconds: float = Field(default=15.0, gt=0)
+    wechat_clawbot_long_poll_timeout_seconds: float = Field(default=40.0, gt=0)
 
     # Calibrated against production RayBet/DLTV signal cadence: DLTV state
     # changes arrive event-driven every ~40-60s with a median pairing lag of

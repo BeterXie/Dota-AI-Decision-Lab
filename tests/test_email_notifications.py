@@ -1,5 +1,5 @@
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -82,6 +82,7 @@ class BuyProvider(SuccessfulProvider):
                 confidence=0.8,
                 market_assessment="UNDERPRICED",
                 minimum_acceptable_odds_a=1.9,
+                stake=250.0,
                 primary_reasons=["Verified draft edge"],
                 counter_arguments=["Late crossover"],
                 data_quality_concerns=[],
@@ -89,6 +90,29 @@ class BuyProvider(SuccessfulProvider):
             ),
             model_version=self.model,
         )
+
+
+class ScriptedProvider(SuccessfulProvider):
+    def __init__(self, decisions: list[AiDecision]) -> None:
+        super().__init__()
+        self._decisions = decisions
+
+    async def decide(self, _snapshot_input: str) -> AiProviderResponse:
+        self.calls += 1
+        decision = self._decisions[min(self.calls - 1, len(self._decisions) - 1)]
+        return AiProviderResponse(
+            raw_response={"model": self.model},
+            decision=decision,
+            model_version=self.model,
+        )
+
+
+class RecordingWeChatService:
+    def __init__(self) -> None:
+        self.prepared_batches: list[list[str]] = []
+
+    async def prepare_decision_notification(self, session, *, snapshot, decisions) -> None:
+        self.prepared_batches.append(sorted(str(item.id) for item in decisions))
 
 
 async def _snapshot_and_decisions(session, decision_at: datetime | None = None):
@@ -682,6 +706,127 @@ async def test_ai_handler_skips_email_when_no_buy_decision() -> None:
             )
             == 0
         )
+    await engine.dispose()
+
+
+async def _persist_checkpoint_snapshot(
+    snapshots: SnapshotRepository,
+    session,
+    *,
+    canonical_map_id,
+    decision_at: datetime,
+):
+    return await snapshots.persist(
+        session,
+        canonical_map_id=canonical_map_id,
+        decision_at=decision_at,
+        mode="LIVE_BASIC",
+        identity={
+            "team_a": {"id": "team-a", "name": "A"},
+            "team_b": {"id": "team-b", "name": "B"},
+        },
+        market={},
+        draft=None,
+        history={},
+        live={"game_time_seconds": 600},
+        quality={"eligible": True, "blockers": [], "warnings": []},
+    )
+
+
+def _decision(action: str, *, stake: float | None = 100.0) -> AiDecision:
+    return AiDecision(
+        action=action,
+        fair_probability_a=0.6 if action == "BUY_A" else None,
+        confidence=0.7,
+        market_assessment="UNDERPRICED" if action in {"BUY_A", "BUY_B"} else "UNKNOWN",
+        minimum_acceptable_odds_a=1.7,
+        stake=stake if action in {"BUY_A", "BUY_B"} else None,
+        primary_reasons=[],
+        counter_arguments=[],
+        data_quality_concerns=[],
+        blockers=[],
+    )
+
+
+@pytest.mark.asyncio
+async def test_ai_handler_emails_only_when_the_buy_side_changes() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    email_service = DecisionEmailNotificationService(
+        session_factory=factory,
+        jobs=JobRepository(),
+        sender=RecordingSender(),
+        sender_from="Decision Lab <alerts@example.com>",
+        recipients=("owner@example.com",),
+        subject_prefix="[Decision]",
+    )
+    snapshots = SnapshotRepository()
+    provider = ScriptedProvider(
+        [
+            _decision("BUY_A"),
+            _decision("NO_BUY"),
+            _decision("BUY_A"),
+            _decision("BUY_B"),
+        ]
+    )
+    wechat_service = RecordingWeChatService()
+    handler = ApplicationJobHandlers(
+        SimpleNamespace(
+            settings=SimpleNamespace(ai_min_game_time_seconds=600),
+            session_factory=factory,
+            snapshots=snapshots,
+            ai=AiCoordinator([provider], timeout_seconds=1),
+            health=HealthRegistry(),
+            email_notifications=email_service,
+            wechat_clawbot=wechat_service,
+        )
+    )
+    canonical_map_id = uuid4()
+    now = datetime.now(UTC)
+    for offset in range(4):
+        decision_at = now + timedelta(minutes=offset)
+        async with factory() as session, session.begin():
+            snapshot = await _persist_checkpoint_snapshot(
+                snapshots,
+                session,
+                canonical_map_id=canonical_map_id,
+                decision_at=decision_at,
+            )
+        job = DurableJob(
+            id=uuid4(),
+            job_type=JobType.RUN_AI_PROVIDER,
+            dedupe_key=f"ai-side-change-{offset}",
+            payload={"snapshot_id": str(snapshot.snapshot_id)},
+            status=JobStatus.RUNNING,
+            priority=100,
+            not_before=decision_at,
+            attempt_count=1,
+            max_attempts=8,
+            locked_by="fixture",
+            locked_at=decision_at,
+        )
+        await handler.run_ai(job)
+
+    async with factory() as session:
+        assert (
+            await session.scalar(select(func.count()).select_from(DecisionEmailNotificationRecord))
+            == 2
+        )
+        notifications = list(
+            (
+                await session.scalars(
+                    select(DecisionEmailNotificationRecord).order_by(
+                        DecisionEmailNotificationRecord.created_at
+                    )
+                )
+            ).all()
+        )
+    assert "BUY A" in notifications[0].subject
+    assert "BUY B" in notifications[1].subject
+    assert provider.calls == 4
+    assert len(wechat_service.prepared_batches) == 2
     await engine.dispose()
 
 

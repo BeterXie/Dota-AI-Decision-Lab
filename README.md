@@ -57,15 +57,36 @@ The dashboard and API are served from `http://127.0.0.1:8000` by default. Import
 
 Copy `.env.example` to `.env` and provide the credentials available to this installation. Missing credentials stay explicit: readiness reports `ACTION_REQUIRED`, and the runtime does not invent substitute data.
 
-`STRATZ_TOKEN` enables primary historical synchronization and local R.O.S.H. inputs. `OPENDOTA_API_KEY` is optional. Each configured AI provider runs independently; one unavailable provider does not block the others.
+`STRATZ_TOKEN` enables primary historical synchronization and local R.O.S.H. inputs. `OPENDOTA_API_KEY` is optional. Postmatch result resolution tries STRATZ, then OpenDota, then the already-integrated DLTV `/live/{valve_match_id}.json` channel, whose response publishes `winner` after the map ends. Each configured AI provider runs independently; one unavailable provider does not block the others.
+
+Each provider/model owns an independent virtual shadow bankroll per match (`AI_VIRTUAL_BANKROLL`, default 10000). Every checkpoint input includes that AI's prior decisions for the match (`AI_PRIOR_DECISIONS_LIMIT`, default 10) and the current bankroll, and the model chooses its own virtual `stake` within the available bankroll. When the map result is available, the runtime settles each virtual stake at decision-time odds and records `virtual_pnl`/`virtual_odds` for the AI decision modal and Evaluation view. The stake is analysis capital only: it is never real money and never an automatic bet.
 
 Decision email notifications are owned by this runtime and use the Resend HTTP API. Set
 `EMAIL_NOTIFICATIONS_ENABLED=true`, `EMAIL_RECIPIENTS`, `RESEND_API_KEY`, and
 `RESEND_FROM`. One bilingual
-text/HTML email is durably queued after a snapshot's AI decisions are persisted; the
-message uses that immutable snapshot's match, odds, live, draft, history, and quality data.
-Resend requests use a persistent notification ID as the idempotency key so job retries and
-runtime restarts do not produce duplicate messages.
+text/HTML email is durably queued when a checkpoint introduces a buy side that has not been
+notified for that map before — the first `BUY_A`/`BUY_B`, or a side change such as
+`BUY_A → BUY_B`. Repeating the same side and `NO_BUY`/`INSUFFICIENT_DATA` checkpoints stay
+silent. The message uses the immutable snapshot's match, odds, live, draft, history, and
+quality data. Resend requests use a persistent notification ID as the idempotency key so
+job retries and runtime restarts do not produce duplicate messages.
+
+The runtime can also push the same side-change decisions to your personal WeChat through the
+official WeChat ClawBot channel **without running OpenClaw**. It speaks Tencent's iLink bot
+HTTP API directly (`https://ilinkai.weixin.qq.com`), the same protocol used by the official
+`@tencent-weixin/openclaw-weixin` plugin. Enable it with `WECHAT_CLAWBOT_ENABLED=true`, then
+bind your WeChat once:
+
+```powershell
+.\.venv\Scripts\python.exe tools\wechat_clawbot.py login   # scan the QR code with WeChat
+.\.venv\Scripts\python.exe tools\wechat_clawbot.py status
+.\.venv\Scripts\python.exe tools\wechat_clawbot.py send "test"
+```
+
+Credentials are stored under `WECHAT_CLAWBOT_STATE_DIR` (default `.runtime/wechat-clawbot`,
+gitignored). The inbound worker accepts `当前比赛`, `为什么买 <队伍>`, `暂停通知` /
+`恢复通知` in the direct chat. Official support is one-to-one direct chat only; WeChat
+group posting is not part of the official ClawBot channel yet.
 
 Provider hosts, model IDs, live synchronization thresholds, decision checkpoints, worker timing, and runtime binding are centralized in `app/config.py` and can be overridden by environment variables.
 

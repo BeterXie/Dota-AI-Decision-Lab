@@ -134,6 +134,8 @@ DLTV_DELAYED_DETAIL
 
 7. 当前比赛的 Socket transport 大约每几秒广播一次，但很多消息是重复状态；有效 `game_time / score / radiant_lead` 更新比 transport 粒度粗得多。因此不能把“5 秒收到一条消息”理解为“比赛状态每 5 秒更新”。
 
+8. 比赛结束后，`GET /live/{valve_match_id}.json` 会发布 `winner: "radiant" | "dire"`（实测已完成地图确认）。该字段配合 `db.first_team/second_team.is_radiant` 显式布尔才能安全映射到 Provider team id；DLTV 的 first/second 排序本身不等于 Radiant/Dire。
+
 ### 0.2 RayBet HAR 已确认
 
 1. 当前网页使用 HTTP Host：
@@ -601,8 +603,20 @@ OpenAI、DeepSeek Flash 和 DeepSeek Pro 的 Responses 请求使用 `reasoning.e
 
 ### 5.1 Decision Email Notification
 
-每次 DecisionSnapshot 的 AI 决策批次完成后，系统可向配置的邮件列表发送一封双语汇总通知。
+每次 DecisionSnapshot 的 AI 决策批次完成后，系统可向配置的邮件列表发送双语汇总通知。
 通知必须由项目自己的 Resend HTTP API Provider 和 Durable Worker 发送，不依赖外部邮件 Agent/CLI。
+
+邮件触发遵循“下注换边才通知”规则，避免同一地图重复刷邮件：
+
+```text
+首次出现 BUY_A 或 BUY_B → 发送
+同一侧再次 BUY（如 BUY_A → BUY_A）→ 静默
+NO_BUY / INSUFFICIENT_DATA → 静默
+已通知 BUY_A 后出现 BUY_B（或反向）→ 发送
+```
+
+同一地图内已通知过的下注侧通过该地图更早 snapshot 的成功 AI decision 推导；当前批次
+引入新侧时，邮件内容仍冻结于当前 DecisionSnapshot 及其全部买入决策。
 
 邮件内容冻结于同一个 DecisionSnapshot，至少包括：
 
@@ -619,6 +633,23 @@ Historical Intelligence 与覆盖度
 邮件通知记录必须持久化发送状态、收件人、模板版本、确定性 Idempotency-Key、Resend 邮件 ID、尝试次数、错误和发送时间。
 任务使用 durable job 重试并在重启后恢复；已发送通知不得在正常 reconciliation 中重复发送。
 缺失比赛字段保持 `UNKNOWN`，不得用 0 补齐。Resend API Key 只存在于环境配置，不得进入日志或数据库。
+
+### 5.1A WeChat ClawBot Direct Channel
+
+可选启用官方微信 ClawBot 直连通道（`WECHAT_CLAWBOT_ENABLED=true`），**不依赖 OpenClaw
+运行时**。客户端直接实现腾讯 iLink bot HTTP JSON 协议（`https://ilinkai.weixin.qq.com`，
+与官方 `@tencent-weixin/openclaw-weixin` 插件相同的 `getupdates / sendmessage / QR 登录`）。
+QR 登录确认后的 `bot_token`、服务端 `baseurl` 与长轮询游标只持久化在本地 state 目录
+（默认 `.runtime/wechat-clawbot`，gitignored），不得写入日志、数据库或邮件。
+
+约束：
+
+```text
+决策推送与邮件共用同一个“下注换边才通知”触发点，经 SEND_WECHAT_DECISION durable job 投递；
+入站只处理 direct chat（官方通道当前不承诺群聊自动发言）；
+入站命令只允许读取/开关操作：当前比赛、为什么买、暂停通知、恢复通知；
+未绑定账号时 readiness 上报 ACTION_REQUIRED，并提示运行 tools/wechat_clawbot.py login。
+```
 
 ---
 
@@ -3035,8 +3066,15 @@ STRATZ 是 Primary，但系统不能把 STRATZ 当单点故障。
 Basic Match Result
 STRATZ available → use STRATZ
 else OpenDota available → use OpenDota
+else DLTV /live/{valve_match_id}.json winner available → use DLTV
 else keep PENDING
 ```
+
+DLTV 赛果来自现有 `/live/{valve_match_id}.json` 通道：比赛结束后该响应发布
+`winner: "radiant" | "dire"`。它必须通过 `db.first_team.is_radiant` /
+`db.second_team.is_radiant` 显式布尔映射到 Provider team id（DLTV provider 排序
+绝不等于 Radiant/Dire），并作为 `DLTV_POSTMATCH` raw event 归档后再进入
+`historical_maps` / `map_results` 结算。
 
 Advanced：
 
@@ -3801,6 +3839,8 @@ class AiDecision(BaseModel):
 
     minimum_acceptable_odds_a: float | None
 
+    stake: float | None
+
     primary_reasons: list[str]
     counter_arguments: list[str]
     data_quality_concerns: list[str]
@@ -3815,7 +3855,37 @@ counter_arguments
 
 避免只生成单向解释。
 
-`minimum_acceptable_odds_a` 是 decimal odds 下限：只有 Team A 市场赔率大于等于该值才可认为值得买，禁止与 implied-probability 上限混用。AI 决策实验唯一身份为：
+`minimum_acceptable_odds_a` 是 decimal odds 下限：只有 Team A 市场赔率大于等于该值才可认为值得买，禁止与 implied-probability 上限混用。`stake` 是模型自己选择的虚拟影子下注额（virtual shadow stake），不是真实资金、也不是自动执行指令：`BUY_A/BUY_B` 必须满足 `0 < stake <= virtual_bankroll.bankroll_before`；`NO_BUY/INSUFFICIENT_DATA` 必须为 null/0。上游校验违反该策略的模型输出为 `POLICY_FAILED`，保留 raw_response，不把 normalized decision 写入下游。
+
+每个 Provider/Model 在一场比赛中拥有独立的虚拟 bankroll（默认 `AI_VIRTUAL_BANKROLL=10000`）。决策输入中包含：
+
+```text
+virtual_bankroll: {
+    initial
+    bankroll_before
+    unsettled_stakes
+    units
+    policy
+}
+prior_decisions: [
+    该 AI 本场比赛此前的成功决策（最多 AI_PRIOR_DECISIONS_LIMIT 条）
+]
+```
+
+`bankroll_before` 在当前快照构建时确定性计算：初始资金减去该 AI 此前各轮 stake。历史决策只作为连续性上下文，不是当前快照的独立证据；新证据允许改变结论，但模型必须说明与前几轮判断的关系。`ai_decisions` 保存 `bankroll_before` 与 `stake` 两列冻结当时的输入上下文，结算策略以后变化也不得改写模型实际看到的资金上下文。
+
+当 map result 可用且无 provider conflict 时，Evaluation 层用决策时点的市场赔率结算该 stake：
+
+```text
+BUY_A 赢: stake × (odds_a - 1)；输: -stake
+BUY_B 赢: stake × (odds_b - 1)；输: -stake
+NO_BUY / INSUFFICIENT_DATA: 0
+BUY 但无 stake 或无可结算赔率: null（未结算，不伪造）
+```
+
+`decision_evaluations` 保存 `virtual_pnl` 与 `virtual_odds` 冻结结算结果；前端在每个 AI 的多轮弹窗和 Evaluation 页展示已结算虚拟盈亏、累计下注与 ROI。所有结算仍只发生在影子资金上，不触碰真实资金。
+
+AI 决策实验唯一身份为：
 
 ```text
 snapshot_id
@@ -4591,7 +4661,7 @@ UI 不是核心资产。
 
 ```text
 自动下注
-资金管理
+真实资金管理
 Kelly
 Replay Parser
 Vision OCR
@@ -4601,6 +4671,8 @@ AI 辩论
 多数票自动执行
 训练自己的 LLM
 ```
+
+虚拟影子资金（virtual shadow bankroll / stake）是模型决策输出的一部分，仅用于审计与校准，属于 V1 决策情报范围；它不触碰真实资金，也不构成任何自动下注。
 
 当前产品目标是：
 

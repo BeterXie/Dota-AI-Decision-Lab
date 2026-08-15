@@ -10,6 +10,7 @@ from app.ai.eligibility import ai_decision_is_game_time_eligible
 from app.config import Settings
 from app.domain.events import DomainEvent, DomainEventType
 from app.domain.jobs import DurableJob, JobType
+from app.domain.snapshot import DecisionSnapshot
 from app.draft.coordinator import DltvBootstrapCoordinator
 from app.draft.rosh_service import RoshService
 from app.evaluation.future_odds import FutureOddsService
@@ -68,6 +69,8 @@ class JobHandlerDependencies:
     future_odds: FutureOddsService
     settlement: SettlementService
     evaluation: EvaluationService
+    dltv_result: object | None = None
+    wechat_clawbot: object | None = None
 
 
 class ApplicationJobHandlers:
@@ -84,6 +87,7 @@ class ApplicationJobHandlers:
             JobType.BUILD_SNAPSHOT: self.build_snapshot,
             JobType.RUN_AI_PROVIDER: self.run_ai,
             JobType.SEND_DECISION_EMAIL: self.send_decision_email,
+            JobType.SEND_WECHAT_DECISION: self.send_wechat_decision,
             JobType.CAPTURE_FUTURE_ODDS: self.capture_future_odds,
             JobType.RESOLVE_POSTMATCH: self.resolve_postmatch,
             JobType.SETTLE_MAP: self.settle_map,
@@ -433,7 +437,10 @@ class ApplicationJobHandlers:
                     },
                 )
             # Emails are only sent when a NEW buy decision (BUY_A/BUY_B) was
-            # produced; NO_BUY / INSUFFICIENT_DATA checkpoints stay silent.
+            # produced AND it introduces a side that has not been notified for
+            # this map before. Repeating the same side, NO_BUY, and
+            # INSUFFICIENT_DATA checkpoints stay silent; only a side change
+            # (for example BUY_A -> BUY_B) produces a new notification.
             buy_decisions = [
                 record
                 for record in records
@@ -442,8 +449,24 @@ class ApplicationJobHandlers:
                 and isinstance(record.normalized_response, dict)
                 and record.normalized_response.get("action") in {"BUY_A", "BUY_B"}
             ]
-            if self._d.email_notifications is not None and buy_decisions:
+            prior_buy_sides = await _prior_buy_sides(
+                session,
+                canonical_map_id=await _email_scope_map_id(session, snapshot),
+                decision_at=snapshot.decision_at,
+            )
+            new_side_decisions = [
+                record
+                for record in buy_decisions
+                if record.normalized_response.get("action") not in prior_buy_sides
+            ]
+            if self._d.email_notifications is not None and new_side_decisions:
                 await self._d.email_notifications.prepare(
+                    session,
+                    snapshot=snapshot,
+                    decisions=buy_decisions,
+                )
+            if getattr(self._d, "wechat_clawbot", None) is not None and new_side_decisions:
+                await self._d.wechat_clawbot.prepare_decision_notification(
                     session,
                     snapshot=snapshot,
                     decisions=buy_decisions,
@@ -469,6 +492,39 @@ class ApplicationJobHandlers:
             notification_id=str(notification.id),
             recipient_count=len(notification.recipients),
             sent_at=notification.sent_at,
+        )
+
+    async def send_wechat_decision(self, job: DurableJob) -> None:
+        if self._d.wechat_clawbot is None:
+            raise RuntimeError("WeChat ClawBot notifications are not configured")
+        snapshot_id = _required_uuid(job.payload, "snapshot_id")
+        raw_decision_ids = job.payload.get("decision_ids")
+        if not isinstance(raw_decision_ids, list) or not raw_decision_ids:
+            raise ValueError("job payload decision_ids must be a non-empty list")
+        decision_ids = [_optional_uuid(item) for item in raw_decision_ids]
+        if any(item is None for item in decision_ids):
+            raise ValueError("job payload contains an invalid decision id")
+        async with self._d.session_factory() as session, session.begin():
+            snapshot = await self._d.snapshots.get(session, snapshot_id)
+            if snapshot is None:
+                raise ValueError("decision snapshot does not exist")
+            decisions = list(
+                (
+                    await session.scalars(
+                        select(AiDecisionRecord).where(AiDecisionRecord.id.in_(decision_ids))
+                    )
+                ).all()
+            )
+            if len(decisions) != len(decision_ids):
+                raise ValueError("WeChat decision batch references missing AI decisions")
+            sent = await self._d.wechat_clawbot.send_decision_notification(
+                snapshot=snapshot,
+                decisions=decisions,
+            )
+        await self._d.health.dependency(
+            "WECHAT",
+            "READY",
+            decisions=sent,
         )
 
     async def capture_future_odds(self, job: DurableJob) -> None:
@@ -563,7 +619,11 @@ class ApplicationJobHandlers:
         failures: list[str] = []
         providers = tuple(
             provider
-            for provider in (self._d.historical_primary, self._d.opendota)
+            for provider in (
+                self._d.historical_primary,
+                self._d.opendota,
+                getattr(self._d, "dltv_result", None),
+            )
             if provider is not None
         )
         for provider in providers:
@@ -740,6 +800,55 @@ class ApplicationJobHandlers:
         return canonical_map, series
 
 
+async def _email_scope_map_id(
+    session: AsyncSession,
+    snapshot: DecisionSnapshot,
+) -> UUID | None:
+    """Resolve the map used to deduplicate decision email sides.
+
+    Snapshots persisted at series level carry ``canonical_map_id = NULL``; when
+    the identity already contains a Valve Match ID, fall back to the canonical
+    map lookup so side-change suppression still applies.
+    """
+    record = await session.get(DecisionSnapshotRecord, snapshot.snapshot_id)
+    if record is not None and record.canonical_map_id is not None:
+        return record.canonical_map_id
+    identity = snapshot.identity
+    valve_match_id = identity.get("valve_match_id") if isinstance(identity, dict) else None
+    if not isinstance(valve_match_id, int):
+        return None
+    return await session.scalar(
+        select(CanonicalMap.id).where(CanonicalMap.valve_match_id == valve_match_id)
+    )
+
+
+async def _prior_buy_sides(
+    session: AsyncSession,
+    *,
+    canonical_map_id: UUID | None,
+    decision_at: datetime,
+) -> set[str]:
+    if canonical_map_id is None:
+        return set()
+    responses = (
+        await session.scalars(
+            select(AiDecisionRecord.normalized_response)
+            .join(DecisionSnapshotRecord, DecisionSnapshotRecord.id == AiDecisionRecord.snapshot_id)
+            .where(
+                DecisionSnapshotRecord.canonical_map_id == canonical_map_id,
+                DecisionSnapshotRecord.decision_at < decision_at,
+                AiDecisionRecord.parse_status == "SUCCESS",
+                AiDecisionRecord.normalized_response.is_not(None),
+            )
+        )
+    ).all()
+    return {
+        str(response["action"])
+        for response in responses
+        if isinstance(response, dict) and response.get("action") in {"BUY_A", "BUY_B"}
+    }
+
+
 def _required_int(payload: dict, key: str) -> int:
     value = _optional_int(payload.get(key))
     if value is None:
@@ -765,6 +874,14 @@ def _observed_postmatch_teams(
         pairs = (
             (match.get("radiantTeamId"), radiant.get("name")),
             (match.get("direTeamId"), dire.get("name")),
+        )
+    elif provider == "dltv":
+        database = payload.get("db") if isinstance(payload, dict) else {}
+        first = database.get("first_team") if isinstance(database, dict) else {}
+        second = database.get("second_team") if isinstance(database, dict) else {}
+        pairs = (
+            (first.get("id"), first.get("title")),
+            (second.get("id"), second.get("title")),
         )
     else:
         return ()

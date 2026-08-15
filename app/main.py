@@ -60,6 +60,7 @@ from app.models import (
 from app.notifications import DecisionEmailNotificationService, ResendEmailSender
 from app.observability import Metrics, configure_logging, configure_tracing
 from app.providers.dltv.bootstrap import DltvBootstrapClient
+from app.providers.dltv.results import DltvResultProvider
 from app.providers.dltv.socket import DltvSocketClient
 from app.providers.opendota.client import OpenDotaClient
 from app.providers.raybet.http import RayBetHttpClient, RayBetHttpPool
@@ -67,6 +68,11 @@ from app.providers.raybet.http_transport import CurlRayBetHttpClient, CurlRayBet
 from app.providers.raybet.socket import RayBetSocketClient
 from app.providers.stratz.client import StratzClient
 from app.providers.stratz.history import StratzHistoricalProvider
+from app.providers.wechat_clawbot import (
+    WeChatClawBotClient,
+    WeChatClawBotService,
+    WeChatClawBotStore,
+)
 from app.repositories.raw import RawEventRepository
 from app.runtime.health import HealthRegistry
 from app.runtime.supervisor import Supervisor
@@ -111,6 +117,7 @@ async def run() -> None:
     )
     raybet_socket = RayBetSocketClient(settings.raybet_socket_url, settings.raybet_origin)
     dltv_http = DltvBootstrapClient(settings.dltv_base_url)
+    dltv_result = DltvResultProvider(dltv_http)
     dltv_socket = DltvSocketClient(settings.dltv_base_url)
     opendota = OpenDotaClient(
         settings.opendota_base_url,
@@ -187,11 +194,29 @@ async def run() -> None:
         ai_providers,
         timeout_seconds=settings.ai_timeout_seconds,
         max_live_data_lag_seconds=settings.ai_max_live_data_lag_seconds,
+        virtual_bankroll=settings.ai_virtual_bankroll,
+        prior_decisions_limit=settings.ai_prior_decisions_limit,
     )
     email_notifications = _email_notifications(
         settings,
         session_factory=session_factory,
         jobs=jobs,
+    )
+    wechat_clawbot = (
+        WeChatClawBotService(
+            client=WeChatClawBotClient(
+                base_url=settings.wechat_clawbot_base_url,
+                bot_agent=settings.wechat_clawbot_bot_agent,
+                timeout_seconds=settings.wechat_clawbot_timeout_seconds,
+                long_poll_timeout_seconds=settings.wechat_clawbot_long_poll_timeout_seconds,
+            ),
+            store=WeChatClawBotStore(settings.wechat_clawbot_state_dir),
+            session_factory=session_factory,
+            jobs=jobs,
+            health=health,
+        )
+        if settings.wechat_clawbot_enabled
+        else None
     )
     future_odds = FutureOddsService(
         jobs,
@@ -237,6 +262,8 @@ async def run() -> None:
             future_odds=future_odds,
             settlement=SettlementService(),
             evaluation=EvaluationService(),
+            dltv_result=dltv_result,
+            wechat_clawbot=wechat_clawbot,
         )
     ).mapping()
     reconciliation = ReconciliationService(
@@ -501,6 +528,15 @@ async def run() -> None:
                 health=health,
             )
         )
+    if settings.run_provider_workers and wechat_clawbot is not None:
+        workers.append(
+            ServiceWorker(
+                name="WeChatClawBotWorker",
+                run=wechat_clawbot.run_inbound,
+                stop=wechat_clawbot.stop,
+                health_registry=health,
+            )
+        )
 
     frontend_dist = ROOT / "frontend" / "dist"
     app = create_app(
@@ -536,6 +572,8 @@ async def run() -> None:
         await supervisor_task
         if email_notifications is not None:
             await email_notifications.close()
+        if wechat_clawbot is not None:
+            await wechat_clawbot.stop()
         await ai.close()
         await opendota.close()
         if stratz_history is not None:
@@ -562,6 +600,8 @@ def _job_workers(*, settings, session_factory, jobs, handlers, health) -> list[S
     }
     if settings.email_notifications_enabled and not settings.email_configuration_errors:
         groups["EmailNotificationWorker"] = (JobType.SEND_DECISION_EMAIL,)
+    if settings.wechat_clawbot_enabled:
+        groups["WeChatDecisionWorker"] = (JobType.SEND_WECHAT_DECISION,)
     result = []
     identity = f"{socket.gethostname()}:{os.getpid()}"
     for name, job_types in groups.items():
@@ -668,15 +708,16 @@ def _ai_providers(settings: Settings):
                     timeout_seconds=settings.ai_timeout_seconds,
                 )
             )
-        providers.append(
-            DeepSeekDecisionProvider(
-                api_key=settings.deepseek_api_key.get_secret_value(),
-                model=settings.deepseek_pro_model,
-                base_url=settings.deepseek_base_url,
-                reasoning_effort=settings.deepseek_reasoning_effort,
-                timeout_seconds=settings.ai_timeout_seconds,
+        if settings.deepseek_pro_decisions_enabled:
+            providers.append(
+                DeepSeekDecisionProvider(
+                    api_key=settings.deepseek_api_key.get_secret_value(),
+                    model=settings.deepseek_pro_model,
+                    base_url=settings.deepseek_base_url,
+                    reasoning_effort=settings.deepseek_reasoning_effort,
+                    timeout_seconds=settings.ai_timeout_seconds,
+                )
             )
-        )
     if settings.kimi_api_key and settings.kimi_decisions_enabled:
         providers.append(
             KimiDecisionProvider(
@@ -740,6 +781,16 @@ async def _initialize_dependency_health(
             "UNKNOWN",
             recipient_count=len(settings.decision_email_recipients),
         )
+    if not settings.wechat_clawbot_enabled:
+        await health.dependency("WECHAT", "DISABLED")
+    elif WeChatClawBotStore(settings.wechat_clawbot_state_dir).account_count() == 0:
+        await health.dependency(
+            "WECHAT",
+            "ACTION_REQUIRED",
+            message="run: python -m tools.wechat_clawbot login",
+        )
+    else:
+        await health.dependency("WECHAT", "UNKNOWN")
     await health.dependency("STRATZ", "UNKNOWN" if settings.stratz_token else "ACTION_REQUIRED")
     await health.dependency(
         "DRAFT_ENGINE", "UNKNOWN" if settings.stratz_token else "ACTION_REQUIRED"

@@ -305,6 +305,8 @@ def render_decision_email(
                 f"对当前赔率的看法：{_assessment_label(normalized.get('market_assessment'))}",
                 f"认为 {team_a} 至少需要达到的赔率："
                 f"{_display(normalized.get('minimum_acceptable_odds_a'))}",
+                f"虚拟下注：{_display(normalized.get('stake'))}",
+                f"可用虚拟资金：{_display(decision.bankroll_before)}",
                 f"主要理由：{_translated_list(translated, normalized, 'primary_reasons')}",
                 f"可能出错的地方：{_translated_list(translated, normalized, 'counter_arguments')}",
                 "数据方面的顾虑："
@@ -414,6 +416,8 @@ def _decision_html(
         ("信心", _percent(value.get("confidence"))),
         ("对当前赔率的看法", _assessment_label(value.get("market_assessment"))),
         (f"{team_a} 最低可接受赔率", _display(value.get("minimum_acceptable_odds_a"))),
+        ("虚拟下注", _display(value.get("stake"))),
+        ("可用虚拟资金", _display(record.bankroll_before)),
         ("主要理由", _translated_list(translated, value, "primary_reasons")),
         ("可能出错的地方", _translated_list(translated, value, "counter_arguments")),
         ("数据方面的顾虑", _translated_list(translated, value, "data_quality_concerns")),
