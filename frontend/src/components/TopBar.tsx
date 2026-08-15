@@ -32,6 +32,10 @@ export const TopBar: React.FC<TopBarProps> = ({ runtime, onOpenDiagnostics, onRe
       </div>
 
       <div className="top-bar-right">
+        <a className="review-nav-btn" href="/review">
+          {locale === "zh-CN" ? "比赛复盘" : "Match Review"}
+        </a>
+
         <button
           className={`system-status-btn ${statusClass}`}
           onClick={onOpenDiagnostics}
