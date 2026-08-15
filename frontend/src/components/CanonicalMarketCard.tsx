@@ -2,7 +2,8 @@ import React from "react";
 import type { MapDetail, MapSummary } from "../api";
 import IntelligenceChart from "../Chart";
 import { useI18n } from "../i18n";
-import { formatOdds, primaryMarketPair } from "../utils/presentation";
+import { marketChartZoomWindow } from "../utils/marketChart";
+import { formatOdds, marketStageDisplayLabel, primaryMarketPair } from "../utils/presentation";
 
 const teamAColor = "#7C9CFF";
 const teamBColor = "#9C82FF";
@@ -22,13 +23,19 @@ export function CanonicalMarketCard({ match }: { match: MapSummary | MapDetail }
   const timeline = "market_timeline" in match ? match.market_timeline : [];
   const dataA = pair ? timeline.filter((item) => item.odds_id === pair.teamA.odds_id).map((item) => [item.received_at, Number(item.price)]) : [];
   const dataB = pair ? timeline.filter((item) => item.odds_id === pair.teamB.odds_id).map((item) => [item.received_at, Number(item.price)]) : [];
+  const timestamps = [...dataA, ...dataB].map((item) => Date.parse(String(item[0]))).filter(Number.isFinite);
+  const zoom = timestamps.length ? marketChartZoomWindow(timestamps, match.scheduled_at) : null;
   const age = pair ? Math.max(pair.teamA.age_seconds, pair.teamB.age_seconds) : null;
   const option = {
     animation: false,
     tooltip: { trigger: "axis" },
-    grid: { left: 38, right: 12, top: 18, bottom: 26 },
+    grid: { left: 38, right: 12, top: 18, bottom: 40 },
     xAxis: { type: "time", axisLabel: { color: "#687386", fontSize: 10, hideOverlap: true } },
     yAxis: { type: "value", scale: true, axisLabel: { color: "#687386", fontSize: 10 }, splitLine: { lineStyle: { color: "rgba(255,255,255,.05)" } } },
+    dataZoom: zoom ? [
+      { type: "inside", xAxisIndex: 0, startValue: zoom.start, endValue: zoom.end },
+      { type: "slider", xAxisIndex: 0, height: 14, bottom: 2, startValue: zoom.start, endValue: zoom.end, borderColor: "rgba(255,255,255,.08)", backgroundColor: "rgba(255,255,255,.03)", fillerColor: "rgba(124,156,255,.12)", handleStyle: { color: "#7C9CFF" }, textStyle: { color: "#687386", fontSize: 9 } }
+    ] : [],
     series: [
       { name: teamA, type: "line", smooth: true, showSymbol: false, lineStyle: { width: 2, color: teamAColor }, data: dataA },
       { name: teamB, type: "line", smooth: true, showSymbol: false, lineStyle: { width: 2, color: teamBColor }, data: dataB }
@@ -44,7 +51,11 @@ export function CanonicalMarketCard({ match }: { match: MapSummary | MapDetail }
           <div className="market-vs">VS</div>
           <div><span>{teamB}</span><strong style={{ color: teamBColor }}>{formatOdds(pair.teamB.price)}</strong><small>{t("fair")} {fairB != null ? pct(fairB, locale) : "—"}</small></div>
         </div>
-        <div className="player-market-meta"><span>{t("freshness")} <b>{age == null ? "—" : `${age.toFixed(1)}s`}</b></span><span>{t("pairSkew")} <b>{match.market_quality?.pair_skew_seconds == null ? "—" : `${match.market_quality.pair_skew_seconds.toFixed(1)}s`}</b></span></div>
+        <div className="player-market-meta">
+          <span>{t("marketStage")} <b>{marketStageDisplayLabel(match.map_number ?? null, match.best_of ?? null, pair.stage, locale)}</b></span>
+          <span>{t("freshness")} <b>{age == null ? "—" : `${age.toFixed(1)}s`}</b></span>
+          <span>{t("pairSkew")} <b>{match.market_quality?.pair_skew_seconds == null ? "—" : `${match.market_quality.pair_skew_seconds.toFixed(1)}s`}</b></span>
+        </div>
         <div className="player-market-chart">{dataA.length > 1 || dataB.length > 1 ? <IntelligenceChart option={option} /> : <span className="chart-empty">{t("waitingForOddsTrend")}</span>}</div>
       </> : <div className="empty-rail-msg">{t("marketUnavailable")}</div>}
     </section>

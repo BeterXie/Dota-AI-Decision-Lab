@@ -63,6 +63,8 @@ confidence = 1.0
 
 Other structured DLTV fields may be validation or future alternative evidence only after their contract is separately proven. They must not silently weaken this gate.
 
+The DLTV postmatch result normalizer uses this same authority: the `/live/{valve_match_id}.json` `winner` value (`radiant`/`dire`) is translated to a DLTV provider team ID only through these validated `is_radiant` booleans, then to a canonical team through `provider_team_mappings`.
+
 ## 4. Missing or conflicting evidence remains unknown
 
 Never repair missing side identity by guessing from provider first/second order, Team A/B order, array order, odds order, player order, team names alone, previous-map sides, or tournament convention.
@@ -192,7 +194,7 @@ The following regression cases are mandatory:
 3. Team A = Dire and Team B = Radiant moves Radiant roster history to Team B and Dire roster history to Team A;
 4. unresolved side identity removes roster-specific Team A/B history rather than leaving a potentially wrong assignment;
 5. unresolved sides with a complete draft degrade AI snapshot to the safe lower mode;
-6. frontend reversed-side fixture verifies Header, R.O.S.H., Lineup, and Live use the same mapping;
+6. frontend reversed-side fixture verifies Header kill score, R.O.S.H., Lineup, and Live use the same mapping;
 7. invalid/non-canonical side IDs are never rendered as verified teams.
 
 Changes to these semantics require updated regression tests and replay evidence. Passing visual tests alone is insufficient.

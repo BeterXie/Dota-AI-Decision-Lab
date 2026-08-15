@@ -19,11 +19,17 @@ export function getMatchDisplayPhase(match: MapSummary): MatchDisplayPhase {
   return "TRACKED";
 }
 
+export interface PrimaryMarketPair {
+  teamA: MarketObservation;
+  teamB: MarketObservation;
+  stage: string | null;
+}
+
 export function primaryMarketPair(
   markets: MarketObservation[],
   teamAId: string | null | undefined,
   teamBId: string | null | undefined
-): { teamA: MarketObservation; teamB: MarketObservation } | null {
+): PrimaryMarketPair | null {
   if (!teamAId || !teamBId) return null;
   const groups = new Map<string, MarketObservation[]>();
   for (const item of markets) {
@@ -38,7 +44,13 @@ export function primaryMarketPair(
     .filter((candidate): candidate is { key: string; teamA: MarketObservation; teamB: MarketObservation } => Boolean(candidate.teamA && candidate.teamB))
     .sort((left, right) => marketPriority(left.key) - marketPriority(right.key));
   const selected = candidates[0];
-  return selected ? { teamA: selected.teamA, teamB: selected.teamB } : null;
+  return selected
+    ? {
+        teamA: selected.teamA,
+        teamB: selected.teamB,
+        stage: selected.teamA.match_stage ?? selected.teamB.match_stage
+      }
+    : null;
 }
 
 function latestForTeam(items: MarketObservation[], teamId: string): MarketObservation | null {
@@ -59,6 +71,25 @@ export function formatOdds(value: number | string | null | undefined): string {
   if (value == null) return "—";
   const numeric = Number(value);
   return Number.isFinite(numeric) ? numeric.toFixed(2) : "—";
+}
+
+export function marketStageDisplayLabel(
+  mapNumber: number | null,
+  bestOf: number | null,
+  stage: string | null,
+  locale: string
+): string {
+  const zh = locale === "zh-CN";
+  if (stage?.toLowerCase() === "final" && mapNumber != null && bestOf != null && mapNumber === bestOf) {
+    return zh
+      ? `第${mapNumber}局（决胜局）· RayBet 将本局并入 BO3 胜者盘`
+      : `Map ${mapNumber} (decider) · merged into BO3 winner market`;
+  }
+  const map = stage?.match(/^r?(\d+)$/i);
+  if (map) {
+    return zh ? `第${map[1]}局` : `Map ${map[1]}`;
+  }
+  return stage ?? (zh ? "未知盘口" : "Unknown market stage");
 }
 
 export function median(values: number[]): number | null {

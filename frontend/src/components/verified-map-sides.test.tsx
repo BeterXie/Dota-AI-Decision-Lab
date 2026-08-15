@@ -85,6 +85,17 @@ test("header keeps series A/B separate from verified map sides", () => {
   expect(screen.getAllByText(/Alpha · DIRE/).length).toBeGreaterThanOrEqual(1);
 });
 
+test("header kill score is routed through verified sides into Team A/B columns", () => {
+  const { container } = withI18n(<PlayerMatchHeader match={match} />);
+
+  // Team A (Alpha) is Dire with 8 kills; Team B (Bravo) is Radiant with 10.
+  const score = container.querySelector(".score-number");
+  expect(score?.textContent?.replace(/\s/g, "")).toBe("8:10");
+  const scoreTime = container.querySelector(".score-time");
+  expect(scoreTime?.textContent).toContain("Alpha · DIRE");
+  expect(scoreTime?.textContent).toContain("Bravo · RADIANT");
+});
+
 test("R.O.S.H. attributes positive radiant edge to the verified radiant team", () => {
   withI18n(<PlayerDraftAdvantageCard match={match} />);
 

@@ -22,10 +22,23 @@ export const PlayerMatchHeader: React.FC<PlayerMatchHeaderProps> = ({ match, onS
   const pair = primaryMarketPair(match.market, match.team_a?.id, match.team_b?.id);
   const phase = getMatchDisplayPhase(match);
   const gameTime = match.live?.game_time_seconds;
-  const hasLiveScore = match.live?.radiant_kills != null && match.live?.dire_kills != null;
   const sides = resolveVerifiedMapSides(match);
   const teamASide = sides?.radiant.seriesSide === "A" ? "radiant" : sides?.dire.seriesSide === "A" ? "dire" : null;
   const teamBSide = sides?.radiant.seriesSide === "B" ? "radiant" : sides?.dire.seriesSide === "B" ? "dire" : null;
+  // The header columns are Team A and Team B, not Radiant and Dire. Kill
+  // counts must be routed through verified side identity, otherwise a swapped
+  // Radiant/Dire matchup shows the opponent's score under each team.
+  const teamAScore = teamASide === "radiant"
+    ? match.live?.radiant_kills
+    : teamASide === "dire"
+      ? match.live?.dire_kills
+      : null;
+  const teamBScore = teamBSide === "radiant"
+    ? match.live?.radiant_kills
+    : teamBSide === "dire"
+      ? match.live?.dire_kills
+      : null;
+  const hasLiveScore = sides !== null && teamAScore != null && teamBScore != null;
   const aiMedian = median(
     match.decisions
       .map((decision) => decision.decision?.fair_probability_a)
@@ -113,15 +126,15 @@ export const PlayerMatchHeader: React.FC<PlayerMatchHeaderProps> = ({ match, onS
         <div className="score-cell">
           {hasLiveScore ? (
             <>
-              <div className="score-number" aria-label={locale === "zh-CN" ? "天辉与夜魇击杀比分" : "Radiant versus Dire kill score"}>
-                <span className="score-radiant">{match.live?.radiant_kills}</span>
+              <div className="score-number" aria-label={locale === "zh-CN" ? "双方击杀比分" : "Team kill score"}>
+                <span className={teamASide === "dire" ? "score-dire" : "score-radiant"}>{teamAScore}</span>
                 <span className="score-divider">:</span>
-                <span className="score-dire">{match.live?.dire_kills}</span>
+                <span className={teamBSide === "dire" ? "score-dire" : "score-radiant"}>{teamBScore}</span>
               </div>
               <span className="score-time">
-                {sideScoreLabel(sides?.radiant.name, "radiant", locale)}
+                {sideScoreLabel(teamA, teamASide ?? "radiant", locale)}
                 {gameTime != null ? ` · ${formatGameTime(gameTime)} · ` : " · "}
-                {sideScoreLabel(sides?.dire.name, "dire", locale)}
+                {sideScoreLabel(teamB, teamBSide ?? "dire", locale)}
               </span>
             </>
           ) : (
