@@ -123,17 +123,19 @@ jobs:
         run: |
           npm test
           npm run build
-      - name: Remove temporary patch plumbing and commit
+      - name: Persist validated product code
         run: |
+          # The patch adds permanent CI gates too, but GitHub Actions tokens cannot
+          # update workflow files in this repository. Restore workflows here;
+          # the GitHub connector will update CI and remove temporary workflows.
+          git checkout HEAD -- .github/workflows/ci.yml
           rm tools/_apply_prelaunch_second_wave.py
-          rm .github/workflows/run-prelaunch-second-wave.yml
-          rm .github/workflows/run-prelaunch-audit.yml
           uv run ruff format app migrations tests tools
           uv run ruff check --fix app migrations tests tools
           uv run ruff check app migrations tests tools
           uv run ruff check --select S app migrations tools
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
+          git add -A -- ':!.github/workflows'
           git commit -m "fix: close prelaunch audit findings"
           git push origin HEAD:fix/prelaunch-hardening
