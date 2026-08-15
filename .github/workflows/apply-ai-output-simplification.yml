@@ -1,0 +1,312 @@
+name: Apply AI output simplification
+
+on:
+  push:
+    branches:
+      - perf/ai-output-simplification
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: perf/ai-output-simplification
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+        with:
+          version: "0.12.0"
+          python-version: "3.14"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Apply schema and presentation changes
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace_once(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != 1:
+                  raise SystemExit(f"{path}: expected one match, got {count}: {old!r}")
+              file.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          def replace_all(path: str, old: str, new: str, *, expected: int) -> None:
+              file = Path(path)
+              text = file.read_text(encoding="utf-8")
+              count = text.count(old)
+              if count != expected:
+                  raise SystemExit(f"{path}: expected {expected} matches, got {count}: {old!r}")
+              file.write_text(text.replace(old, new), encoding="utf-8")
+
+          # Prompt/output contract. Keep deliberative checks, stop requesting verbose lists.
+          replace_once("app/ai/base.py", "import hashlib\n", "import hashlib\nimport json\n")
+          replace_once(
+              "app/ai/base.py",
+              "from app.domain.decision import AiDecision\n",
+              "from app.domain.decision import AiDecision, LEGACY_EXPLANATION_FIELDS\n",
+          )
+          replace_once(
+              "app/ai/base.py",
+              'PROMPT_VERSION = "decision-analyst-v5-performance"',
+              'PROMPT_VERSION = "decision-analyst-v5.1-output"',
+          )
+          replace_once(
+              "app/ai/base.py",
+              "- Include concise primary reasons, counter-arguments, data-quality concerns, and\n  blockers.\n",
+              "- Before finalizing, internally challenge the leading conclusion with the strongest\n"
+              "  contrary evidence and data-quality limitations. Reflect material uncertainty in\n"
+              "  fair_probability_a/confidence and, when decision-relevant, primary_reasons.\n"
+              "- Do not output separate counter-argument or data-quality-concern lists. Use blockers\n"
+              "  only for conditions that prevent a reliable decision.\n",
+          )
+          replace_once(
+              "app/ai/base.py",
+              "def parse_decision(text: str, raw_response: dict[str, Any]) -> AiDecision:\n"
+              "    try:\n"
+              "        return AiDecision.model_validate_json(text)\n"
+              "    except Exception as exc:\n"
+              "        raise AiProviderFailure(\n"
+              "            f\"invalid AI decision JSON: {type(exc).__name__}: {exc}\",\n"
+              "            parse_status=\"PARSE_FAILED\",\n"
+              "            raw_response=raw_response,\n"
+              "        ) from exc\n",
+              "def parse_decision(text: str, raw_response: dict[str, Any]) -> AiDecision:\n"
+              "    try:\n"
+              "        payload = json.loads(text)\n"
+              "        if not isinstance(payload, dict):\n"
+              "            raise ValueError(\"AI decision must be a JSON object\")\n"
+              "        retired = sorted(LEGACY_EXPLANATION_FIELDS.intersection(payload))\n"
+              "        if retired:\n"
+              "            raise ValueError(\n"
+              "                \"AI decision contains retired output fields: \" + \", \".join(retired)\n"
+              "            )\n"
+              "        return AiDecision.model_validate(payload)\n"
+              "    except Exception as exc:\n"
+              "        raise AiProviderFailure(\n"
+              "            f\"invalid AI decision JSON: {type(exc).__name__}: {exc}\",\n"
+              "            parse_status=\"PARSE_FAILED\",\n"
+              "            raw_response=raw_response,\n"
+              "        ) from exc\n",
+          )
+
+          # Provider-facing input changes because prior decision objects become smaller.
+          replace_once("app/ai/input.py", 'AI_VIEW_VERSION = "ai-view-v5"', 'AI_VIEW_VERSION = "ai-view-v6"')
+          replace_once(
+              "app/ai/coordinator.py",
+              '                    "primary_reasons": item.decision.primary_reasons,\n'
+              '                    "counter_arguments": item.decision.counter_arguments,\n'
+              '                    "data_quality_concerns": item.decision.data_quality_concerns,\n',
+              '                    "primary_reasons": item.decision.primary_reasons,\n'
+              '                    "blockers": item.decision.blockers,\n',
+          )
+
+          # Non-strict chat-completions fallback gets the same compact contract.
+          replace_once(
+              "app/ai/chat_completions.py",
+              "                            '\"primary_reasons\":[],'\n"
+              "                            '\"counter_arguments\":[],\"data_quality_concerns\":[],\"blockers\":[]}. '\n",
+              "                            '\"primary_reasons\":[],\"blockers\":[]}. '\n",
+          )
+
+          # Email translation and rendering should not recreate fields the decision model no longer emits.
+          replace_once(
+              "app/notifications/translation.py",
+              '                "primary_reasons": _strings(record.normalized_response, "primary_reasons"),\n'
+              '                "counter_arguments": _strings(record.normalized_response, "counter_arguments"),\n'
+              '                "data_quality_concerns": _strings(\n'
+              '                    record.normalized_response, "data_quality_concerns"\n'
+              '                ),\n'
+              '                "blockers": _strings(record.normalized_response, "blockers"),\n',
+              '                "primary_reasons": _strings(record.normalized_response, "primary_reasons"),\n'
+              '                "blockers": _strings(record.normalized_response, "blockers"),\n',
+          )
+          replace_once(
+              "app/notifications/translation.py",
+              '        "primary_reasons": {"type": "array", "items": {"type": "string"}},\n'
+              '        "counter_arguments": {"type": "array", "items": {"type": "string"}},\n'
+              '        "data_quality_concerns": {"type": "array", "items": {"type": "string"}},\n'
+              '        "blockers": {"type": "array", "items": {"type": "string"}},\n',
+              '        "primary_reasons": {"type": "array", "items": {"type": "string"}},\n'
+              '        "blockers": {"type": "array", "items": {"type": "string"}},\n',
+          )
+          replace_once(
+              "app/notifications/email.py",
+              '                f"主要理由：{_translated_list(translated, normalized, \'primary_reasons\')}",\n'
+              '                f"可能出错的地方：{_translated_list(translated, normalized, \'counter_arguments\')}",\n'
+              '                "数据方面的顾虑："\n'
+              '                f"{_translated_list(translated, normalized, \'data_quality_concerns\')}",\n'
+              '                f"无法给出结论的原因：{_translated_list(translated, normalized, \'blockers\')}",\n',
+              '                f"主要理由：{_translated_list(translated, normalized, \'primary_reasons\')}",\n'
+              '                f"无法给出结论的原因：{_translated_list(translated, normalized, \'blockers\')}",\n',
+          )
+          replace_once(
+              "app/notifications/email.py",
+              '        ("主要理由", _translated_list(translated, value, "primary_reasons")),\n'
+              '        ("可能出错的地方", _translated_list(translated, value, "counter_arguments")),\n'
+              '        ("数据方面的顾虑", _translated_list(translated, value, "data_quality_concerns")),\n'
+              '        ("无法给出结论的原因", _translated_list(translated, value, "blockers")),\n',
+              '        ("主要理由", _translated_list(translated, value, "primary_reasons")),\n'
+              '        ("无法给出结论的原因", _translated_list(translated, value, "blockers")),\n',
+          )
+
+          # Dashboard: old API records may still carry legacy fields, but the UI no longer presents them.
+          replace_once(
+              "frontend/src/components/PlayerAiDecisionStrip.tsx",
+              '                      <ReasonList title={t("reasons")} values={item.decision?.primary_reasons} />\n'
+              '                      <ReasonList title={t("counterArguments")} values={item.decision?.counter_arguments} />\n'
+              '                      <ReasonList title={t("qualityConcerns")} values={item.decision?.data_quality_concerns} />\n',
+              '                      <ReasonList title={t("reasons")} values={item.decision?.primary_reasons} />\n',
+          )
+          replace_all("frontend/src/i18n.tsx", '    counterArguments: "Counter arguments",\n', '', expected=1)
+          replace_all("frontend/src/i18n.tsx", '    qualityConcerns: "Quality concerns",\n', '', expected=1)
+          replace_all("frontend/src/i18n.tsx", '    counterArguments: "反方论据",\n', '', expected=1)
+          replace_all("frontend/src/i18n.tsx", '    qualityConcerns: "质量问题",\n', '', expected=1)
+          replace_once(
+              "frontend/src/api.ts",
+              '    counter_arguments?: string[];\n    data_quality_concerns?: string[];\n',
+              '    /** Legacy records from prompt versions before v5.1-output only. */\n'
+              '    counter_arguments?: string[];\n'
+              '    /** Legacy records from prompt versions before v5.1-output only. */\n'
+              '    data_quality_concerns?: string[];\n',
+          )
+
+          # Provider fixtures must represent the new output contract; legacy constructor fixtures are
+          # intentionally left in place to exercise backward-compatible stored-decision parsing.
+          replace_once(
+              "tests/test_ai_providers.py",
+              '    "primary_reasons": ["Evidence is incomplete"],\n'
+              '    "counter_arguments": ["The market may already price known strength"],\n'
+              '    "data_quality_concerns": ["Historical sample is small"],\n'
+              '    "blockers": [],\n',
+              '    "primary_reasons": ["Evidence is incomplete"],\n'
+              '    "blockers": [],\n',
+          )
+          replace_once(
+              "tests/test_ai_coordinator.py",
+              '    assert record.ai_view_version == "ai-view-v5"\n',
+              '    assert record.ai_view_version == "ai-view-v6"\n',
+          )
+          replace_once(
+              "tests/test_ai_coordinator.py",
+              '    assert records[0].ai_view_version == "ai-view-v5"\n',
+              '    assert records[0].ai_view_version == "ai-view-v6"\n',
+          )
+          replace_once(
+              "tests/test_ai_coordinator.py",
+              '    assert prior["bankroll_after"] == 9_500.0\n',
+              '    assert prior["bankroll_after"] == 9_500.0\n'
+              '    assert "counter_arguments" not in prior\n'
+              '    assert "data_quality_concerns" not in prior\n'
+              '    assert prior["blockers"] == []\n',
+          )
+
+          # Update v5 performance guard to the new prompt contract and add explicit schema/legacy checks.
+          replace_once(
+              "tests/test_ai_v5_performance.py",
+              'from app.ai.base import (\n    PROMPT_VERSION,\n    SYSTEM_PROMPT,\n    ai_prompt_cache_key,\n    extract_provider_usage,\n)\n',
+              'from app.ai.base import (\n    PROMPT_VERSION,\n    SYSTEM_PROMPT,\n    AiProviderFailure,\n    ai_prompt_cache_key,\n    decision_json_schema,\n    extract_provider_usage,\n    parse_decision,\n)\n'
+              'from app.domain.decision import AiDecision\n',
+          )
+          replace_once(
+              "tests/test_ai_v5_performance.py",
+              '    assert PROMPT_VERSION == "decision-analyst-v5-performance"\n',
+              '    assert PROMPT_VERSION == "decision-analyst-v5.1-output"\n',
+          )
+          replace_once(
+              "tests/test_ai_v5_performance.py",
+              '        "Simplified Chinese",\n        "stake <= virtual_bankroll.bankroll_before",\n',
+              '        "Simplified Chinese",\n'
+              '        "stake <= virtual_bankroll.bankroll_before",\n'
+              '        "internally challenge the leading conclusion",\n'
+              '        "data-quality limitations",\n'
+              '        "do not output separate counter-argument",\n',
+          )
+          perf = Path("tests/test_ai_v5_performance.py")
+          text = perf.read_text(encoding="utf-8")
+          marker = "\n\ndef test_prompt_cache_key_is_stable_per_experiment() -> None:\n"
+          if text.count(marker) != 1:
+              raise SystemExit("tests/test_ai_v5_performance.py: insertion marker mismatch")
+          addition = '''\n\ndef test_output_schema_omits_verbose_explanation_lists_but_reads_legacy_records() -> None:\n    schema = decision_json_schema()\n    assert "counter_arguments" not in schema["properties"]\n    assert "data_quality_concerns" not in schema["properties"]\n    assert "primary_reasons" in schema["properties"]\n    assert "blockers" in schema["properties"]\n\n    legacy = AiDecision.model_validate(\n        {\n            "action": "NO_BUY",\n            "fair_probability_a": 0.5,\n            "confidence": 0.6,\n            "market_assessment": "FAIR",\n            "minimum_acceptable_odds_a": None,\n            "stake": None,\n            "primary_reasons": ["legacy"],\n            "counter_arguments": ["legacy counter"],\n            "data_quality_concerns": ["legacy quality"],\n            "blockers": [],\n        }\n    )\n    dumped = legacy.model_dump(mode="json")\n    assert "counter_arguments" not in dumped\n    assert "data_quality_concerns" not in dumped\n\n\ndef test_provider_output_rejects_retired_explanation_fields() -> None:\n    payload = {\n        "action": "NO_BUY",\n        "fair_probability_a": 0.5,\n        "confidence": 0.6,\n        "market_assessment": "FAIR",\n        "minimum_acceptable_odds_a": None,\n        "stake": None,\n        "primary_reasons": ["current"],\n        "counter_arguments": ["should not be emitted"],\n        "blockers": [],\n    }\n    try:\n        parse_decision(__import__("json").dumps(payload), {"fixture": True})\n    except AiProviderFailure as exc:\n        assert exc.parse_status == "PARSE_FAILED"\n        assert "retired output fields" in str(exc)\n    else:\n        raise AssertionError("retired provider output field was accepted")\n'''
+          perf.write_text(text.replace(marker, addition + marker, 1), encoding="utf-8")
+
+          # Email and translator tests enforce that presentation cannot resurrect retired lists.
+          replace_once(
+              "tests/test_email_notifications.py",
+              '    assert "主要理由：market.observations favors A" in text_body\n'
+              '    assert "可能出错的地方：quality.live_sync is CAUTION" in text_body\n'
+              '    assert "模型状态：回答格式异常" in text_body\n',
+              '    assert "主要理由：market.observations favors A" in text_body\n'
+              '    assert "可能出错的地方" not in text_body\n'
+              '    assert "数据方面的顾虑" not in text_body\n'
+              '    assert "模型状态：回答格式异常" in text_body\n',
+          )
+          replace_once(
+              "tests/test_email_notifications.py",
+              '                                                "primary_reasons": ["市场价格支持该判断"],\n'
+              '                                                "counter_arguments": ["同步可能有延迟"],\n'
+              '                                                "data_quality_concerns": ["实时数据需要谨慎"],\n'
+              '                                                "blockers": [],\n',
+              '                                                "primary_reasons": ["市场价格支持该判断"],\n'
+              '                                                "blockers": [],\n',
+          )
+          replace_once(
+              "tests/test_email_notifications.py",
+              '        ids = [item["decision_id"] for item in json.loads(payload["input"])]\n',
+              '        source = json.loads(payload["input"])\n'
+              '        assert all("counter_arguments" not in item for item in source)\n'
+              '        assert all("data_quality_concerns" not in item for item in source)\n'
+              '        ids = [item["decision_id"] for item in source]\n',
+          )
+
+          # Frontend regression: even legacy API fixtures must not render the retired sections.
+          player_test = Path("frontend/src/components/player-ai-decisions.test.tsx")
+          text = player_test.read_text(encoding="utf-8")
+          anchor = '    expect(screen.getByText("主要理由")).toBeInTheDocument();\n'
+          if anchor in text and 'queryByText("反方论据")' not in text:
+              text = text.replace(
+                  anchor,
+                  anchor
+                  + '    expect(screen.queryByText("反方论据")).not.toBeInTheDocument();\n'
+                  + '    expect(screen.queryByText("质量问题")).not.toBeInTheDocument();\n',
+                  1,
+              )
+          player_test.write_text(text, encoding="utf-8")
+
+          # Architecture docs: the current output contract is intentionally compact; historical records retain
+          # the retired keys in raw/normalized JSON for audit compatibility.
+          docs = Path("docs/ARCHITECTURE.md")
+          text = docs.read_text(encoding="utf-8")
+          text = text.replace("`counter_arguments`", "`counter_arguments`（仅历史记录兼容，不再由当前模型输出）")
+          text = text.replace("`data_quality_concerns`", "`data_quality_concerns`（仅历史记录兼容，不再由当前模型输出）")
+          docs.write_text(text, encoding="utf-8")
+
+      - name: Format and lint backend
+        run: |
+          uv sync --frozen --extra dev
+          uv run ruff format app/ai app/domain/decision.py app/notifications tests/test_ai_providers.py tests/test_ai_coordinator.py tests/test_ai_v5_performance.py tests/test_email_notifications.py
+          uv run ruff check app/ai app/domain/decision.py app/notifications tests/test_ai_providers.py tests/test_ai_coordinator.py tests/test_ai_v5_performance.py tests/test_email_notifications.py
+      - name: Run focused backend tests
+        run: uv run pytest tests/test_ai_providers.py tests/test_ai_coordinator.py tests/test_ai_v5_performance.py tests/test_ai_decision_integrity.py tests/test_email_notifications.py tests/test_backtest.py tests/test_virtual_pnl.py
+      - name: Run frontend unit tests and build
+        working-directory: frontend
+        run: |
+          npm ci
+          npm test
+          npm run build
+      - name: Commit product changes
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app docs frontend tests
+          git commit -m "perf(ai): stop emitting verbose explanation lists"
+          git push origin HEAD:perf/ai-output-simplification
