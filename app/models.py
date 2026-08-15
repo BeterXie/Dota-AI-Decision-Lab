@@ -691,9 +691,17 @@ class AiDecisionRecord(Base):
     # produced no buy decision or the attempt failed). Mirrors the stake field
     # in normalized_response for cheap bankroll reconstruction.
     stake: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    # End-to-end latency trace. request/response cover provider HTTP only; the
+    # durable-job and prepare timestamps explain the queue and DB phases that
+    # the user actually waits through before a decision appears in the UI.
+    job_enqueued_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    job_claimed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    input_prepare_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    input_prepare_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     request_started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     response_received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     latency_seconds: Mapped[float | None] = mapped_column(Float)
+    decision_persisted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     raw_response: Mapped[dict | None] = mapped_column(JSON_DOCUMENT)
     normalized_response: Mapped[dict | None] = mapped_column(JSON_DOCUMENT)
     parse_status: Mapped[str] = mapped_column(String(32), nullable=False)
@@ -816,6 +824,10 @@ class DecisionEvaluationRecord(Base):
     # result, or a BUY decision with no recorded stake/odds).
     virtual_pnl: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     virtual_odds: Mapped[Decimal | None] = mapped_column(Numeric(12, 5))
+    # Standardized 1-unit settlement for the same BUY decision. It isolates
+    # prediction/calibration quality from each model's discretionary stake
+    # sizing, so cross-model P&L comparisons are not dominated by risk appetite.
+    unit_pnl: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     metrics_version: Mapped[str] = mapped_column(String(64), nullable=False)
 

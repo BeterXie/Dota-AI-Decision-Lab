@@ -73,6 +73,10 @@ class OpenAiDecisionProvider:
             await self._client.aclose()
 
 
+class LocalOpenAiDecisionProvider(OpenAiDecisionProvider):
+    name = "local_openai"
+
+
 def response_output_text(payload: dict[str, Any], *, provider_name: str) -> str:
     for item in payload.get("output", []):
         if not isinstance(item, dict) or item.get("type") != "message":

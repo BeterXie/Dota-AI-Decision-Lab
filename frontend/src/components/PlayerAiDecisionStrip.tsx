@@ -89,7 +89,15 @@ export function PlayerAiDecisionStrip({ decisions }: { decisions: AiDecision[] }
                 <div><span>{locale === "zh-CN" ? "初始虚拟资金" : "Initial bankroll"}</span><strong>{formatMoney(initialBankroll(selected), locale)}</strong></div>
                 <div><span>{locale === "zh-CN" ? "累计虚拟下注" : "Total staked"}</span><strong>{formatMoney(totalStaked(selected), locale)}</strong></div>
                 <div><span>{locale === "zh-CN" ? "已结算虚拟盈亏" : "Settled virtual P&L"}</span><strong className={pnlTone(settledPnl(selected))}>{formatSignedMoney(settledPnl(selected), locale)}</strong></div>
-                <div><span>{locale === "zh-CN" ? "最终虚拟资金" : "Final bankroll"}</span><strong>{formatMoney(finalBankroll(selected), locale)}</strong></div>
+                  {pendingStake(selected) != null && pendingStake(selected)! > 0 && (
+                    <div><span>{locale === "zh-CN" ? "待结算虚拟下注" : "Pending unsettled stake"}</span><strong>{formatMoney(pendingStake(selected), locale)}</strong></div>
+                  )}
+                  {finalBankroll(selected) == null && (
+                    <div><span>{locale === "zh-CN" ? "当前可用虚拟资金" : "Current available bankroll"}</span><strong>{formatMoney(availableBankroll(selected), locale)}</strong></div>
+                  )}
+                {finalBankroll(selected) != null && (
+                    <div><span>{locale === "zh-CN" ? "最终虚拟资金" : "Final bankroll"}</span><strong>{formatMoney(finalBankroll(selected), locale)}</strong></div>
+                  )}
               </div>
               <div className="ai-round-timeline">
                 {selected.rounds.map((item, index) => {
@@ -122,7 +130,13 @@ export function PlayerAiDecisionStrip({ decisions }: { decisions: AiDecision[] }
                       <div className="detail-section inline-meta">
                         <span>{item.model_version}</span>
                         <span>{item.prompt_version}</span>
-                        <span>{item.latency_seconds == null ? "—" : `${item.latency_seconds.toFixed(2)}s`}</span>
+                          <span>{item.latency_seconds == null ? "—" : `inference ${item.latency_seconds.toFixed(2)}s`}</span>
+                          <span>
+                            {formatDuration(item.job_enqueued_at, item.job_claimed_at, "queue")}
+                          </span>
+                          <span>
+                            {formatDuration(item.job_enqueued_at, item.decision_persisted_at, "end-to-end")}
+                          </span>
                       </div>
                     </article>
                   );
@@ -180,6 +194,13 @@ function summaryFor(group: AiDecisionGroup) {
   };
 }
 
+
+function formatDuration(start: string | null | undefined, end: string | null | undefined, label: string): string {
+  if (!start || !end) return `${label} —`;
+  const seconds = (Date.parse(end) - Date.parse(start)) / 1000;
+  return Number.isFinite(seconds) ? `${label} ${seconds.toFixed(2)}s` : `${label} —`;
+}
+
 function numberOrNull(value: number | string | null | undefined): number | null {
   if (typeof value === "number" && Number.isFinite(value)) return value;
   if (typeof value === "string" && value.trim() !== "") {
@@ -223,9 +244,29 @@ function settledPnl(group: AiDecisionGroup): number | null {
 function finalBankroll(group: AiDecisionGroup): number | null {
   const initial = initialBankroll(group);
   if (initial == null) return null;
-  const staked = totalStaked(group) ?? 0;
+
   const pnl = settledPnl(group) ?? 0;
-  return initial - staked + pnl;
+  if (pendingStake(group) != null && pendingStake(group)! > 0) return null;
+  return initial + pnl;
+}
+
+function pendingStake(group: AiDecisionGroup): number | null {
+  let total = 0;
+  let found = false;
+  for (const item of group.rounds) {
+    const stake = numberOrNull(item.stake ?? item.decision?.stake);
+    if (stake == null || stake <= 0) continue;
+    if (numberOrNull(item.evaluation?.virtual_pnl) != null) continue;
+    total += stake;
+    found = true;
+  }
+  return found ? total : null;
+}
+
+function availableBankroll(group: AiDecisionGroup): number | null {
+  const initial = initialBankroll(group);
+  if (initial == null) return null;
+  return initial - (totalStaked(group) ?? 0);
 }
 
 function ReasonList({ title, values }: { title: string; values?: string[] }) {
@@ -260,6 +301,7 @@ function actionStyle(value: string): React.CSSProperties | undefined {
 
 function providerLabel(value: string): string {
   const normalized = value.toLowerCase();
+  if (normalized.includes("local_openai")) return "Local GPT";
   if (normalized.includes("openai")) return "GPT";
   if (normalized.includes("anthropic")) return "Claude";
   if (normalized.includes("google") || normalized.includes("gemini")) return "Gemini";

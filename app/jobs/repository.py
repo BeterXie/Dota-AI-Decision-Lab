@@ -261,6 +261,7 @@ class JobRepository:
             status=JobStatus(record.status),
             priority=record.priority,
             not_before=record.not_before,
+            created_at=record.created_at,
             attempt_count=record.attempt_count,
             max_attempts=record.max_attempts,
             locked_by=record.locked_by,

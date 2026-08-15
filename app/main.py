@@ -18,6 +18,7 @@ from app.ai import (
     DeepSeekDecisionProvider,
     GeminiDecisionProvider,
     KimiDecisionProvider,
+    LocalOpenAiDecisionProvider,
     OpenAiDecisionProvider,
 )
 from app.ai.base import ai_experiment_key
@@ -214,6 +215,9 @@ async def run() -> None:
             session_factory=session_factory,
             jobs=jobs,
             health=health,
+            live_state_max_age_seconds=settings.live_state_max_age_seconds,
+            live_market_max_age_seconds=settings.live_market_max_age_seconds,
+            market_max_pair_skew_seconds=settings.market_max_pair_skew_seconds,
         )
         if settings.wechat_clawbot_enabled
         else None
@@ -280,7 +284,10 @@ async def run() -> None:
         await reconciliation.run(session, now=datetime.now(UTC))
 
     hub = EventHub()
-    domain_dispatcher = DomainEventDispatcher(jobs)
+    domain_dispatcher = DomainEventDispatcher(
+        jobs,
+        ai_experiments=tuple(ai_experiment_key(item.name, item.model) for item in ai_providers),
+    )
     outbox_dispatcher = OutboxDispatcher(session_factory, hub.publish)
     workers = []
 
@@ -587,24 +594,29 @@ async def run() -> None:
 
 def _job_workers(*, settings, session_factory, jobs, handlers, health) -> list[ServiceWorker]:
     groups = {
-        "RayBetRegistryRefreshWorker": (JobType.REFRESH_ODDS_REGISTRY,),
-        "DltvBootstrapWorker": (JobType.BOOTSTRAP_DLTV_MATCH, JobType.REPAIR_LEGACY_DRAFT),
-        "HistoricalSyncWorker": (JobType.SYNC_HISTORICAL,),
-        "DraftCoordinator": (JobType.BUILD_DRAFT_CURVE,),
-        "SnapshotCoordinator": (JobType.BUILD_SNAPSHOT,),
-        "AiCoordinatorWorker": (JobType.RUN_AI_PROVIDER,),
-        "FutureOddsWorker": (JobType.CAPTURE_FUTURE_ODDS,),
-        "PostmatchResolverWorker": (JobType.RESOLVE_POSTMATCH,),
-        "SettlementWorker": (JobType.SETTLE_MAP,),
-        "EvaluationWorker": (JobType.EVALUATE_DECISION,),
+        "RayBetRegistryRefreshWorker": ((JobType.REFRESH_ODDS_REGISTRY,), 1),
+        "DltvBootstrapWorker": (
+            (JobType.BOOTSTRAP_DLTV_MATCH, JobType.REPAIR_LEGACY_DRAFT),
+            1,
+        ),
+        "HistoricalSyncWorker": ((JobType.SYNC_HISTORICAL,), 1),
+        "DraftCoordinator": ((JobType.BUILD_DRAFT_CURVE,), 1),
+        "SnapshotCoordinator": ((JobType.BUILD_SNAPSHOT,), 1),
+        # One job = one provider/model, so the AI worker pool owns multiple
+        # concurrent HTTP requests without a slow model blocking the rest.
+        "AiCoordinatorWorker": ((JobType.RUN_AI_PROVIDER,), settings.ai_worker_concurrency),
+        "FutureOddsWorker": ((JobType.CAPTURE_FUTURE_ODDS,), 1),
+        "PostmatchResolverWorker": ((JobType.RESOLVE_POSTMATCH,), 1),
+        "SettlementWorker": ((JobType.SETTLE_MAP,), 1),
+        "EvaluationWorker": ((JobType.EVALUATE_DECISION,), 1),
     }
     if settings.email_notifications_enabled and not settings.email_configuration_errors:
-        groups["EmailNotificationWorker"] = (JobType.SEND_DECISION_EMAIL,)
+        groups["EmailNotificationWorker"] = ((JobType.SEND_DECISION_EMAIL,), 1)
     if settings.wechat_clawbot_enabled:
-        groups["WeChatDecisionWorker"] = (JobType.SEND_WECHAT_DECISION,)
+        groups["WeChatDecisionWorker"] = ((JobType.SEND_WECHAT_DECISION,), 1)
     result = []
     identity = f"{socket.gethostname()}:{os.getpid()}"
-    for name, job_types in groups.items():
+    for name, (job_types, concurrency) in groups.items():
         runner = JobRunner(
             worker_id=f"{identity}:{name}",
             session_factory=session_factory,
@@ -613,6 +625,7 @@ def _job_workers(*, settings, session_factory, jobs, handlers, health) -> list[S
             poll_seconds=settings.job_poll_seconds,
             lease_seconds=settings.job_lease_seconds,
             job_types=job_types,
+            concurrency=concurrency,
         )
         result.append(
             ServiceWorker(
@@ -655,15 +668,18 @@ _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
 def _assert_bind_safety(settings: Settings) -> None:
-    """Refuse to expose the unauthenticated API beyond loopback.
+    """Defense-in-depth assertion that the dashboard binds to loopback only.
 
-    The dashboard has no auth layer (CORS is not a security boundary), so
-    binding a non-loopback address without an API token would publish match
-    intelligence and decision state to the network.
+    ``Settings.require_loopback_host`` already rejects non-loopback values at
+    config-parse time; this runtime check fails closed if a hand-built settings
+    object bypasses that validator. ``API_TOKEN`` is reserved for a future
+    authenticated remote-access mode and must not be interpreted as permission
+    to bind beyond loopback today.
     """
-    if settings.host not in _LOOPBACK_HOSTS and settings.api_token is None:
+    if settings.host not in _LOOPBACK_HOSTS:
         raise RuntimeError(
-            "refusing to start: HOST is non-loopback but API_TOKEN is not configured"
+            "refusing to start: HOST must be loopback until HTTP and WebSocket "
+            "authentication are implemented"
         )
 
 
@@ -676,6 +692,16 @@ def _ai_providers(settings: Settings):
                 model=settings.openai_model,
                 base_url=settings.openai_base_url,
                 reasoning_effort=settings.openai_reasoning_effort,
+                timeout_seconds=settings.ai_timeout_seconds,
+            )
+        )
+    if settings.local_openai_api_key:
+        providers.append(
+            LocalOpenAiDecisionProvider(
+                api_key=settings.local_openai_api_key.get_secret_value(),
+                model=settings.local_openai_model,
+                base_url=settings.local_openai_base_url,
+                reasoning_effort=settings.local_openai_reasoning_effort,
                 timeout_seconds=settings.ai_timeout_seconds,
             )
         )
@@ -797,6 +823,7 @@ async def _initialize_dependency_health(
     )
     provider_dependencies = {
         "openai": "GPT",
+        "local_openai": "LOCAL_GPT",
         "anthropic": "CLAUDE",
         "gemini": "GEMINI",
         "deepseek": "DEEPSEEK",

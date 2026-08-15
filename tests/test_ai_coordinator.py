@@ -385,3 +385,62 @@ async def test_no_buy_with_nonzero_stake_is_policy_failed() -> None:
     assert record.parse_status == "POLICY_FAILED"
     assert record.normalized_response is None
     await engine.dispose()
+
+
+
+@pytest.mark.asyncio
+async def test_bankroll_accounting_uses_all_history_while_context_window_is_limited() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    now = datetime(2026, 1, 1, 12, 30, tzinfo=UTC)
+    provider = FakeProvider("openai", model="fixture-model")
+
+    async with factory() as session, session.begin():
+        canonical_map = CanonicalMap(map_number=1)
+        session.add(canonical_map)
+        await session.flush()
+        first = await _persist_fixture_snapshot(
+            session,
+            canonical_map_id=canonical_map.id,
+            decision_at=now - timedelta(minutes=10),
+        )
+        await AiCoordinator(
+            [FakeProvider("openai", model="fixture-model", decision=_buy_decision(400.0))],
+            timeout_seconds=1,
+            virtual_bankroll=10_000.0,
+        ).run_all(session, first)
+        second = await _persist_fixture_snapshot(
+            session,
+            canonical_map_id=canonical_map.id,
+            decision_at=now - timedelta(minutes=5),
+        )
+        await AiCoordinator(
+            [FakeProvider("openai", model="fixture-model", decision=_buy_decision(600.0))],
+            timeout_seconds=1,
+            virtual_bankroll=10_000.0,
+        ).run_all(session, second)
+        third = await _persist_fixture_snapshot(
+            session,
+            canonical_map_id=canonical_map.id,
+            decision_at=now,
+        )
+        third_records = await AiCoordinator(
+            [provider],
+            timeout_seconds=1,
+            virtual_bankroll=10_000.0,
+            prior_decisions_limit=1,
+        ).run_all(session, third)
+
+    third_input = json.loads(provider.inputs[0])
+    bankroll = third_input["virtual_bankroll"]
+    # Both earlier stakes are deducted from the bankroll even though only the
+    # latest round is shown to the model.
+    assert bankroll["bankroll_before"] == 9_000.0
+    assert bankroll["unsettled_stakes"] == 1_000.0
+    assert len(third_input["prior_decisions"]) == 1
+    assert third_input["prior_decisions"][0]["stake"] == 600.0
+    assert third_input["prior_decisions"][0]["bankroll_before"] == 9_600.0
+    assert third_records[0].bankroll_before == 9_000.0
+    await engine.dispose()

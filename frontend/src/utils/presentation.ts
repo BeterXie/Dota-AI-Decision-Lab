@@ -67,6 +67,14 @@ function marketPriority(key: string): number {
   return 1;
 }
 
+export function targetProbability(
+  action: string | null | undefined,
+  fairProbabilityA: number | null | undefined
+): number | null {
+  if (typeof fairProbabilityA !== "number" || !Number.isFinite(fairProbabilityA)) return null;
+  return action === "BUY_B" ? 1 - fairProbabilityA : fairProbabilityA;
+}
+
 export function formatOdds(value: number | string | null | undefined): string {
   if (value == null) return "—";
   const numeric = Number(value);

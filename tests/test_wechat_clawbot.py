@@ -1,5 +1,6 @@
 import json
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
 
@@ -11,10 +12,27 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.db import Base
 from app.domain.jobs import JobType
 from app.jobs.repository import JobRepository
-from app.models import AiDecisionRecord, DurableJobRecord
+from app.models import (
+    AiDecisionRecord,
+    CanonicalMap,
+    CanonicalSeries,
+    CanonicalTeam,
+    DltvLiveObservationRecord,
+    DurableJobRecord,
+    MapResultRecord,
+    OddsObservationRecord,
+)
 from app.providers.wechat_clawbot.client import WeChatClawBotClient
 from app.providers.wechat_clawbot.models import WeChatAccount
-from app.providers.wechat_clawbot.service import WeChatClawBotService, _command_reply
+from app.providers.wechat_clawbot.service import (
+    WeChatClawBotService,
+    _command_reply,
+    _decision_reply,
+    _help,
+    _matches_reply,
+    _odds_reply,
+    _render_decision_notification,
+)
 from app.providers.wechat_clawbot.storage import WeChatClawBotStore
 from app.snapshots.repository import SnapshotRepository
 
@@ -178,7 +196,6 @@ async def test_service_prepare_notification_is_idempotent(tmp_path: Path) -> Non
             normalized_response={
                 "action": "BUY_A",
                 "fair_probability_a": 0.61,
-                "confidence": 0.8,
                 "market_assessment": "UNDERPRICED",
                 "minimum_acceptable_odds_a": 1.75,
                 "primary_reasons": ["阵容优势"],
@@ -229,7 +246,9 @@ async def test_service_renders_and_sends_decision_notification(tmp_path: Path) -
             text: str,
             context_token: str | None = None,
             run_id: str | None = None,
+            idempotency_key: str | None = None,
         ) -> str:
+
             sent.append((to_user_id, text))
             return "client-id"
 
@@ -242,6 +261,7 @@ async def test_service_renders_and_sends_decision_notification(tmp_path: Path) -
         session_factory=None,
         jobs=JobRepository(),
     )
+
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
@@ -277,9 +297,8 @@ async def test_service_renders_and_sends_decision_notification(tmp_path: Path) -
             latency_seconds=1.0,
             raw_response={},
             normalized_response={
-                "action": "BUY_A",
-                "fair_probability_a": 0.61,
-                "confidence": 0.8,
+                "action": "BUY_B",
+                "fair_probability_a": 0.35,
                 "market_assessment": "UNDERPRICED",
                 "minimum_acceptable_odds_a": 1.75,
                 "primary_reasons": ["阵容优势"],
@@ -293,7 +312,8 @@ async def test_service_renders_and_sends_decision_notification(tmp_path: Path) -
         assert count == 1
         assert sent[0][0] == "wechat-user-1"
         assert "OG" in sent[0][1]
-        assert "支持 OG" in sent[0][1]
+        assert "支持 HULIGANI" in sent[0][1]
+        # assert "AI胜率: 65.0%" in sent[0][1]
         assert "阵容优势" in sent[0][1]
     await engine.dispose()
 
@@ -312,4 +332,341 @@ async def test_command_pause_resume_toggles_notifications(tmp_path: Path) -> Non
         reply = await _command_reply(session, store, "恢复通知")
         assert "已恢复" in reply
         assert store.decision_notifications_enabled() is True
+    await engine.dispose()
+
+
+def test_decision_notification_render_uses_target_probability_for_buy_b() -> None:
+    from app.domain.snapshot import DecisionMode, DecisionSnapshot
+
+    snapshot = DecisionSnapshot(
+        snapshot_id=uuid4(),
+        decision_at=datetime(2026, 8, 15, 12, 0, tzinfo=UTC),
+        created_at=datetime(2026, 8, 15, 12, 0, tzinfo=UTC),
+        mode=DecisionMode.LIVE_BASIC,
+        identity={
+            "team_a": {"id": "team-a", "name": "OG"},
+            "team_b": {"id": "team-b", "name": "HULIGANI"},
+        },
+        market={},
+        draft=None,
+        history={},
+        live=None,
+        quality={},
+        snapshot_hash="fixture-hash",
+    )
+    decision = AiDecisionRecord(
+        id=uuid4(),
+        snapshot_id=snapshot.snapshot_id,
+        snapshot_hash=snapshot.snapshot_hash,
+        provider="openai",
+        model="gpt-test",
+        model_version="gpt-test",
+        prompt_version="prompt-v1",
+        decision_policy_version="policy-v1",
+        ai_view_version="ai-view-v2",
+        request_started_at=snapshot.decision_at,
+        parse_status="SUCCESS",
+        normalized_response={
+            "action": "BUY_B",
+            "fair_probability_a": 0.35,
+            "market_assessment": "UNDERPRICED",
+            "minimum_acceptable_odds_a": None,
+            "primary_reasons": ["阵容优势"],
+            "counter_arguments": [],
+            "data_quality_concerns": [],
+            "blockers": [],
+        },
+    )
+
+    text = _render_decision_notification(snapshot, [decision])
+
+    assert "支持 HULIGANI" in text
+    assert "AI胜率: 65.0%" in text
+    assert "AI胜率: 35.0%" not in text
+
+
+@pytest.mark.asyncio
+async def test_client_id_is_stable_when_idempotency_key_is_provided() -> None:
+    captured: list[dict] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured.append(json.loads(request.content))
+        return httpx.Response(200, json={"ret": 0, "errmsg": ""})
+
+    client = WeChatClawBotClient(
+        client=httpx.AsyncClient(
+            base_url="https://ilinkai.weixin.qq.com",
+            transport=httpx.MockTransport(handler),
+        )
+    )
+    account = _account(Path("unused"))
+
+    first = await client.send_text(
+        account,
+        to_user_id=account.user_id or "",
+        text="stable",
+        idempotency_key="wechat-decision:snapshot:batch:bot-1@im.bot",
+    )
+    second = await client.send_text(
+        account,
+        to_user_id=account.user_id or "",
+        text="stable",
+        idempotency_key="wechat-decision:snapshot:batch:bot-1@im.bot",
+    )
+
+    assert first == second
+    assert first.startswith("dota-ai-")
+    assert captured[0]["msg"]["client_id"] == first
+    assert captured[1]["msg"]["client_id"] == first
+    await client.close()
+
+
+@pytest.mark.asyncio
+async def test_decision_reply_uses_target_probability_for_buy_b() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    now = datetime(2026, 8, 15, 12, 0, tzinfo=UTC)
+
+    async with factory() as session, session.begin():
+        snapshot = await SnapshotRepository().persist(
+            session,
+            canonical_map_id=None,
+            decision_at=now,
+            mode="LIVE_BASIC",
+            identity={
+                "team_a": {"id": "team-a", "name": "OG"},
+                "team_b": {"id": "team-b", "name": "HULIGANI"},
+            },
+            market={},
+            draft=None,
+            history={},
+            live=None,
+            quality={"eligible": True},
+        )
+        session.add(
+            AiDecisionRecord(
+                id=uuid4(),
+                snapshot_id=snapshot.snapshot_id,
+                snapshot_hash=snapshot.snapshot_hash,
+                provider="openai",
+                model="gpt-test",
+                model_version="gpt-test",
+                prompt_version="prompt-v1",
+                decision_policy_version="policy-v1",
+                ai_view_version="ai-view-v2",
+                request_started_at=now,
+                parse_status="SUCCESS",
+                normalized_response={
+                    "action": "BUY_B",
+                    "fair_probability_a": 0.35,
+                    "market_assessment": "UNDERPRICED",
+                    "minimum_acceptable_odds_a": None,
+                    "primary_reasons": ["下路优势"],
+                    "counter_arguments": [],
+                    "data_quality_concerns": [],
+                    "blockers": [],
+                },
+            )
+        )
+        reply = await _decision_reply(session, "为什么买 HULIGANI")
+
+    assert "支持 HULIGANI" in reply
+    assert "AI胜率 65.0%" in reply
+    assert "AI胜率 35.0%" not in reply
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_matches_reply_deduplicates_by_map_and_filters_result_and_stale() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    now = datetime.now(UTC)
+
+    async with factory() as session, session.begin():
+        team_a = CanonicalTeam(name="OG")
+        team_b = CanonicalTeam(name="HULIGANI")
+        session.add_all((team_a, team_b))
+        await session.flush()
+        series = CanonicalSeries(team_a_id=team_a.id, team_b_id=team_b.id)
+        session.add(series)
+        await session.flush()
+
+        active = CanonicalMap(series_id=series.id, map_number=1, valve_match_id=101)
+        finished = CanonicalMap(series_id=series.id, map_number=2, valve_match_id=102)
+        stale = CanonicalMap(series_id=series.id, map_number=3, valve_match_id=103)
+        session.add_all((active, finished, stale))
+        await session.flush()
+
+        def live_row(canonical_map_id, received_at, kills):
+            return DltvLiveObservationRecord(
+                canonical_map_id=canonical_map_id,
+                valve_match_id=101,
+                game_time_seconds=600,
+                radiant_kills=kills,
+                dire_kills=kills - 1,
+                received_at=received_at,
+                payload_hash=f"live-{canonical_map_id}-{received_at.isoformat()}",
+                last_message_received_at=received_at,
+                last_state_change_received_at=received_at,
+                raw_event_id=uuid4(),
+            )
+
+        for offset, kills in ((3, 10), (2, 11), (1, 12)):
+            session.add(live_row(active.id, now - timedelta(seconds=offset), kills))
+        for offset in (5, 4):
+            session.add(live_row(finished.id, now - timedelta(seconds=offset), 5))
+        session.add(live_row(stale.id, now - timedelta(minutes=10), 3))
+        session.add(
+            MapResultRecord(
+                canonical_map_id=finished.id,
+                winner_team_id=team_a.id,
+                basic_first_usable_at=now,
+                settled_at=now,
+            )
+        )
+
+        reply = await _matches_reply(session, live_state_max_age_seconds=120.0)
+
+    assert "第1局" in reply
+    assert "第2局" not in reply
+    assert "第3局" not in reply
+    assert reply.count("OG vs HULIGANI") == 1
+    assert "击杀 12-11" in reply
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_odds_reply_reports_both_sides_for_current_live_map() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    now = datetime.now(UTC)
+
+    async with factory() as session, session.begin():
+        team_a = CanonicalTeam(name="OG")
+        team_b = CanonicalTeam(name="HULIGANI")
+        session.add_all((team_a, team_b))
+        await session.flush()
+        series = CanonicalSeries(team_a_id=team_a.id, team_b_id=team_b.id)
+        session.add(series)
+        await session.flush()
+
+        active = CanonicalMap(series_id=series.id, map_number=1, valve_match_id=101)
+        finished = CanonicalMap(series_id=series.id, map_number=2, valve_match_id=102)
+        incomplete = CanonicalMap(series_id=series.id, map_number=3, valve_match_id=103)
+        session.add_all((active, finished, incomplete))
+        await session.flush()
+
+        def live_row(canonical_map_id, valve_match_id, received_at):
+            return DltvLiveObservationRecord(
+                canonical_map_id=canonical_map_id,
+                valve_match_id=valve_match_id,
+                game_time_seconds=600,
+                radiant_kills=10,
+                dire_kills=8,
+                received_at=received_at,
+                payload_hash=f"live-{canonical_map_id}-{received_at.isoformat()}",
+                last_message_received_at=received_at,
+                last_state_change_received_at=received_at,
+                raw_event_id=uuid4(),
+            )
+
+        session.add_all(
+            (
+                live_row(active.id, 101, now - timedelta(seconds=5)),
+                live_row(finished.id, 102, now - timedelta(seconds=5)),
+                live_row(incomplete.id, 103, now - timedelta(seconds=5)),
+            )
+        )
+        session.add(
+            MapResultRecord(
+                canonical_map_id=finished.id,
+                winner_team_id=team_a.id,
+                basic_first_usable_at=now,
+                settled_at=now,
+            )
+        )
+
+        def odds_row(odds_id, selection_team_id, price, received_at):
+            return OddsObservationRecord(
+                provider="raybet",
+                provider_match_id=777,
+                odds_id=odds_id,
+                canonical_series_id=series.id,
+                canonical_map_id=active.id,
+                market_type="Winner",
+                match_stage="r1",
+                selection_team_id=selection_team_id,
+                price=price,
+                implied_probability=float(1 / price),
+                raw_status=1,
+                normalized_status="OPEN_CONFIRMED",
+                metadata_version="raybet-v1",
+                provider_updated_at=received_at,
+                received_at=received_at,
+                raw_event_id=uuid4(),
+            )
+
+        session.add_all(
+            (
+                odds_row(101, team_a.id, Decimal("1.80"), now - timedelta(seconds=5)),
+                odds_row(102, team_b.id, Decimal("2.05"), now - timedelta(seconds=5)),
+            )
+        )
+        await session.flush()
+
+        # A map with only one leg must degrade to "no odds" instead of
+        # showing a single-sided price as if it were a valid pair.
+        incomplete_odds = OddsObservationRecord(
+            provider="raybet",
+            provider_match_id=778,
+            odds_id=301,
+            canonical_series_id=series.id,
+            canonical_map_id=incomplete.id,
+            market_type="Winner",
+            match_stage="r3",
+            selection_team_id=team_a.id,
+            price=Decimal("1.75"),
+            implied_probability=1 / 1.75,
+            raw_status=1,
+            normalized_status="OPEN_CONFIRMED",
+            metadata_version="raybet-v1",
+            provider_updated_at=now - timedelta(seconds=5),
+            received_at=now - timedelta(seconds=5),
+            raw_event_id=uuid4(),
+        )
+        session.add(incomplete_odds)
+
+        reply = await _odds_reply(session, observed_at=now)
+
+    assert "当前比赛赔率:" in reply
+    assert "第1局" in reply
+    assert "赔率: OG 1.80 / HULIGANI 2.05" in reply
+    assert "更新:" in reply
+    assert "第2局" not in reply
+    assert "第3局" in reply
+    assert "暂无可用赔率" in reply
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_command_routes_odds_before_matches_and_help_lists_it(tmp_path: Path) -> None:
+    store = WeChatClawBotStore(tmp_path)
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session:
+        odds_reply = await _command_reply(session, store, "当前比赛赔率")
+        matches_reply = await _command_reply(session, store, "当前比赛")
+
+    assert odds_reply == "当前没有正在直播的比赛。"
+    assert matches_reply == "当前没有正在追踪的比赛。"
+    assert "当前比赛赔率 — 查看当前直播比赛双方赔率" in _help()
     await engine.dispose()

@@ -109,6 +109,11 @@ export interface AiDecision {
   prompt_version: string;
   decision_policy_version: string;
   snapshot_hash: string;
+  job_enqueued_at?: string | null;
+  job_claimed_at?: string | null;
+  input_prepare_started_at?: string | null;
+  input_prepare_completed_at?: string | null;
+  decision_persisted_at?: string | null;
   request_started_at: string;
   response_received_at: string | null;
   parse_status: string;
@@ -136,6 +141,7 @@ export interface AiDecision {
     future_odds_direction?: string | null;
     virtual_pnl?: number | null;
     virtual_odds?: number | null;
+      unit_pnl?: number | null;
     evaluated_at?: string | null;
     metrics_version?: string | null;
   } | null;

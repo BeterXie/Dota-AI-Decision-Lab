@@ -1,14 +1,17 @@
 import asyncio
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import structlog
-from sqlalchemy import select
+from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import aliased
 
+from app.domain.decision import target_probability
 from app.domain.jobs import JobType
 from app.domain.snapshot import DecisionSnapshot
 from app.jobs.repository import JobRepository
+from app.market.current import evaluate_current_market_pair, map_market_stages
 from app.models import (
     AiDecisionRecord,
     CanonicalMap,
@@ -16,6 +19,8 @@ from app.models import (
     CanonicalTeam,
     DecisionSnapshotRecord,
     DltvLiveObservationRecord,
+    MapResultRecord,
+    OddsObservationRecord,
 )
 from app.providers.wechat_clawbot.client import WeChatClawBotClient
 from app.providers.wechat_clawbot.models import (
@@ -25,6 +30,7 @@ from app.providers.wechat_clawbot.models import (
 )
 from app.providers.wechat_clawbot.storage import WeChatClawBotStore
 from app.runtime.health import HealthRegistry
+from app.time import ensure_utc
 
 logger = structlog.get_logger()
 
@@ -45,12 +51,18 @@ class WeChatClawBotService:
         session_factory: async_sessionmaker[AsyncSession],
         jobs: JobRepository,
         health: HealthRegistry | None = None,
+        live_state_max_age_seconds: float = 120.0,
+        live_market_max_age_seconds: float = 90.0,
+        market_max_pair_skew_seconds: float = 5.0,
     ) -> None:
         self._client = client
         self._store = store
         self._session_factory = session_factory
         self._jobs = jobs
         self._health = health
+        self._live_state_max_age_seconds = live_state_max_age_seconds
+        self._live_market_max_age_seconds = live_market_max_age_seconds
+        self._market_max_pair_skew_seconds = market_max_pair_skew_seconds
         self._stop = asyncio.Event()
         self._inbound_task: asyncio.Task | None = None
         self._closed = False
@@ -97,6 +109,7 @@ class WeChatClawBotService:
         if not accounts:
             return 0
         text = _render_decision_notification(snapshot, decisions)
+        decision_batch_key = ",".join(sorted(str(item.id) for item in decisions))
         sent = 0
         for account in accounts:
             if not account.user_id:
@@ -106,6 +119,10 @@ class WeChatClawBotService:
                 to_user_id=account.user_id,
                 text=text,
                 context_token=account.context_token,
+                idempotency_key=(
+                    f"wechat-decision:{snapshot.snapshot_id}:"
+                    f"{decision_batch_key}:{account.account_id}"
+                ),
             )
             sent += 1
         return sent
@@ -194,7 +211,14 @@ class WeChatClawBotService:
     ) -> None:
         if not message.from_user_id:
             return
-        reply = await _command_reply(session, self._store, message.text)
+        reply = await _command_reply(
+            session,
+            self._store,
+            message.text,
+            live_state_max_age_seconds=self._live_state_max_age_seconds,
+            live_market_max_age_seconds=self._live_market_max_age_seconds,
+            market_max_pair_skew_seconds=self._market_max_pair_skew_seconds,
+        )
         await self._client.send_text(
             account,
             to_user_id=message.from_user_id,
@@ -253,7 +277,12 @@ def _render_decision_notification(
             "INSUFFICIENT_DATA": "数据不足",
         }.get(str(action), str(action or "未知"))
         confidence = normalized.get("confidence")
-        probability = normalized.get("fair_probability_a")
+        probability = target_probability(
+            str(action),
+            normalized.get("fair_probability_a")
+            if isinstance(normalized.get("fair_probability_a"), (int, float))
+            else None,
+        )
         lines.append(f"▪ {decision.provider.upper()} / {decision.model}: {label}")
         if isinstance(probability, (int, float)):
             lines.append(f"  AI胜率: {probability * 100:.1f}%")
@@ -270,12 +299,24 @@ async def _command_reply(
     session: AsyncSession,
     store: WeChatClawBotStore,
     text: str,
+    *,
+    live_state_max_age_seconds: float = 120.0,
+    live_market_max_age_seconds: float = 90.0,
+    market_max_pair_skew_seconds: float = 5.0,
 ) -> str:
     normalized = text.strip().casefold()
     if not normalized:
         return _help()
+    # Check the more specific odds command before the generic matches command.
+    if "当前比赛赔率" in normalized:
+        return await _odds_reply(
+            session,
+            live_state_max_age_seconds=live_state_max_age_seconds,
+            live_market_max_age_seconds=live_market_max_age_seconds,
+            market_max_pair_skew_seconds=market_max_pair_skew_seconds,
+        )
     if "当前比赛" in normalized or normalized in {"matches", "比赛"}:
-        return await _matches_reply(session)
+        return await _matches_reply(session, live_state_max_age_seconds=live_state_max_age_seconds)
     if "暂停" in normalized and "通知" in normalized:
         store.set_decision_notifications(False)
         return "✅ 已暂停 AI 决策微信通知。发送「恢复通知」重新开启。"
@@ -289,10 +330,31 @@ async def _command_reply(
     return _help()
 
 
-async def _matches_reply(session: AsyncSession) -> str:
+async def _current_live_map_rows(
+    session: AsyncSession,
+    *,
+    observed_at: datetime,
+    live_state_max_age_seconds: float,
+) -> list[
+    tuple[CanonicalMap, CanonicalSeries, CanonicalTeam, CanonicalTeam, DltvLiveObservationRecord]
+]:
     team_a_alias = aliased(CanonicalTeam)
     team_b_alias = aliased(CanonicalTeam)
-    maps = list(
+    # One observation stream can emit many rows per map; keep only the latest
+    # live observation per map (the same subquery pattern used by the web API),
+    # then drop maps that already have a result or whose latest observation is
+    # stale.  This prevents one active map from filling all five reply slots.
+    latest_live = (
+        select(
+            DltvLiveObservationRecord.canonical_map_id,
+            func.max(DltvLiveObservationRecord.received_at).label("latest_received_at"),
+        )
+        .where(DltvLiveObservationRecord.canonical_map_id.is_not(None))
+        .group_by(DltvLiveObservationRecord.canonical_map_id)
+        .subquery()
+    )
+    freshness_cutoff = observed_at - timedelta(seconds=live_state_max_age_seconds)
+    return list(
         (
             await session.execute(
                 select(
@@ -305,15 +367,35 @@ async def _matches_reply(session: AsyncSession) -> str:
                 .join(CanonicalSeries, CanonicalSeries.id == CanonicalMap.series_id)
                 .join(team_a_alias, team_a_alias.id == CanonicalSeries.team_a_id)
                 .join(team_b_alias, team_b_alias.id == CanonicalSeries.team_b_id)
+                .join(latest_live, latest_live.c.canonical_map_id == CanonicalMap.id)
                 .join(
                     DltvLiveObservationRecord,
-                    DltvLiveObservationRecord.canonical_map_id == CanonicalMap.id,
+                    and_(
+                        DltvLiveObservationRecord.canonical_map_id
+                        == latest_live.c.canonical_map_id,
+                        DltvLiveObservationRecord.received_at == latest_live.c.latest_received_at,
+                    ),
                 )
-                .where(CanonicalMap.valve_match_id.is_not(None))
-                .order_by(DltvLiveObservationRecord.received_at.desc())
+                .outerjoin(MapResultRecord, MapResultRecord.canonical_map_id == CanonicalMap.id)
+                .where(
+                    CanonicalMap.valve_match_id.is_not(None),
+                    MapResultRecord.id.is_(None),
+                    DltvLiveObservationRecord.received_at >= freshness_cutoff,
+                )
+                .order_by(latest_live.c.latest_received_at.desc())
                 .limit(5)
             )
         ).all()
+    )
+
+
+async def _matches_reply(
+    session: AsyncSession, *, live_state_max_age_seconds: float = 120.0
+) -> str:
+    maps = await _current_live_map_rows(
+        session,
+        observed_at=datetime.now(UTC),
+        live_state_max_age_seconds=live_state_max_age_seconds,
     )
     if not maps:
         return "当前没有正在追踪的比赛。"
@@ -323,6 +405,85 @@ async def _matches_reply(session: AsyncSession) -> str:
             f"▪ {team_a.name} vs {team_b.name} · 第{map_record.map_number or '?'}局"
             f" · 击杀 {live.radiant_kills}-{live.dire_kills}"
         )
+    return "\n".join(lines)
+
+
+async def _odds_reply(
+    session: AsyncSession,
+    *,
+    live_state_max_age_seconds: float = 120.0,
+    live_market_max_age_seconds: float = 90.0,
+    market_max_pair_skew_seconds: float = 5.0,
+    observed_at: datetime | None = None,
+) -> str:
+    observed_at = observed_at if observed_at is not None else datetime.now(UTC)
+    maps = await _current_live_map_rows(
+        session,
+        observed_at=observed_at,
+        live_state_max_age_seconds=live_state_max_age_seconds,
+    )
+    if not maps:
+        return "当前没有正在直播的比赛。"
+    map_ids = [map_record.id for map_record, _series, _team_a, _team_b, _live in maps]
+    series_ids = [series.id for _map_record, series, _team_a, _team_b, _live in maps]
+    latest_market_times = (
+        select(
+            OddsObservationRecord.odds_id,
+            func.max(OddsObservationRecord.received_at).label("latest_received_at"),
+        )
+        .where(
+            OddsObservationRecord.market_type == "Winner",
+            or_(
+                OddsObservationRecord.canonical_map_id.in_(map_ids),
+                OddsObservationRecord.canonical_series_id.in_(series_ids),
+            ),
+        )
+        .group_by(OddsObservationRecord.odds_id)
+        .subquery()
+    )
+    market_rows = list(
+        (
+            await session.scalars(
+                select(OddsObservationRecord).join(
+                    latest_market_times,
+                    and_(
+                        OddsObservationRecord.odds_id == latest_market_times.c.odds_id,
+                        OddsObservationRecord.received_at
+                        == latest_market_times.c.latest_received_at,
+                    ),
+                )
+            )
+        ).all()
+    )
+    lines = ["当前比赛赔率:"]
+    for map_record, series, team_a, team_b, _live in maps:
+        lines.append(f"▪ {team_a.name} vs {team_b.name} · 第{map_record.map_number or '?'}局")
+        stages = map_market_stages(map_record.map_number, best_of=series.best_of)
+        candidate_rows = [
+            row
+            for row in market_rows
+            if row.match_stage in stages
+            and (row.canonical_map_id == map_record.id or row.canonical_series_id == series.id)
+        ]
+        evaluated = evaluate_current_market_pair(
+            candidate_rows,
+            series=series,
+            canonical_map_id=map_record.id,
+            observed_at=observed_at,
+            live_market_max_age_seconds=live_market_max_age_seconds,
+            market_max_pair_skew_seconds=market_max_pair_skew_seconds,
+        )
+        if evaluated is None:
+            lines.append("  赔率: 暂无可用赔率")
+            continue
+        (leg_a, leg_b), quality = evaluated
+        status_note = "" if quality.eligible else " · ⚠️ 赔率未通过实时校验"
+        lines.append(
+            f"  赔率: {team_a.name} {leg_a.price:.2f}"
+            f" / {team_b.name} {leg_b.price:.2f}{status_note}"
+        )
+        updated_at = ensure_utc(max(leg_a.received_at, leg_b.received_at))
+        lines.append(f"  更新: {updated_at.strftime('%H:%M UTC')}")
     return "\n".join(lines)
 
 
@@ -377,7 +538,11 @@ async def _decision_reply(session: AsyncSession, query: str) -> str:
     for item in matches:
         target = item["team_a"] if item["action"] == "BUY_A" else item["team_b"]
         normalized = item["normalized"]
-        probability = normalized.get("fair_probability_a")
+        fair_probability_a = normalized.get("fair_probability_a")
+        probability = target_probability(
+            str(item["action"]),
+            fair_probability_a if isinstance(fair_probability_a, (int, float)) else None,
+        )
         confidence = normalized.get("confidence")
         reasons = normalized.get("primary_reasons") or []
         lines.append(
@@ -390,7 +555,7 @@ async def _decision_reply(session: AsyncSession, query: str) -> str:
             lines.append(f"  置信度: {confidence * 100:.1f}%")
         if reasons:
             lines.append(f"  理由: {'; '.join(str(reason) for reason in reasons[:3])}")
-        lines.append(f"  决策时间: {item['decision_at'].astimezone().strftime('%Y-%m-%d %H:%M')}")
+        lines.append(f"  决策时间: {ensure_utc(item['decision_at']).strftime('%Y-%m-%d %H:%M')}")
     return "\n".join(lines)
 
 
@@ -399,6 +564,7 @@ def _help() -> str:
         [
             "Dota AI Decision Lab 微信指令:",
             "▪ 当前比赛 — 查看正在追踪的比赛",
+            "▪ 当前比赛赔率 — 查看当前直播比赛双方赔率",
             "▪ 为什么买 <队伍> — 查询最近 BUY 决策理由",
             "▪ 暂停通知 / 恢复通知 — 开关 AI 决策推送",
         ]

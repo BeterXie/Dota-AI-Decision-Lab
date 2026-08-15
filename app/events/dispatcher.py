@@ -5,6 +5,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.ai.jobs import ai_job_dedupe_key_for_experiment, ai_job_payload, ai_job_priority
 from app.domain.events import DomainEventType
 from app.domain.jobs import JobType
 from app.jobs.repository import JobRepository
@@ -41,8 +42,13 @@ def utc_now() -> datetime:
 
 
 class DomainEventDispatcher:
-    def __init__(self, jobs: JobRepository) -> None:
+    def __init__(
+        self,
+        jobs: JobRepository,
+        ai_experiments: tuple[tuple[str, str, str, str, str], ...] = (),
+    ) -> None:
         self._jobs = jobs
+        self._ai_experiments = ai_experiments
 
     async def dispatch_pending(self, session: AsyncSession, *, limit: int = 100) -> int:
         records = list(
@@ -58,18 +64,17 @@ class DomainEventDispatcher:
         )
         for record in records:
             event_type = DomainEventType(record.event_type)
-            job_type = EVENT_JOB_MAP[event_type]
-            # Live decision requests must jump ahead of reconciliation
-            # backfills (priority 150) so fresh snapshots get AI results
-            # before the re-run backlog is drained.
-            priority = 50 if job_type is JobType.RUN_AI_PROVIDER else 100
-            await self._jobs.enqueue(
-                session,
-                job_type=job_type,
-                dedupe_key=f"event:{record.id}",
-                payload={**record.payload, "domain_event_id": str(record.id)},
-                priority=priority,
-            )
+            if event_type is DomainEventType.AI_DECISION_REQUESTED:
+                await self._enqueue_ai_provider_jobs(session, record)
+            else:
+                job_type = EVENT_JOB_MAP[event_type]
+                await self._jobs.enqueue(
+                    session,
+                    job_type=job_type,
+                    dedupe_key=f"event:{record.id}",
+                    payload={**record.payload, "domain_event_id": str(record.id)},
+                    priority=100,
+                )
             for additional_job_type in EVENT_ADDITIONAL_JOBS.get(event_type, ()):
                 await self._jobs.enqueue(
                     session,
@@ -81,6 +86,37 @@ class DomainEventDispatcher:
                 await self._enqueue_closing_captures(session, record)
             record.processed_at = utc_now()
         return len(records)
+
+    async def _enqueue_ai_provider_jobs(
+        self,
+        session: AsyncSession,
+        record: DomainEventRecord,
+    ) -> None:
+        """Fan out one AI_DECISION_REQUESTED event into one durable job per
+        configured (provider, model) experiment.
+
+        Each job commits its own result as soon as that provider finishes, so
+        a slow model no longer delays the UI for the faster models.
+        """
+        snapshot_id_value = record.payload.get("snapshot_id")
+        if not isinstance(snapshot_id_value, str):
+            return
+        try:
+            snapshot_id = UUID(snapshot_id_value)
+        except ValueError:
+            return
+        snapshot = await session.get(DecisionSnapshotRecord, snapshot_id)
+        if snapshot is None:
+            return
+        priority = ai_job_priority(snapshot.mode)
+        for experiment in self._ai_experiments:
+            await self._jobs.enqueue(
+                session,
+                job_type=JobType.RUN_AI_PROVIDER,
+                dedupe_key=ai_job_dedupe_key_for_experiment(snapshot.snapshot_hash, experiment),
+                payload=ai_job_payload(snapshot.id, experiment[0], experiment[1]),
+                priority=priority,
+            )
 
     async def _enqueue_closing_captures(
         self,

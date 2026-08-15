@@ -6,7 +6,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.eligibility import ai_record_is_game_time_eligible
-from app.ai.view import AI_VIEW_VERSION
+from app.ai.jobs import ai_job_dedupe_key_for_experiment, ai_job_payload
 from app.domain.events import DomainEvent, DomainEventType
 from app.domain.jobs import JobType
 from app.draft.engine import MODEL_VERSION
@@ -396,7 +396,7 @@ class ReconciliationService:
                 continue
             completed = set(
                 (
-                    await session.scalars(
+                    await session.execute(
                         select(
                             AiDecisionRecord.provider,
                             AiDecisionRecord.model,
@@ -407,19 +407,34 @@ class ReconciliationService:
                     )
                 ).all()
             )
-            if set(self._ai_experiments).issubset(completed):
-                continue
-            await self._jobs.enqueue(
-                session,
-                job_type=JobType.RUN_AI_PROVIDER,
-                # The dedupe key is version-scoped: a succeeded v1-era job with
-                # the same snapshot must not block the v2 experiment re-run
-                # (and vice versa), and backfill jobs yield to live decisions.
-                dedupe_key=f"reconcile-ai:{AI_VIEW_VERSION}:{snapshot.id}",
-                payload={"snapshot_id": str(snapshot.id)},
-                priority=150,
-            )
-            created += 1
+            for experiment in self._ai_experiments:
+                if experiment in completed:
+                    continue
+                provider, model = experiment[:2]
+                dedupe_key = ai_job_dedupe_key_for_experiment(
+                    snapshot.snapshot_hash, experiment
+                )
+                existing_job = await session.scalar(
+                    select(DurableJobRecord.id).where(
+                        DurableJobRecord.job_type == JobType.RUN_AI_PROVIDER.value,
+                        DurableJobRecord.dedupe_key == dedupe_key,
+                    )
+                )
+                if existing_job is not None:
+                    continue
+                await self._jobs.enqueue(
+                    session,
+                    job_type=JobType.RUN_AI_PROVIDER,
+                    # One durable job per provider/model. The dedupe key is
+                    # version-scoped: a succeeded v1-era job with the same
+                    # snapshot must not block the v2 experiment re-run (and
+                    # vice versa). Priority 150 makes backfills yield to every
+                    # live event path.
+                    dedupe_key=dedupe_key,
+                    payload=ai_job_payload(snapshot.id, provider, model),
+                    priority=150,
+                )
+                created += 1
         return created
 
     async def _reconcile_future_odds(self, session: AsyncSession) -> int:

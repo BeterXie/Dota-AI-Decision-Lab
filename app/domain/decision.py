@@ -19,3 +19,18 @@ class AiDecision(BaseModel):
     counter_arguments: list[str]
     data_quality_concerns: list[str]
     blockers: list[str]
+
+
+def target_probability(
+    action: str | None, fair_probability_a: float | None
+) -> float | None:
+    """Return the win probability for the side targeted by ``action``.
+
+    The model emits ``fair_probability_a`` (Team A's win probability) for every
+    action.  When the conclusion is ``BUY_B``, the supported target is Team B,
+    so presentation layers must invert the probability.  Keeping that inversion
+    here stops WeChat, email and the web dashboard from drifting apart.
+    """
+    if action == "BUY_B" and fair_probability_a is not None:
+        return 1.0 - fair_probability_a
+    return fair_probability_a

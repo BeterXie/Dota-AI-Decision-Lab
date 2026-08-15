@@ -13,10 +13,9 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy import and_, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.domain.market import MarketPairQuality
 from app.history.service import HistoricalIntelligenceService
+from app.market.current import evaluate_current_market_pair, map_market_stages
 from app.market.fair_probability import remove_vig
-from app.market.pairing import MarketPairLeg, evaluate_market_pair
 from app.models import (
     AiDecisionRecord,
     CanonicalEvent,
@@ -545,7 +544,7 @@ async def _map_summary_payloads(
         provider_match_id = provider_match_by_series.get(canonical_map.series_id)
         raybet_match = raybet_by_id.get(provider_match_id)
         stages = set(
-            _map_market_stages(
+            map_market_stages(
                 canonical_map.map_number,
                 best_of=series.best_of if series is not None else None,
             )
@@ -659,85 +658,6 @@ async def _map_summary_payloads(
     return payloads
 
 
-def _market_pair_leg(record: OddsObservationRecord) -> MarketPairLeg:
-    return MarketPairLeg(
-        provider_match_id=record.provider_match_id,
-        odds_id=record.odds_id,
-        canonical_series_id=record.canonical_series_id,
-        canonical_map_id=record.canonical_map_id,
-        market_type=record.market_type,
-        match_stage=record.match_stage,
-        selection_team_id=record.selection_team_id,
-        price=record.price,
-        normalized_status=record.normalized_status,
-        metadata_version=record.metadata_version,
-        received_at=record.received_at,
-    )
-
-
-def _current_market_evaluation(
-    rows: Sequence[OddsObservationRecord],
-    *,
-    series: CanonicalSeries | None,
-    canonical_map_id: UUID | None,
-    observed_at: datetime,
-    live_market_max_age_seconds: float,
-    market_max_pair_skew_seconds: float,
-) -> tuple[tuple[OddsObservationRecord, OddsObservationRecord], MarketPairQuality] | None:
-    """Pick and evaluate the freshest complete A/B market pair.
-
-    Mirrors the snapshot builder's pairing rules: candidate legs are grouped
-    by (provider match, market type, match stage) and the freshest pair wins.
-    """
-    if series is None or series.team_a_id is None or series.team_b_id is None:
-        return None
-    team_ids = frozenset({series.team_a_id, series.team_b_id})
-    latest_by_odds: dict[int, OddsObservationRecord] = {}
-    for row in rows:
-        current = latest_by_odds.get(row.odds_id)
-        if current is None or row.received_at > current.received_at:
-            latest_by_odds[row.odds_id] = row
-    grouped: dict[tuple[int, str | None, str | None], dict[UUID, OddsObservationRecord]] = {}
-    for row in latest_by_odds.values():
-        if row.selection_team_id not in team_ids:
-            continue
-        grouped.setdefault((row.provider_match_id, row.market_type, row.match_stage), {})[
-            row.selection_team_id
-        ] = row
-    evaluated: list[
-        tuple[float, tuple[OddsObservationRecord, OddsObservationRecord], MarketPairQuality]
-    ] = []
-    for (_provider_match_id, _market_type, match_stage), by_team in grouped.items():
-        if set(by_team) != team_ids:
-            continue
-        legs = (
-            by_team[series.team_a_id],
-            by_team[series.team_b_id],
-        )
-        quality = evaluate_market_pair(
-            tuple(_market_pair_leg(record) for record in legs),
-            expected_series_id=series.id,
-            # The deciding-map fallback uses the series-scoped "final" market
-            # whose observations carry no map identity; map checks are skipped
-            # for that stage by design.
-            expected_map_id=None if match_stage == "final" else canonical_map_id,
-            expected_team_ids=team_ids,
-            decision_at=observed_at,
-            max_age_seconds=live_market_max_age_seconds,
-            max_pair_skew_seconds=market_max_pair_skew_seconds,
-        )
-        freshness = max(legs[0].received_at, legs[1].received_at)
-        evaluated.append((freshness, legs, quality))
-    if not evaluated:
-        return None
-    # Prefer an eligible pair (open, fresh) over a stale/suspended candidate;
-    # this is what lets the live "final" market of a deciding map replace the
-    # delisted per-map r{n} market.
-    eligible = [candidate for candidate in evaluated if candidate[2].eligible]
-    _, legs, quality = max(eligible or evaluated, key=lambda item: item[0])
-    return legs, quality
-
-
 def _current_market_payload(
     rows: Sequence[OddsObservationRecord],
     *,
@@ -755,7 +675,7 @@ def _current_market_payload(
     (this block) != Frozen Snapshot Market (snapshot_market_quality /
     latest_snapshot.market).
     """
-    evaluated = _current_market_evaluation(
+    evaluated = evaluate_current_market_pair(
         rows,
         series=series,
         canonical_map_id=canonical_map_id,
@@ -926,7 +846,7 @@ async def _map_payload(
         ),
         OddsObservationRecord.market_type == "Winner",
         OddsObservationRecord.match_stage.in_(
-            _map_market_stages(
+            map_market_stages(
                 canonical_map.map_number,
                 best_of=series.best_of if series is not None else None,
             )
@@ -1107,6 +1027,7 @@ async def _map_payload(
         if snapshot is not None
         else []
     )
+    decisions = _canonical_decision_rounds(decisions)
     checkpoint_decisions: list[AiDecisionRecord] = []
     snapshot_by_id = {item.id: item for item in checkpoint_snapshots}
     if detailed and snapshot_by_id:
@@ -1117,6 +1038,7 @@ async def _map_payload(
                 )
             ).all()
         )
+        checkpoint_decisions = _canonical_decision_rounds(checkpoint_decisions)
     evaluation_by_decision: dict[UUID, DecisionEvaluationRecord] = {}
     evaluation_decision_ids = {item.id for item in decisions}
     evaluation_decision_ids.update(item.id for item in checkpoint_decisions)
@@ -1592,27 +1514,36 @@ async def _latest_raybet_match(session: AsyncSession, series_id: UUID | None) ->
     )
 
 
-def _map_market_stages(map_number: int | None, *, best_of: int | None = None) -> tuple[str, ...]:
-    if map_number is None:
-        return ()
-    stages = (
-        f"r{map_number}",
-        f"Map r{map_number}",
-        f"map r{map_number}",
-        f"Map {map_number}",
-        f"map {map_number}",
-    )
-    if best_of is not None and map_number == best_of:
-        # RayBet withdraws the per-map winner market of the DECIDING map (the
-        # r{n} odds stop updating and are delisted, status 4) and keeps only
-        # the series winner ("final") market live; for the deciding map that
-        # market IS the map winner, so it must be a candidate stage.
-        stages += ("final",)
-    return stages
-
-
 def _series_market_rows(rows):
     return list(rows)
+
+
+def _canonical_decision_rounds(
+    records: Sequence[AiDecisionRecord],
+) -> list[AiDecisionRecord]:
+    """Return one canonical decision per snapshot / provider / model.
+
+    Prompt, policy or ai-view upgrades can leave several experiment records on
+    the same checkpoint.  Downstream display and evaluation cards must count
+    each decision round once; otherwise re-running one checkpoint multiplies
+    stake, P&L and ROI.  The canonical record is the latest successful attempt
+    for that (snapshot, provider, model) round.
+    """
+    best: dict[tuple[UUID, str, str], tuple[tuple, AiDecisionRecord]] = {}
+    for record in records:
+        if record.parse_status != "SUCCESS" or record.normalized_response is None:
+            continue
+        key = (record.snapshot_id, record.provider, record.model)
+        attempt = (
+            record.request_started_at,
+            record.prompt_version,
+            record.decision_policy_version,
+            record.ai_view_version,
+        )
+        current = best.get(key)
+        if current is None or attempt > current[0]:
+            best[key] = (attempt, record)
+    return [record for _, record in best.values()]
 
 
 def _decision_payload(
@@ -1628,6 +1559,11 @@ def _decision_payload(
         "prompt_version": record.prompt_version,
         "decision_policy_version": record.decision_policy_version,
         "snapshot_hash": record.snapshot_hash,
+        "job_enqueued_at": record.job_enqueued_at,
+        "job_claimed_at": record.job_claimed_at,
+        "input_prepare_started_at": record.input_prepare_started_at,
+        "input_prepare_completed_at": record.input_prepare_completed_at,
+        "decision_persisted_at": record.decision_persisted_at,
         "request_started_at": record.request_started_at,
         "response_received_at": record.response_received_at,
         "parse_status": record.parse_status,
@@ -1651,6 +1587,7 @@ def _decision_payload(
                 "virtual_odds": float(evaluation.virtual_odds)
                 if evaluation.virtual_odds is not None
                 else None,
+                "unit_pnl": float(evaluation.unit_pnl) if evaluation.unit_pnl is not None else None,
                 "evaluated_at": evaluation.evaluated_at,
                 "metrics_version": evaluation.metrics_version,
             }

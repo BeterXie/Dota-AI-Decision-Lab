@@ -102,6 +102,8 @@ test("shows one fixed AI card per model and opens all rounds in one modal", () =
   expect(screen.getAllByText("+50").length).toBeGreaterThan(0);
   expect(screen.getAllByText("-20").length).toBeGreaterThan(0);
   expect(screen.getAllByText("+30").length).toBeGreaterThan(0);
+    expect(screen.getByText("10,030")).toBeInTheDocument();
+    expect(screen.getByText("Final bankroll")).toBeInTheDocument();
   expect(screen.getByText("Draft and price align")).toBeInTheDocument();
   expect(screen.getByText("Momentum flipped")).toBeInTheDocument();
 });
@@ -127,4 +129,36 @@ test("deduplicates repeated experiments on the same checkpoint", () => {
   expect(screen.getByText("1 round")).toBeInTheDocument();
   expect(screen.getAllByText("NO BUY").length).toBeGreaterThan(0);
   expect(screen.queryByText("BUY A")).not.toBeInTheDocument();
+});
+
+
+
+test("final bankroll is initial plus settled P&L only when every staked round is settled", () => {
+  const settled = decision({
+    id: "settled",
+    snapshot_id: "s1",
+    snapshot_decision_at: "2026-08-12T12:00:00Z",
+    bankroll_before: 10_000,
+    stake: 100,
+    evaluation: { virtual_pnl: 100, virtual_odds: 2 },
+    decision: { ...decision({}).decision, action: "BUY_A", stake: 100 }
+  });
+  const unsettled = decision({
+    id: "unsettled",
+    snapshot_id: "s2",
+    snapshot_decision_at: "2026-08-12T12:05:00Z",
+    bankroll_before: 9_900,
+    stake: 200,
+    evaluation: null,
+    decision: { ...decision({}).decision, action: "BUY_B", stake: 200 }
+  });
+
+  renderStrip([settled, unsettled]);
+  fireEvent.click(screen.getByRole("button", { name: /GPT/ }));
+
+  expect(screen.queryByText("Final bankroll")).not.toBeInTheDocument();
+  expect(screen.getByText("Current available bankroll")).toBeInTheDocument();
+  expect(screen.getByText("9,700")).toBeInTheDocument();
+  expect(screen.getByText("Pending unsettled stake")).toBeInTheDocument();
+  expect(screen.getAllByText("200").length).toBeGreaterThan(0);
 });

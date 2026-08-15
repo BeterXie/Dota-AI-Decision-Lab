@@ -189,7 +189,7 @@ def _overall_status(dependencies: dict[str, dict[str, Any]]) -> str:
         return "ACTION_REQUIRED"
     ai_statuses = [
         dependencies[name].get("status")
-        for name in ("GPT", "CLAUDE", "GEMINI", "DEEPSEEK", "KIMI")
+        for name in ("GPT", "CLAUDE", "GEMINI", "DEEPSEEK", "KIMI", "LOCAL_GPT")
         if name in dependencies
     ]
     if ai_statuses and all(status == "ACTION_REQUIRED" for status in ai_statuses):

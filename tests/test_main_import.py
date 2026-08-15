@@ -78,6 +78,45 @@ async def test_configured_openai_deepseek_and_kimi_are_registered() -> None:
 
 
 @pytest.mark.asyncio
+async def test_local_openai_is_registered_as_an_independent_provider() -> None:
+    from app.config import Settings
+    from app.main import _ai_providers
+
+    settings = Settings(
+        _env_file=None,
+        openai_api_key="openai-test",
+        local_openai_api_key="local-test",
+        local_openai_model="local-gpt",
+        local_openai_reasoning_effort="max",
+    )
+    providers = _ai_providers(settings)
+
+    assert [provider.name for provider in providers] == ["openai", "local_openai"]
+    assert [provider.model for provider in providers] == ["gpt-5.6-terra", "local-gpt"]
+    assert [provider.reasoning_effort for provider in providers] == ["high", "max"]
+    for provider in providers:
+        await provider.close()
+
+
+@pytest.mark.asyncio
+async def test_local_openai_health_dependency_is_registered() -> None:
+    from app.config import Settings
+    from app.main import _initialize_dependency_health
+    from app.runtime.health import HealthRegistry
+
+    health = HealthRegistry()
+    await _initialize_dependency_health(
+        health,
+        settings=Settings(_env_file=None, local_openai_api_key="local-test"),
+        ai_provider_names=("local_openai",),
+    )
+
+    dependencies = (await health.snapshot())["dependencies"]
+    assert dependencies["LOCAL_GPT"]["status"] == "UNKNOWN"
+    assert dependencies["GPT"]["status"] == "ACTION_REQUIRED"
+
+
+@pytest.mark.asyncio
 async def test_kimi_is_excluded_when_decisions_are_disabled() -> None:
     from app.config import Settings
     from app.main import _ai_providers
@@ -154,3 +193,16 @@ async def test_email_readiness_distinguishes_disabled_missing_and_configured() -
     configured_email = (await configured.snapshot())["dependencies"]["EMAIL"]
     assert configured_email["status"] == "UNKNOWN"
     assert configured_email["metadata"]["recipient_count"] == 2
+
+
+def test_runtime_bind_assert_never_allows_api_token_to_unlock_non_loopback() -> None:
+    from app.config import Settings
+    from app.main import _assert_bind_safety
+
+    # Settings would reject this object at parse time, but the runtime guard
+    # must also fail closed instead of preserving the old API_TOKEN exception.
+    settings = Settings(_env_file=None, host="127.0.0.1")
+    settings.__dict__["host"] = "0.0.0.0"
+
+    with pytest.raises(RuntimeError, match="HOST must be loopback"):
+        _assert_bind_safety(settings)

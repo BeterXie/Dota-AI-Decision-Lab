@@ -3,7 +3,7 @@ import type { MapDetail, MapSummary } from "../api";
 import IntelligenceChart from "../Chart";
 import { useI18n } from "../i18n";
 import { marketChartZoomWindow } from "../utils/marketChart";
-import { formatOdds, marketStageDisplayLabel, primaryMarketPair } from "../utils/presentation";
+import { formatOdds, getMatchDisplayPhase, marketStageDisplayLabel, primaryMarketPair } from "../utils/presentation";
 
 const teamAColor = "#7C9CFF";
 const teamBColor = "#9C82FF";
@@ -11,7 +11,12 @@ const teamBColor = "#9C82FF";
 export function CanonicalMarketCard({ match }: { match: MapSummary | MapDetail }) {
   const { locale, t } = useI18n();
   const pair = primaryMarketPair(match.market, match.team_a?.id, match.team_b?.id);
-  const eligible = match.market_quality?.eligible === true;
+  const phase = getMatchDisplayPhase(match);
+  const marketClosed = phase === "POSTMATCH" || phase === "AWAITING_RESULT";
+  const eligible = marketClosed ? false : match.market_quality?.eligible === true;
+  const statusClass = marketClosed ? "closed" : eligible ? "ready" : "limited";
+  const statusLabel = marketClosed ? t("marketClosed") : eligible ? "READY" : "LIMITED";
+  const closedNote = phase === "POSTMATCH" ? t("marketClosedPostmatch") : t("marketClosedAwaitingResult");
   const teamA = match.team_a?.name ?? t("teamA");
   const teamB = match.team_b?.name ?? t("teamB");
   const fairA = eligible
@@ -43,8 +48,9 @@ export function CanonicalMarketCard({ match }: { match: MapSummary | MapDetail }
   };
 
   return (
-    <section className="analytics-card market-card player-market-card">
-      <div className="player-section-heading compact"><div><span className="section-kicker">MARKET</span><h3>{t("primaryWinnerMarket")}</h3></div><span className={`player-status-pill ${eligible ? "ready" : "limited"}`}>{eligible ? "READY" : "LIMITED"}</span></div>
+    <section className={`analytics-card market-card player-market-card${marketClosed ? " market-closed" : ""}`}>
+      <div className="player-section-heading compact"><div><span className="section-kicker">MARKET</span><h3>{t("primaryWinnerMarket")}</h3></div><span className={`player-status-pill ${statusClass}`}>{statusLabel}</span></div>
+      {marketClosed ? <div className="player-market-closed-note">{closedNote}</div> : null}
       {pair ? <>
         <div className="player-market-odds">
           <div><span>{teamA}</span><strong style={{ color: teamAColor }}>{formatOdds(pair.teamA.price)}</strong><small>{t("fair")} {fairA != null ? pct(fairA, locale) : "—"}</small></div>

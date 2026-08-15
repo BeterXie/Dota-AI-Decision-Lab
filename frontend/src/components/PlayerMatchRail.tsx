@@ -1,7 +1,7 @@
 import React from "react";
 import type { MapSummary } from "../api";
 import { useI18n } from "../i18n";
-import { formatOdds, getMatchDisplayPhase, primaryMarketPair } from "../utils/presentation";
+import { formatOdds, getMatchDisplayPhase, primaryMarketPair, targetProbability } from "../utils/presentation";
 import { getTeamLogoUrl, getTeamAbbreviation } from "../utils/dotaAssets";
 
 interface PlayerMatchRailProps {
@@ -27,10 +27,10 @@ function getMatchDecisionBadge(match: MapSummary): { text: string; kind: "buy-a"
   if (buys.length > 0) {
     const best = buys[0];
     const action = best.decision?.action;
-    const fairProbabilityA = best.decision?.fair_probability_a;
-    const selectedProbability = typeof fairProbabilityA === "number"
-      ? action === "BUY_B" ? 1 - fairProbabilityA : fairProbabilityA
-      : null;
+    const selectedProbability = targetProbability(action, best.decision?.fair_probability_a);
+
+
+
     const prob = selectedProbability === null ? null : Math.round(selectedProbability * 100);
     const label = action === "BUY_A" ? "BUY A" : "BUY B";
     return {

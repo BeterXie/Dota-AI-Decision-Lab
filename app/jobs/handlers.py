@@ -1,3 +1,4 @@
+import asyncio
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
@@ -5,7 +6,8 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.ai.coordinator import AiCoordinator
+from app.ai.base import ai_experiment_key
+from app.ai.coordinator import AiCoordinator, PreparedAiDecision
 from app.ai.eligibility import ai_decision_is_game_time_eligible
 from app.config import Settings
 from app.domain.events import DomainEvent, DomainEventType
@@ -386,91 +388,211 @@ class ApplicationJobHandlers:
 
     async def run_ai(self, job: DurableJob) -> None:
         snapshot_id = _required_uuid(job.payload, "snapshot_id")
+        provider = _optional_str(job.payload.get("provider"))
+        model = _optional_str(job.payload.get("model"))
+        if provider is None and model is None:
+            # Jobs enqueued before the per-experiment fan-out carry only
+            # snapshot_id.  Run the batch path (prepare -> inference ->
+            # persist) so deploying this change does not strand old jobs.
+            await self._run_ai_legacy(job, snapshot_id)
+            return
+        if provider is None or model is None:
+            raise ValueError("RUN_AI_PROVIDER payload requires provider and model")
+        self._d.ai.get_provider(provider, model)
+
+        # Phase 1: PREPARE in a short read transaction.  No provider HTTP call
+        # happens while a database session/transaction is open.
         async with self._d.session_factory() as session, session.begin():
-            snapshot = await self._d.snapshots.get(session, snapshot_id)
+            snapshot = await self._eligible_ai_snapshot(session, snapshot_id)
             if snapshot is None:
-                raise ValueError("decision snapshot does not exist")
-            if not ai_decision_is_game_time_eligible(
-                snapshot,
-                min_game_time_seconds=self._d.settings.ai_min_game_time_seconds,
-            ):
                 return
-            existing_ids = set(
+            prepared = await self._d.ai.prepare(
+                session,
+                snapshot,
+                provider=provider,
+                model=model,
+                job_enqueued_at=job.created_at,
+                job_claimed_at=job.locked_at,
+            )
+
+        # Phase 2: INFERENCE with no DB transaction held.
+        record = await self._d.ai.run_inference(prepared)
+
+        # Phase 3: PERSIST in a new short transaction.  Each provider result
+        # is committed and visible in the UI as soon as it finishes.
+        await self._persist_ai_results(prepared.snapshot, [(prepared, record)])
+
+    async def _run_ai_legacy(self, job: DurableJob, snapshot_id: UUID) -> None:
+        async with self._d.session_factory() as session, session.begin():
+            snapshot = await self._eligible_ai_snapshot(session, snapshot_id)
+            if snapshot is None:
+                return
+            prepared_jobs = await self._d.ai.prepare_all(
+                session,
+                snapshot,
+                job_enqueued_at=job.created_at,
+                job_claimed_at=job.locked_at,
+            )
+        if not prepared_jobs:
+            return
+        records = await asyncio.gather(*(self._d.ai.run_inference(item) for item in prepared_jobs))
+        await self._persist_ai_results(
+            snapshot,
+            list(zip(prepared_jobs, records, strict=True)),
+        )
+
+    async def _eligible_ai_snapshot(
+        self,
+        session: AsyncSession,
+        snapshot_id: UUID,
+    ) -> DecisionSnapshot | None:
+        snapshot = await self._d.snapshots.get(session, snapshot_id)
+        if snapshot is None:
+            raise ValueError("decision snapshot does not exist")
+        if not ai_decision_is_game_time_eligible(
+            snapshot,
+            min_game_time_seconds=self._d.settings.ai_min_game_time_seconds,
+        ):
+            return None
+        return snapshot
+
+    async def _persist_ai_results(
+        self,
+        snapshot: DecisionSnapshot,
+        results: list[tuple[PreparedAiDecision, AiDecisionRecord]],
+    ) -> None:
+        async with self._d.session_factory() as session, session.begin():
+            # Serialize the per-snapshot completion gate so concurrent provider
+            # jobs cannot race each other while preparing notifications.
+            await session.execute(
+                select(DecisionSnapshotRecord.id)
+                .where(DecisionSnapshotRecord.id == snapshot.snapshot_id)
+                .with_for_update()
+            )
+            persisted_at = datetime.now(UTC)
+            for prepared, record in results:
+                if prepared.existing_record is None:
+                    record.decision_persisted_at = persisted_at
+                    session.add(record)
+            await session.flush()
+
+            snapshot_records = list(
                 (
                     await session.scalars(
-                        select(AiDecisionRecord.id).where(
-                            AiDecisionRecord.snapshot_id == snapshot_id
+                        select(AiDecisionRecord).where(
+                            AiDecisionRecord.snapshot_id == snapshot.snapshot_id
                         )
                     )
                 ).all()
             )
-            records = await self._d.ai.run_all(session, snapshot)
-            dependency_names = {
-                "openai": "GPT",
-                "anthropic": "CLAUDE",
-                "gemini": "GEMINI",
-                "deepseek": "DEEPSEEK",
-                "kimi": "KIMI",
+            current_records = [
+                record
+                for record in snapshot_records
+                if (
+                    record.provider,
+                    record.model,
+                    record.prompt_version,
+                    record.decision_policy_version,
+                    record.ai_view_version,
+                )
+                == ai_experiment_key(record.provider, record.model)
+            ]
+            await self._update_ai_health(current_records)
+
+            expected = set(self._d.ai.experiments)
+            present = {
+                (
+                    record.provider,
+                    record.model,
+                    record.prompt_version,
+                    record.decision_policy_version,
+                    record.ai_view_version,
+                )
+                for record in current_records
             }
-            records_by_dependency: dict[str, list] = {}
-            for record in records:
-                dependency = dependency_names.get(record.provider, record.provider.upper())
-                records_by_dependency.setdefault(dependency, []).append(record)
-            for dependency, dependency_records in records_by_dependency.items():
-                failed = [
-                    record for record in dependency_records if record.parse_status != "SUCCESS"
-                ]
-                await self._d.health.dependency(
-                    dependency,
-                    "DEGRADED" if failed else "READY",
-                    message="; ".join(
-                        f"{record.model}: {record.error or record.parse_status}"
-                        for record in failed
-                    )
-                    or None,
-                    models={
-                        record.model: {
-                            "parse_status": record.parse_status,
-                            "latency_seconds": record.latency_seconds,
-                        }
-                        for record in dependency_records
-                    },
+            if expected.issubset(present):
+                await self._prepare_decision_notifications(
+                    session,
+                    snapshot,
+                    current_records,
                 )
-            # Emails are only sent when a NEW buy decision (BUY_A/BUY_B) was
-            # produced AND it introduces a side that has not been notified for
-            # this map before. Repeating the same side, NO_BUY, and
-            # INSUFFICIENT_DATA checkpoints stay silent; only a side change
-            # (for example BUY_A -> BUY_B) produces a new notification.
-            buy_decisions = [
-                record
-                for record in records
-                if record.id not in existing_ids
-                and record.parse_status == "SUCCESS"
-                and isinstance(record.normalized_response, dict)
-                and record.normalized_response.get("action") in {"BUY_A", "BUY_B"}
-            ]
-            prior_buy_sides = await _prior_buy_sides(
-                session,
-                canonical_map_id=await _email_scope_map_id(session, snapshot),
-                decision_at=snapshot.decision_at,
+
+    async def _update_ai_health(self, records: list[AiDecisionRecord]) -> None:
+        dependency_names = {
+            "openai": "GPT",
+            "local_openai": "LOCAL_GPT",
+            "anthropic": "CLAUDE",
+            "gemini": "GEMINI",
+            "deepseek": "DEEPSEEK",
+            "kimi": "KIMI",
+        }
+        records_by_dependency: dict[str, list[AiDecisionRecord]] = {}
+        for record in records:
+            dependency = dependency_names.get(record.provider, record.provider.upper())
+            records_by_dependency.setdefault(dependency, []).append(record)
+        for dependency, dependency_records in records_by_dependency.items():
+            failed = [record for record in dependency_records if record.parse_status != "SUCCESS"]
+            await self._d.health.dependency(
+                dependency,
+                "DEGRADED" if failed else "READY",
+                message="; ".join(
+                    f"{record.model}: {record.error or record.parse_status}" for record in failed
+                )
+                or None,
+                models={
+                    record.model: {
+                        "parse_status": record.parse_status,
+                        "latency_seconds": record.latency_seconds,
+                    }
+                    for record in dependency_records
+                },
             )
-            new_side_decisions = [
-                record
-                for record in buy_decisions
-                if record.normalized_response.get("action") not in prior_buy_sides
-            ]
-            if self._d.email_notifications is not None and new_side_decisions:
-                await self._d.email_notifications.prepare(
-                    session,
-                    snapshot=snapshot,
-                    decisions=buy_decisions,
-                )
-            if getattr(self._d, "wechat_clawbot", None) is not None and new_side_decisions:
-                await self._d.wechat_clawbot.prepare_decision_notification(
-                    session,
-                    snapshot=snapshot,
-                    decisions=buy_decisions,
-                )
+
+    async def _prepare_decision_notifications(
+        self,
+        session: AsyncSession,
+        snapshot: DecisionSnapshot,
+        current_records: list[AiDecisionRecord],
+    ) -> None:
+        # Emails/WeChat messages are only sent after every configured
+        # experiment has produced a persisted record (success OR failure), so
+        # one aggregate notification contains the complete multi-AI picture.
+        # Repeating the same side, NO_BUY, and INSUFFICIENT_DATA checkpoints
+        # stay silent; only a side change (for example BUY_A -> BUY_B) or a
+        # new buy decision produces a new notification.
+        buy_decisions = [
+            record
+            for record in current_records
+            if record.parse_status == "SUCCESS"
+            and isinstance(record.normalized_response, dict)
+            and record.normalized_response.get("action") in {"BUY_A", "BUY_B"}
+        ]
+        if not buy_decisions:
+            return
+        prior_buy_sides = await _prior_buy_sides(
+            session,
+            canonical_map_id=await _email_scope_map_id(session, snapshot),
+            decision_at=snapshot.decision_at,
+        )
+        new_side_decisions = [
+            record
+            for record in buy_decisions
+            if record.normalized_response.get("action") not in prior_buy_sides
+        ]
+        if not new_side_decisions:
+            return
+        if self._d.email_notifications is not None:
+            await self._d.email_notifications.prepare(
+                session,
+                snapshot=snapshot,
+                decisions=buy_decisions,
+            )
+        if getattr(self._d, "wechat_clawbot", None) is not None:
+            await self._d.wechat_clawbot.prepare_decision_notification(
+                session,
+                snapshot=snapshot,
+                decisions=buy_decisions,
+            )
 
     async def send_decision_email(self, job: DurableJob) -> None:
         if self._d.email_notifications is None:
@@ -897,6 +1019,10 @@ def _required_str(payload: dict, key: str) -> str:
     if not isinstance(value, str) or not value:
         raise ValueError(f"job payload field {key} must be a non-empty string")
     return value
+
+
+def _optional_str(value: object) -> str | None:
+    return value if isinstance(value, str) and value else None
 
 
 def _optional_int(value: object) -> int | None:

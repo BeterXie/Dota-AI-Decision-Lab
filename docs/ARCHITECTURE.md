@@ -586,6 +586,10 @@ class Settings(BaseSettings):
 DATABASE_URL=postgresql+asyncpg://...
 STRATZ_TOKEN=...
 OPENAI_API_KEY=...
+LOCAL_OPENAI_API_KEY=...
+LOCAL_OPENAI_BASE_URL=http://localhost:11434/v1
+LOCAL_OPENAI_MODEL=...
+LOCAL_OPENAI_REASONING_EFFORT=xhigh
 ANTHROPIC_API_KEY=...
 GEMINI_API_KEY=...
 DEEPSEEK_API_KEY=...
@@ -598,6 +602,9 @@ DEEPSEEK_REASONING_EFFORT=xhigh
 
 DeepSeek 使用 OpenAI Responses 兼容接口与严格 JSON Schema；Kimi 使用 OpenAI
 Chat Completions 兼容接口的 JSON Object 模式，并在本地执行同一 `AiDecision` 严格校验。
+`LOCAL_OPENAI_API_KEY` 启用本地 OpenAI 兼容代理（Ollama、LiteLLM 等），作为
+独立的 `local_openai` GPT provider 参与投票；其 Base URL、模型与 reasoning effort
+分别由 `LOCAL_OPENAI_BASE_URL`、`LOCAL_OPENAI_MODEL`、`LOCAL_OPENAI_REASONING_EFFORT` 配置。
 OpenAI、DeepSeek Flash 和 DeepSeek Pro 的 Responses 请求使用 `reasoning.effort=xhigh`。
 所有 Provider 必须接收同一个不可变 Snapshot，独立失败和记录。
 
@@ -3901,28 +3908,33 @@ decision_policy_version
 
 # 16. AI Coordinator
 
-```python
-class AiCoordinator:
-    def __init__(self, providers):
-        self.providers = providers
+AI 决策调度按 provider 独立成 durable job：
 
-    async def run_all(self, snapshot):
-        async def one(provider):
-            try:
-                return await provider.decide(snapshot)
-            except Exception as exc:
-                return {
-                    "provider": provider.name,
-                    "status": "FAILED",
-                    "error": str(exc),
-                }
-
-        return await asyncio.gather(
-            *(one(p) for p in self.providers)
-        )
+```text
+DecisionSnapshot
+    ├── RUN_AI_PROVIDER {provider: openai, model: ...}
+    ├── RUN_AI_PROVIDER {provider: anthropic, model: ...}
+    ├── RUN_AI_PROVIDER {provider: gemini, model: ...}
+    └── RUN_AI_PROVIDER {provider: deepseek, model: ...}
 ```
 
-一个 Provider timeout 不允许拖死其他模型。
+dedupe key：
+
+```text
+ai:{snapshot_hash}:{provider}:{model}:{prompt_version}:{decision_policy_version}:{ai_view_version}
+```
+
+每个 job 分三阶段：
+
+```text
+① PREPARE     短 DB transaction 读取 Snapshot 和历史决策，生成 immutable AI input，关闭 DB
+② INFERENCE   无 DB transaction，HTTP 调用单个 provider（asyncio.wait_for timeout）
+③ PERSIST     新的短 DB transaction，INSERT AiDecisionRecord 并立即 COMMIT
+```
+
+`AI_WORKER_CONCURRENCY`（默认 4）控制同时进行的 AI HTTP 请求数。单个 provider timeout
+不允许拖死其他模型；每个 provider 完成后 UI 立即可见，通知在 snapshot 的全部实验
+都落库后合并触发。
 
 保存：
 
@@ -3935,9 +3947,13 @@ prompt_version
 request_started_at
 response_received_at
 latency
+job_enqueued_at / job_claimed_at
+input_prepare_started_at / input_prepare_completed_at
+decision_persisted_at
 raw_response
 normalized_decision
 ```
+
 
 ---
 

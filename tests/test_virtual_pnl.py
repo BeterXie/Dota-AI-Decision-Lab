@@ -145,6 +145,7 @@ async def test_virtual_pnl_settles_winning_buy_a_with_decision_time_odds() -> No
     assert evaluation.metrics_version == METRICS_VERSION
     assert evaluation.virtual_pnl == Decimal("100.00")
     assert evaluation.virtual_odds == Decimal("2.00000")
+    assert evaluation.unit_pnl == Decimal("1.00")
     await engine.dispose()
 
 
@@ -189,8 +190,10 @@ async def test_virtual_pnl_settles_losing_buy_b_and_no_buy_zero() -> None:
     assert buy is not None
     assert buy.virtual_pnl == Decimal("-40.00")
     assert buy.virtual_odds == Decimal("2.50000")
+    assert buy.unit_pnl == Decimal("-1.00")
     assert no_buy is not None
     assert no_buy.virtual_pnl == Decimal("0.00")
+    assert no_buy.unit_pnl is None
     assert no_buy.virtual_odds is None
     await engine.dispose()
 
@@ -226,4 +229,5 @@ async def test_legacy_buy_without_stake_stays_unsettled_and_v1_row_is_backfilled
     assert evaluation.metrics_version == METRICS_VERSION
     assert evaluation.virtual_pnl is None
     assert evaluation.virtual_odds == Decimal("2.00000")
+    assert evaluation.unit_pnl == Decimal("1.00")
     await engine.dispose()

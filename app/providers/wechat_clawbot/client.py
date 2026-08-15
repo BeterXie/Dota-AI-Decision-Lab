@@ -1,4 +1,5 @@
 import base64
+import hashlib
 import secrets
 from typing import Any
 from uuid import uuid4
@@ -185,8 +186,13 @@ class WeChatClawBotClient:
         text: str,
         context_token: str | None = None,
         run_id: str | None = None,
+        idempotency_key: str | None = None,
     ) -> str:
-        client_id = f"dota-ai-{uuid4().hex}"
+        client_id = (
+            f"dota-ai-{hashlib.sha256(idempotency_key.encode('utf-8')).hexdigest()[:32]}"
+            if idempotency_key
+            else f"dota-ai-{uuid4().hex}"
+        )
         raw = await self._post(
             "/ilink/bot/sendmessage",
             body={

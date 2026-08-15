@@ -49,6 +49,12 @@ class Settings(BaseSettings):
     openai_base_url: str = "https://api.openai.com/v1"
     openai_model: str = "gpt-5.6-terra"
     openai_reasoning_effort: str = "high"
+    # Optional local OpenAI-compatible proxy (Ollama, LiteLLM, ...). It votes as
+    # an independent GPT provider named local_openai whenever the key is set.
+    local_openai_api_key: SecretStr | None = None
+    local_openai_base_url: str = "http://localhost:11434/v1"
+    local_openai_model: str = "local-model"
+    local_openai_reasoning_effort: str = "high"
     anthropic_api_key: SecretStr | None = None
     anthropic_base_url: str = "https://api.anthropic.com/v1"
     anthropic_model: str = "claude-sonnet-4-6"
@@ -74,6 +80,8 @@ class Settings(BaseSettings):
     # Models choose a virtual stake within the available bankroll; no real money
     # and no automatic execution exist in V1.
     ai_virtual_bankroll: float = Field(default=10_000.0, gt=0)
+    # Number of recent prior rounds exposed in the prompt context. Every
+    # canonical prior round still counts toward the virtual bankroll.
     ai_prior_decisions_limit: int = Field(default=10, ge=1)
     # The deepseek flash model still powers email translation; this flag only
     # controls whether it also produces decision votes (off by default).
@@ -136,6 +144,9 @@ class Settings(BaseSettings):
     worker_heartbeat_seconds: float = 10.0
     worker_max_backoff_seconds: float = 60.0
     job_poll_seconds: float = 1.0
+    # Concurrent RUN_AI_PROVIDER durable jobs. One job = one provider/model, so
+    # this is the number of AI HTTP requests that can be in flight at once.
+    ai_worker_concurrency: int = Field(default=4, ge=1)
     job_lease_seconds: float = 120.0
     reconciliation_interval_seconds: float = 60.0
     metrics_enabled: bool = True

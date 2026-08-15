@@ -14,7 +14,7 @@ from app.models import (
     MapResultRecord,
 )
 
-METRICS_VERSION = "decision-evaluation-v2"
+METRICS_VERSION = "decision-evaluation-v3"
 
 
 class EvaluationService:
@@ -92,6 +92,7 @@ class EvaluationService:
             )
             virtual_odds = _virtual_settlement_odds(decision.action, initial_a, initial_b)
             virtual_pnl = _virtual_pnl(decision.action, stake, virtual_odds, team_a_won)
+            unit_pnl = _unit_pnl(decision.action, virtual_odds, team_a_won)
             values = {
                 "result_correct": _result_correct(decision.action, team_a_won),
                 "brier_score": brier_score(decision.fair_probability_a, team_a_won),
@@ -112,6 +113,7 @@ class EvaluationService:
                 ),
                 "virtual_pnl": virtual_pnl,
                 "virtual_odds": virtual_odds,
+                  "unit_pnl": unit_pnl,
                 "evaluated_at": datetime.now(UTC),
                 "metrics_version": METRICS_VERSION,
             }
@@ -178,6 +180,25 @@ def _virtual_pnl(
         won = team_a_won if action == "BUY_A" else not team_a_won
         return round(stake * (odds - 1.0) if won else -stake, 2)
     return 0.0
+
+
+def _unit_pnl(
+    action: str,
+    odds: float | None,
+    team_a_won: bool,
+) -> float | None:
+    """Settle one standardized virtual unit at the decision-time decimal odds.
+
+    This is intentionally stake-independent: a winning BUY returns
+    ``odds - 1`` and a losing BUY returns ``-1``.  It is the same unit-return
+    convention the backtest report already uses, persisted next to the
+    model-sized ``virtual_pnl`` so the dashboard can compare prediction and
+    calibration quality without also comparing risk appetite.
+    """
+    if action in {"BUY_A", "BUY_B"} and odds is not None:
+        won = team_a_won if action == "BUY_A" else not team_a_won
+        return round(odds - 1.0 if won else -1.0, 2)
+    return None
 
 
 def _clv(

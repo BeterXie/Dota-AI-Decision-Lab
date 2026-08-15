@@ -1,6 +1,6 @@
 import { describe, expect, test } from "vitest";
 import type { MarketObservation } from "../api";
-import { marketStageDisplayLabel, primaryMarketPair } from "./presentation";
+import { marketStageDisplayLabel, primaryMarketPair, targetProbability } from "./presentation";
 
 const marketLeg = (overrides: Partial<MarketObservation>): MarketObservation => ({
   odds_id: 1,
@@ -61,5 +61,23 @@ describe("primaryMarketPair", () => {
 
     expect(pair?.stage).toBe("r3");
     expect(pair?.teamA.odds_id).toBe(20);
+  });
+});
+
+
+
+describe("targetProbability", () => {
+  test("returns Team A probability for BUY_A and other non-B actions", () => {
+    expect(targetProbability("BUY_A", 0.35)).toBe(0.35);
+    expect(targetProbability("NO_BUY", 0.35)).toBe(0.35);
+  });
+
+  test("inverts Team A probability for BUY_B", () => {
+    expect(targetProbability("BUY_B", 0.35)).toBeCloseTo(0.65);
+  });
+
+  test("keeps missing values missing", () => {
+    expect(targetProbability("BUY_B", null)).toBeNull();
+    expect(targetProbability("BUY_B", undefined)).toBeNull();
   });
 });

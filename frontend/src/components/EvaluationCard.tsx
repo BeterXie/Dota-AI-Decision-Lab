@@ -12,6 +12,8 @@ interface AiPnlSummary {
   pnl: number | null;
   stake: number | null;
   settledRounds: number;
+  unitPnl: number | null;
+  unitBetCount: number;
   rounds: number;
 }
 
@@ -26,7 +28,7 @@ export const EvaluationCard: React.FC<EvaluationCardProps> = ({ match }) => {
       : null;
   const evidenceCount = detail?.result_evidence?.length || 0;
   const hasEvidence = evidenceCount > 0 || (detail?.future_odds?.length || 0) > 0 || detail?.result != null;
-  const decisions = detail?.checkpoint_decisions ?? detail?.decisions ?? [];
+  const decisions = canonicalDecisionRounds(detail?.checkpoint_decisions ?? detail?.decisions ?? []);
   const pnlSummaries = summarizeVirtualPnl(decisions);
 
   return (
@@ -65,6 +67,14 @@ export const EvaluationCard: React.FC<EvaluationCardProps> = ({ match }) => {
                 <strong>{formatMoney(item.stake, locale)}</strong>
               </div>
               <div className="eval-pnl-metric">
+                <div className="eval-pnl-metric">
+                  <span>{locale === "zh-CN" ? "标准化 1 单位盈亏" : "1-unit P&L"}</span>
+                  <strong className={pnlTone(item.unitPnl)}>{formatSignedMoney(item.unitPnl, locale)}</strong>
+                </div>
+                <div className="eval-pnl-metric">
+                  <span>{locale === "zh-CN" ? "标准化 1 单位 ROI" : "1-unit ROI"}</span>
+                  <strong className={pnlTone(item.unitPnl)}>{formatRoi(item.unitPnl, item.unitBetCount || null, locale)}</strong>
+                </div>
                 <span>{locale === "zh-CN" ? "回报率" : "ROI"}</span>
                 <strong className={pnlTone(item.pnl)}>{formatRoi(item.pnl, item.stake, locale)}</strong>
               </div>
@@ -76,6 +86,24 @@ export const EvaluationCard: React.FC<EvaluationCardProps> = ({ match }) => {
   );
 };
 
+function canonicalDecisionRounds(decisions: AiDecision[]): AiDecision[] {
+  // Defense-in-depth mirror of the API canonical round rule: one successful
+  // decision per snapshot / provider / model, keeping the newest attempt.
+  const best = new Map<string, AiDecision>();
+  for (const decision of decisions) {
+    if (decision.parse_status && !["SUCCESS", "PARSED"].includes(decision.parse_status)) continue;
+    if (!decision.decision) continue;
+    const key = `${decision.snapshot_id ?? decision.id}\u0000${decision.provider}\u0000${decision.model}`;
+    const current = best.get(key);
+    const currentAt = current ? Date.parse(current.request_started_at) : Number.NaN;
+    const nextAt = Date.parse(decision.request_started_at);
+    if (!current || Number.isNaN(currentAt) || nextAt > currentAt) {
+      best.set(key, decision);
+    }
+  }
+  return [...best.values()];
+}
+
 function summarizeVirtualPnl(decisions: AiDecision[]): AiPnlSummary[] {
   const groups = new Map<string, AiPnlSummary>();
   for (const decision of decisions) {
@@ -85,6 +113,8 @@ function summarizeVirtualPnl(decisions: AiDecision[]): AiPnlSummary[] {
       model: decision.model,
       pnl: null,
       stake: null,
+        unitPnl: null,
+        unitBetCount: 0,
       settledRounds: 0,
       rounds: 0
     };
@@ -95,8 +125,20 @@ function summarizeVirtualPnl(decisions: AiDecision[]): AiPnlSummary[] {
     }
     if (pnl != null) {
       item.pnl = (item.pnl ?? 0) + pnl;
+      const unitPnl = toNumber(decision.evaluation?.unit_pnl);
+      if (unitPnl != null) {
+        item.unitPnl = (item.unitPnl ?? 0) + unitPnl;
+        item.unitBetCount += 1;
+      }
       item.settledRounds += 1;
     }
+      if (pnl == null) {
+        const unitPnl = toNumber(decision.evaluation?.unit_pnl);
+        if (unitPnl != null) {
+          item.unitPnl = (item.unitPnl ?? 0) + unitPnl;
+          item.unitBetCount += 1;
+        }
+      }
     item.rounds += 1;
     groups.set(key, item);
   }
@@ -132,6 +174,7 @@ function pnlTone(value: number | null): string {
 
 function providerLabel(value: string): string {
   const normalized = value.toLowerCase();
+  if (normalized.includes("local_openai")) return "Local GPT";
   if (normalized.includes("openai")) return "GPT";
   if (normalized.includes("anthropic")) return "Claude";
   if (normalized.includes("google") || normalized.includes("gemini")) return "Gemini";

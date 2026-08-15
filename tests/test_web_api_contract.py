@@ -116,6 +116,7 @@ def test_decision_payload_exposes_virtual_pnl_settlement() -> None:
         result_correct=True,
         virtual_pnl=Decimal("85.00"),
         virtual_odds=Decimal("1.85000"),
+          unit_pnl=Decimal("0.75"),
         metrics_version="decision-evaluation-v2",
     )
 
@@ -125,6 +126,7 @@ def test_decision_payload_exposes_virtual_pnl_settlement() -> None:
     assert payload["bankroll_before"] == 1000.0
     assert payload["evaluation"]["virtual_pnl"] == 85.0
     assert payload["evaluation"]["virtual_odds"] == 1.85
+    assert payload["evaluation"]["unit_pnl"] == 0.75
     assert payload["evaluation"]["result_correct"] is True
 
 
@@ -808,6 +810,7 @@ async def test_map_detail_exposes_checkpoint_decisions_beyond_the_latest_snapsho
                     ai_view_version="ai-view-v2",
                     request_started_at=now,
                     parse_status="SUCCESS",
+                      normalized_response={"action": "NO_BUY"},
                 ),
                 AiDecisionRecord(
                     id=uuid4(),
@@ -821,6 +824,7 @@ async def test_map_detail_exposes_checkpoint_decisions_beyond_the_latest_snapsho
                     ai_view_version="ai-view-v2",
                     request_started_at=now,
                     parse_status="SUCCESS",
+                      normalized_response={"action": "NO_BUY"},
                 ),
             )
         )
@@ -1015,3 +1019,51 @@ async def test_match_feed_orders_by_coalesced_schedule_newest_first() -> None:
     series_ids = [item["series_id"] for item in payload]
     assert series_ids.index(str(later_series)) < series_ids.index(str(earlier_series))
     await engine.dispose()
+
+
+def test_canonical_decision_rounds_keeps_latest_successful_attempt_per_snapshot_and_model() -> None:
+    from app.web.api import _canonical_decision_rounds
+
+    snapshot_id = uuid4()
+    now = datetime(2026, 8, 13, 12, 0, tzinfo=UTC)
+    base = {
+        "snapshot_id": snapshot_id,
+        "snapshot_hash": "fixture-snapshot-hash",
+        "provider": "openai",
+        "model": "fixture-model",
+        "model_version": "fixture-model",
+        "prompt_version": "prompt-v1",
+        "decision_policy_version": "policy-v1",
+        "ai_view_version": "ai-view-v1",
+        "parse_status": "SUCCESS",
+        "normalized_response": {"action": "BUY_A"},
+    }
+    old_success = AiDecisionRecord(
+        id=uuid4(), request_started_at=now - timedelta(minutes=2), **base
+    )
+    new_failure = AiDecisionRecord(
+        id=uuid4(),
+        request_started_at=now - timedelta(minutes=1),
+        parse_status="TIMEOUT",
+        normalized_response=None,
+        **{
+            key: value
+            for key, value in base.items()
+            if key not in {"parse_status", "normalized_response"}
+        },
+    )
+    newest_success = AiDecisionRecord(
+        id=uuid4(), request_started_at=now, **base
+    )
+    other_model = AiDecisionRecord(
+        id=uuid4(),
+        request_started_at=now,
+        **{**base, "model": "other-model"},
+    )
+
+    canonical = _canonical_decision_rounds([old_success, new_failure, newest_success, other_model])
+
+    assert {(item.id, item.model) for item in canonical} == {
+        (newest_success.id, "fixture-model"),
+        (other_model.id, "other-model"),
+    }

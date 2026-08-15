@@ -54,6 +54,8 @@ def test_core_durable_job_workers_are_all_registered() -> None:
         "SettlementWorker",
         "EvaluationWorker",
     ]
+    ai_worker = next(worker for worker in workers if worker.name == "AiCoordinatorWorker")
+    assert ai_worker._run.__self__._concurrency == 4
 
 
 def test_email_notification_worker_is_registered() -> None:

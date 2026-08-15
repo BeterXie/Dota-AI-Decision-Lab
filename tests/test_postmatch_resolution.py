@@ -371,6 +371,7 @@ async def test_resolve_postmatch_settles_from_dltv_result_evidence() -> None:
         status=JobStatus.RUNNING,
         priority=100,
         not_before=datetime(2026, 8, 12, 12, 0, tzinfo=UTC),
+        created_at=datetime(2026, 8, 12, 12, 0, tzinfo=UTC),
         attempt_count=1,
         max_attempts=10,
         locked_by="fixture",

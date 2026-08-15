@@ -49,6 +49,7 @@ class DurableJob(BaseModel):
     status: JobStatus
     priority: int
     not_before: datetime
+    created_at: datetime
     attempt_count: int = Field(ge=0)
     max_attempts: int = Field(gt=0)
     locked_by: str | None
