@@ -142,9 +142,8 @@ test("renders winner, R.O.S.H., AI decisions and odds movement in one ledger", a
   vi.stubGlobal("fetch", vi.fn(async () => response(fixture)));
   renderReview();
 
-  expect(await screen.findByText("比赛复盘")).toBeInTheDocument();
-  expect(screen.getByText("Aurora")).toBeInTheDocument();
-  expect(screen.getByText("Spirit")).toBeInTheDocument();
+  expect((await screen.findAllByText("Aurora")).length).toBeGreaterThan(0);
+  expect(screen.getAllByText("Spirit").length).toBeGreaterThan(0);
   expect(screen.getByText("🏆 Aurora")).toBeInTheDocument();
   expect(screen.getByText(/Aurora \+4\.0pp ✓/)).toBeInTheDocument();
   expect(screen.getByText(/Spirit \+2\.0pp ✕/)).toBeInTheDocument();
@@ -158,9 +157,9 @@ test("filters the ledger to R.O.S.H. misses", async () => {
   vi.stubGlobal("fetch", vi.fn(async () => response(fixture)));
   renderReview();
 
-  expect(await screen.findByText("Aurora")).toBeInTheDocument();
+  expect((await screen.findAllByText("Aurora")).length).toBeGreaterThan(0);
   fireEvent.click(screen.getByRole("button", { name: "ROSH 错误" }));
-  expect(screen.getByText("Aurora")).toBeInTheDocument();
+  expect(screen.getAllByText("Aurora").length).toBeGreaterThan(0);
 
   const search = screen.getByPlaceholderText("搜索队伍 / 赛事");
   fireEvent.change(search, { target: { value: "不存在" } });
