@@ -63,13 +63,16 @@ def normalize_match_result(
     winner_team_id = radiant_team_id if winner_side.casefold() == "radiant" else dire_team_id
 
     series = database.get("series") if isinstance(database.get("series"), dict) else {}
-    started_at = _iso_datetime(series.get("started_at")) or fetched_at
+    published_started_at = _iso_datetime(series.get("started_at"))
+    started_at = published_started_at or fetched_at
+    started_at_estimated = published_started_at is None
     ended_at = _iso_datetime(series.get("ended_at"))
     match = HistoricalMap(
         provider_match_id=str(match_id),
         event_id=_optional_id(series.get("event_id")),
         patch_id=None,
         started_at=started_at,
+        started_at_estimated=started_at_estimated,
         ended_at=ended_at,
         radiant_team_id=str(radiant_team_id),
         dire_team_id=str(dire_team_id),
@@ -83,6 +86,7 @@ def normalize_match_result(
         match=match,
         players=(),
         advanced_available=False,
+        warnings=("STARTED_AT_ESTIMATED_FROM_FETCHED_AT",) if started_at_estimated else (),
     )
 
 

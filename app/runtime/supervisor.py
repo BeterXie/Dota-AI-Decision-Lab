@@ -39,9 +39,12 @@ class Supervisor:
         for worker in self._workers:
             await self._health.worker_state(worker.name, WorkerState.STOPPING)
         await asyncio.gather(*(worker.stop() for worker in self._workers), return_exceptions=True)
-        for task in self._tasks:
-            task.cancel()
-        await asyncio.gather(*self._tasks, return_exceptions=True)
+        if self._tasks:
+            _done, pending = await asyncio.wait(self._tasks, timeout=5.0)
+            for task in pending:
+                task.cancel()
+            if pending:
+                await asyncio.gather(*pending, return_exceptions=True)
         for worker in self._workers:
             await self._health.worker_state(worker.name, WorkerState.STOPPED)
 
@@ -71,7 +74,7 @@ class Supervisor:
                     error_type=type(exc).__name__,
                     error=str(exc),
                 )
-                delay = min(backoff, self._max_backoff) * random.uniform(0.8, 1.2)
+                delay = min(backoff, self._max_backoff) * random.uniform(0.8, 1.2)  # noqa: S311 - retry jitter is not security-sensitive randomness
                 try:
                     await asyncio.wait_for(self._stop.wait(), timeout=delay)
                     return

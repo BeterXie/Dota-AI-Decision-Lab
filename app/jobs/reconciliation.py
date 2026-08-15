@@ -185,20 +185,22 @@ class ReconciliationService:
         drafts = list(
             (
                 await session.scalars(
-                    select(DraftSnapshotRecord).where(DraftSnapshotRecord.complete.is_(True))
+                    select(DraftSnapshotRecord)
+                    .where(
+                        DraftSnapshotRecord.complete.is_(True),
+                        ~select(DraftMinuteCurveRecord.id)
+                        .where(
+                            DraftMinuteCurveRecord.draft_snapshot_id == DraftSnapshotRecord.id,
+                            DraftMinuteCurveRecord.model_version == MODEL_VERSION,
+                        )
+                        .exists(),
+                    )
+                    .order_by(DraftSnapshotRecord.observed_at.desc())
+                    .limit(1000)
                 )
             ).all()
         )
-        created = 0
         for draft in drafts:
-            curve = await session.scalar(
-                select(DraftMinuteCurveRecord.id).where(
-                    DraftMinuteCurveRecord.draft_snapshot_id == draft.id,
-                    DraftMinuteCurveRecord.model_version == MODEL_VERSION,
-                )
-            )
-            if curve is not None:
-                continue
             await self._jobs.enqueue(
                 session,
                 job_type=JobType.BUILD_DRAFT_CURVE,
@@ -209,8 +211,7 @@ class ReconciliationService:
                 },
                 reopen_terminal=True,
             )
-            created += 1
-        return created
+        return len(drafts)
 
     async def _reconcile_postmatch(self, session: AsyncSession, *, now: datetime) -> int:
         latest_live = (
@@ -244,10 +245,12 @@ class ReconciliationService:
                         )
                         .exists(),
                         latest_live.c.latest_received_at < now - timedelta(minutes=3),
+                        latest_live.c.latest_received_at >= now - timedelta(days=2),
                         ~select(MapResultRecord.id)
                         .where(MapResultRecord.canonical_map_id == CanonicalMap.id)
                         .exists(),
                     )
+                    .limit(500)
                 )
             ).all()
         )
@@ -593,7 +596,8 @@ class ReconciliationService:
         facts = list(
             (
                 await session.scalars(
-                    select(HistoricalMapRecord).where(
+                    select(HistoricalMapRecord)
+                    .where(
                         HistoricalMapRecord.canonical_map_id.is_not(None),
                         HistoricalMapRecord.winner_team_id.is_not(None),
                         HistoricalMapRecord.sync_status != "DATA_CONFLICT",
@@ -604,19 +608,18 @@ class ReconciliationService:
                             == HistoricalMapRecord.canonical_map_id,
                         )
                         .exists(),
+                        ~select(MapResultRecord.id)
+                        .where(
+                            MapResultRecord.canonical_map_id == HistoricalMapRecord.canonical_map_id
+                        )
+                        .exists(),
                     )
+                    .order_by(HistoricalMapRecord.first_usable_at.desc())
+                    .limit(1000)
                 )
             ).all()
         )
-        created = 0
         for fact in facts:
-            settled = await session.scalar(
-                select(MapResultRecord.id).where(
-                    MapResultRecord.canonical_map_id == fact.canonical_map_id
-                )
-            )
-            if settled is not None:
-                continue
             await self._jobs.enqueue(
                 session,
                 job_type=JobType.SETTLE_MAP,
@@ -624,36 +627,46 @@ class ReconciliationService:
                 payload={"canonical_map_id": str(fact.canonical_map_id)},
                 reopen_terminal=True,
             )
-            created += 1
-        return created
+        return len(facts)
 
     async def _reconcile_evaluations(self, session: AsyncSession) -> int:
-        decisions = list((await session.scalars(select(AiDecisionRecord))).all())
-        created_snapshots: set = set()
-        for decision in decisions:
-            snapshot = await session.get(DecisionSnapshotRecord, decision.snapshot_id)
-            if snapshot is None or snapshot.canonical_map_id is None:
-                continue
-            result = await session.scalar(
-                select(MapResultRecord.id).where(
-                    MapResultRecord.canonical_map_id == snapshot.canonical_map_id,
-                    MapResultRecord.provider_conflict.is_(False),
-                    MapResultRecord.winner_team_id.is_not(None),
+        snapshot_ids = list(
+            (
+                await session.scalars(
+                    select(DecisionSnapshotRecord.id)
+                    .join(
+                        AiDecisionRecord,
+                        AiDecisionRecord.snapshot_id == DecisionSnapshotRecord.id,
+                    )
+                    .join(
+                        MapResultRecord,
+                        MapResultRecord.canonical_map_id == DecisionSnapshotRecord.canonical_map_id,
+                    )
+                    .where(
+                        DecisionSnapshotRecord.canonical_map_id.is_not(None),
+                        AiDecisionRecord.parse_status == "SUCCESS",
+                        AiDecisionRecord.normalized_response.is_not(None),
+                        MapResultRecord.provider_conflict.is_(False),
+                        MapResultRecord.winner_team_id.is_not(None),
+                        ~select(DecisionEvaluationRecord.id)
+                        .where(
+                            DecisionEvaluationRecord.ai_decision_id == AiDecisionRecord.id,
+                            DecisionEvaluationRecord.metrics_version == METRICS_VERSION,
+                        )
+                        .exists(),
+                    )
+                    .distinct()
+                    .order_by(DecisionSnapshotRecord.id)
+                    .limit(1000)
                 )
-            )
-            evaluation = await session.scalar(
-                select(DecisionEvaluationRecord.metrics_version).where(
-                    DecisionEvaluationRecord.ai_decision_id == decision.id
-                )
-            )
-            if result is None or evaluation == METRICS_VERSION or snapshot.id in created_snapshots:
-                continue
+            ).all()
+        )
+        for snapshot_id in snapshot_ids:
             await self._jobs.enqueue(
                 session,
                 job_type=JobType.EVALUATE_DECISION,
-                dedupe_key=f"reconcile-evaluation:{METRICS_VERSION}:{snapshot.id}",
-                payload={"snapshot_id": str(snapshot.id)},
+                dedupe_key=f"reconcile-evaluation:{METRICS_VERSION}:{snapshot_id}",
+                payload={"snapshot_id": str(snapshot_id)},
                 reopen_terminal=True,
             )
-            created_snapshots.add(snapshot.id)
-        return len(created_snapshots)
+        return len(snapshot_ids)

@@ -51,6 +51,8 @@ async def _ensure_partition(
     start: date,
     end: date,
 ) -> int:
+    if PARTITIONED_TABLES.get(table) != timestamp_column:
+        raise ValueError("partition table/column is not allowlisted")
     partition = f"{table}_{start:%Y%m%d}"
     exists = await connection.scalar(
         text("select to_regclass(:partition_name) is not null"),
@@ -64,7 +66,7 @@ async def _ensure_partition(
     await connection.execute(text(f"CREATE TEMP TABLE {temporary} AS TABLE {table} WITH NO DATA"))
     await connection.execute(
         text(
-            f"WITH moved AS ("
+            f"WITH moved AS ("  # noqa: S608 - identifiers are allowlisted above
             f"DELETE FROM {default_partition} "
             f"WHERE {timestamp_column} >= :start AND {timestamp_column} < :end RETURNING *"
             f") INSERT INTO {temporary} SELECT * FROM moved"
@@ -77,6 +79,8 @@ async def _ensure_partition(
             f"FOR VALUES FROM ('{start.isoformat()}') TO ('{end.isoformat()}')"
         )
     )
-    await connection.execute(text(f"INSERT INTO {table} SELECT * FROM {temporary}"))
+    await connection.execute(
+        text(f"INSERT INTO {table} SELECT * FROM {temporary}")  # noqa: S608 - allowlisted identifiers
+    )
     await connection.execute(text(f"DROP TABLE {temporary}"))
     return 1

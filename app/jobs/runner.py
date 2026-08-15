@@ -127,8 +127,12 @@ class JobRunner:
                 await handler_task
             except asyncio.CancelledError:
                 pass
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning(
+                    "durable_job_handler_error_after_lease_failure",
+                    job_id=str(job.id),
+                    error=f"{type(exc).__name__}: {exc}",
+                )
             await self._mark_failed(
                 job,
                 f"lease renewal failed: {type(renewal_error).__name__}: {renewal_error}",

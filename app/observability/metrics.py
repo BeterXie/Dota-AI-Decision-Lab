@@ -12,6 +12,10 @@ class Metrics:
         self.live_sync = Gauge("live_sync_seconds", "Live synchronization estimates", ["statistic"])
         self.jobs = Gauge("durable_jobs", "Durable jobs by status", ["status"])
         self.worker_restarts = Counter("worker_restart_total", "Worker restart count", ["worker"])
+        self.event_hub_dropped = Counter(
+            "event_hub_dropped_total",
+            "Live EventHub messages dropped because a subscriber queue was full",
+        )
         self.snapshot_latency = Histogram(
             "snapshot_build_latency_seconds", "Decision snapshot build latency"
         )

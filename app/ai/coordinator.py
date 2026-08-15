@@ -5,6 +5,7 @@ from datetime import UTC, datetime
 from time import perf_counter
 from uuid import UUID
 
+from pydantic import ValidationError
 from pydantic_core import to_jsonable_python
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -500,7 +501,7 @@ def _prior_from_rows(
             continue
         try:
             decision = AiDecision.model_validate(record.normalized_response)
-        except Exception:
+        except ValidationError:
             continue
         prior.append(
             _PriorDecision(

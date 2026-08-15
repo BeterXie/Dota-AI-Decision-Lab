@@ -55,6 +55,7 @@ class HistoricalRepository:
                 provider_match_id=bundle.match.provider_match_id,
                 patch_id=bundle.match.patch_id,
                 started_at=bundle.match.started_at,
+                started_at_estimated=bundle.match.started_at_estimated,
                 ended_at=bundle.match.ended_at,
                 radiant_team_id=radiant_team_id,
                 dire_team_id=dire_team_id,
@@ -85,6 +86,9 @@ class HistoricalRepository:
             record.dire_team_id = record.dire_team_id or dire_team_id
             record.winner_team_id = record.winner_team_id or winner_team_id
             record.patch_id = record.patch_id or bundle.match.patch_id
+            if record.started_at_estimated and not bundle.match.started_at_estimated:
+                record.started_at = bundle.match.started_at
+                record.started_at_estimated = False
             record.ended_at = record.ended_at or bundle.match.ended_at
             record.first_usable_at = earliest(record.first_usable_at, bundle.match.first_usable_at)
             record.fetched_at = bundle.match.fetched_at
