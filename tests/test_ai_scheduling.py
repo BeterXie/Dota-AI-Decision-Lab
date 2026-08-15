@@ -78,7 +78,10 @@ async def _snapshot(session, *, mode: str = "LIVE_BASIC"):
         canonical_map_id=None,
         decision_at=datetime(2026, 8, 15, 12, 0, tzinfo=UTC),
         mode=mode,
-        identity={"team_a": {"id": "team-a", "name": "A"}, "team_b": {"id": "team-b", "name": "B"}},
+        identity={
+            "team_a": {"id": "team-a", "name": "A"},
+            "team_b": {"id": "team-b", "name": "B"},
+        },
         market={},
         draft=None,
         history={},
@@ -107,9 +110,7 @@ async def test_ai_event_fans_out_to_one_durable_job_per_experiment() -> None:
             )
         )
         await session.flush()
-        event_id = (
-            await session.scalar(select(DomainEventRecord.id))
-        )
+        event_id = await session.scalar(select(DomainEventRecord.id))
 
     dispatcher = DomainEventDispatcher(
         JobRepository(),
@@ -152,7 +153,7 @@ async def test_ai_event_fans_out_to_one_durable_job_per_experiment() -> None:
 
 
 @pytest.mark.asyncio
-async def test_reconciliation_enqueues_only_missing_experiments() -> None:
+async def test_reconciliation_does_not_infer_missing_experiment_after_ai_audit_exists() -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
@@ -192,20 +193,15 @@ async def test_reconciliation_enqueues_only_missing_experiments() -> None:
     async with factory() as session, session.begin():
         second = await reconciliation.run(session, now=now)
 
-    assert first.ai_jobs == 1
+    assert first.ai_jobs == 0
     assert second.ai_jobs == 0
     async with factory() as session:
-        record = await session.scalar(
-            select(DurableJobRecord).where(
-                DurableJobRecord.job_type == JobType.RUN_AI_PROVIDER.value
-            )
+        job_count = await session.scalar(
+            select(func.count())
+            .select_from(DurableJobRecord)
+            .where(DurableJobRecord.job_type == JobType.RUN_AI_PROVIDER.value)
         )
-        assert record is not None
-        assert record.payload == {
-            "snapshot_id": str(snapshot.snapshot_id),
-            "provider": "anthropic",
-            "model": "claude-test",
-        }
+    assert job_count == 0
     await engine.dispose()
 
 
@@ -345,9 +341,9 @@ async def test_legacy_ai_job_payload_still_runs_all_experiments() -> None:
     async with factory() as session:
         assert (
             await session.scalar(
-                select(func.count()).select_from(AiDecisionRecord).where(
-                    AiDecisionRecord.snapshot_id == snapshot.snapshot_id
-                )
+                select(func.count())
+                .select_from(AiDecisionRecord)
+                .where(AiDecisionRecord.snapshot_id == snapshot.snapshot_id)
             )
             == 2
         )
@@ -372,7 +368,10 @@ async def test_ai_record_versions_are_current_for_new_jobs() -> None:
         request_started_at=datetime(2026, 8, 15, tzinfo=UTC),
         parse_status="SUCCESS",
     )
-    assert (record.provider, record.model, record.prompt_version,
-            record.decision_policy_version, record.ai_view_version) == (
-        "openai", "gpt-test", PROMPT_VERSION, DECISION_POLICY_VERSION, AI_VIEW_VERSION
-    )
+    assert (
+        record.provider,
+        record.model,
+        record.prompt_version,
+        record.decision_policy_version,
+        record.ai_view_version,
+    ) == ("openai", "gpt-test", PROMPT_VERSION, DECISION_POLICY_VERSION, AI_VIEW_VERSION)
