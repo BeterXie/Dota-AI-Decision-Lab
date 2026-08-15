@@ -1,8 +1,9 @@
 import React from "react";
 import type { DraftPoint, MapDetail, MapSummary } from "../api";
-import IntelligenceChart from "../Chart";
 import { useI18n } from "../i18n";
 import { resolveVerifiedMapSides } from "../utils/mapSides";
+
+const IntelligenceChart = React.lazy(() => import("../Chart"));
 
 export function PlayerDraftAdvantageCard({ match, onViewDetails }: { match: MapSummary | MapDetail; onViewDetails?: () => void }) {
   const { locale, t } = useI18n();
@@ -82,7 +83,13 @@ export function PlayerDraftAdvantageCard({ match, onViewDetails }: { match: MapS
       <div className="rosh-chart-shell">
         <span className="rosh-zone-label radiant">↑ {sides?.radiant.name ? `${sides.radiant.name} · ` : ""}{locale === "zh-CN" ? "天辉优势区" : "Radiant advantage"}</span>
         <span className="rosh-zone-label dire">↓ {sides?.dire.name ? `${sides.dire.name} · ` : ""}{locale === "zh-CN" ? "夜魇优势区" : "Dire advantage"}</span>
-        <div className="rosh-chart-container">{curve.length ? <IntelligenceChart option={chartOption} /> : <span className="chart-empty">{t("noRoshCurve")}</span>}</div>
+        <div className="rosh-chart-container">
+          {curve.length ? (
+            <React.Suspense fallback={<span className="chart-empty">{t("noRoshCurve")}</span>}>
+              <IntelligenceChart option={chartOption} />
+            </React.Suspense>
+          ) : <span className="chart-empty">{t("noRoshCurve")}</span>}
+        </div>
       </div>
 
       {onViewDetails && <div className="card-footer-action"><button className="text-action-btn" onClick={onViewDetails}>{t("viewDetails")} →</button></div>}
