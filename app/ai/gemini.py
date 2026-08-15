@@ -7,6 +7,7 @@ from app.ai.base import (
     AiProviderFailure,
     AiProviderResponse,
     decision_json_schema,
+    extract_provider_usage,
     parse_decision,
 )
 from app.providers.common import create_system_ssl_context
@@ -62,6 +63,7 @@ class GeminiDecisionProvider:
             raw_response=raw,
             decision=parse_decision(text, raw),
             model_version=str(raw.get("model") or self.model),
+            usage=extract_provider_usage(raw),
         )
 
     async def close(self) -> None:

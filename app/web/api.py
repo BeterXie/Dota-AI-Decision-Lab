@@ -1568,6 +1568,11 @@ def _decision_payload(
         "response_received_at": record.response_received_at,
         "parse_status": record.parse_status,
         "latency_seconds": record.latency_seconds,
+        "input_tokens": record.input_tokens,
+        "cached_input_tokens": record.cached_input_tokens,
+        "reasoning_tokens": record.reasoning_tokens,
+        "output_tokens": record.output_tokens,
+        "total_tokens": record.total_tokens,
         "bankroll_before": float(record.bankroll_before)
         if record.bankroll_before is not None
         else None,

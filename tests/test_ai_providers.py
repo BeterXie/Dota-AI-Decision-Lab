@@ -33,6 +33,13 @@ async def test_openai_uses_responses_strict_text_format() -> None:
             json={
                 "status": "completed",
                 "model": "gpt-5.6-terra",
+                "usage": {
+                    "input_tokens": 1200,
+                    "input_tokens_details": {"cached_tokens": 800},
+                    "output_tokens": 200,
+                    "output_tokens_details": {"reasoning_tokens": 120},
+                    "total_tokens": 1400,
+                },
                 "output": [
                     {
                         "type": "message",
@@ -60,6 +67,10 @@ async def test_openai_uses_responses_strict_text_format() -> None:
     assert captured["text"]["format"]["type"] == "json_schema"
     assert captured["text"]["format"]["strict"] is True
     assert captured["reasoning"] == {"effort": "xhigh"}
+    assert captured["prompt_cache_key"].startswith("dota-ai-decision:")
+    assert result.usage is not None
+    assert result.usage.cached_input_tokens == 800
+    assert result.usage.reasoning_tokens == 120
     await client.aclose()
 
 
@@ -179,6 +190,7 @@ async def test_deepseek_uses_responses_strict_text_format() -> None:
     assert captured["text"]["format"]["type"] == "json_schema"
     assert captured["text"]["format"]["strict"] is True
     assert captured["reasoning"] == {"effort": "xhigh"}
+    assert "prompt_cache_key" not in captured
     assert captured["input"] == '{"snapshot_hash":"same"}'
     await client.aclose()
 

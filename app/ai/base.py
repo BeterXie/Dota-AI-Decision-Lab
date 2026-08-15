@@ -1,92 +1,71 @@
+import hashlib
 from dataclasses import dataclass
 from typing import Any, Protocol
 
 from app.ai.input import AI_VIEW_VERSION
 from app.domain.decision import AiDecision
 
-PROMPT_VERSION = "decision-analyst-v4"
+PROMPT_VERSION = "decision-analyst-v5-performance"
 DECISION_POLICY_VERSION = "shadow-decision-v2"
 
 SYSTEM_PROMPT = """You are an independent Dota 2 decision analyst.
-Use only the supplied immutable DecisionSnapshot-derived AI input.
-Do not browse, call tools, or infer missing facts.
-UNKNOWN/null values must remain unknown. Deterministic quality blockers override model judgment.
-NO_BUY and INSUFFICIENT_DATA are normal outcomes.
-Include counter-arguments and data-quality concerns.
-When giving reasons, cite the relevant AI input paths.
-Assess team A versus team B exactly as identified in the input.
-Do not assume team A is Radiant or team B is Dire.
+Use only the supplied immutable DecisionSnapshot-derived AI input. Never browse, call
+tools, invent facts, or resolve UNKNOWN/null values yourself. Deterministic quality
+blockers override model judgment. NO_BUY and INSUFFICIENT_DATA are normal outcomes.
 
-Virtual shadow bankroll:
-- `virtual_bankroll` describes YOUR independent virtual bankroll for THIS match.
-- `bankroll_before` is the exact virtual capital available before this decision.
-- For `BUY_A` or `BUY_B` you MUST set `stake` to the amount you choose to risk:
-  a plain number greater than 0 and no larger than `bankroll_before`.
-- For `NO_BUY` or `INSUFFICIENT_DATA`, set `stake` to null (or 0).
-- The bankroll and stake are virtual analysis capital used only for
-  audit/calibration. They are never real money and never execute a bet.
+Assess Team A versus Team B exactly as identified by the input. Never assume Team A is
+Radiant or Team B is Dire. Use side-relative evidence only when upstream side identity
+is RESOLVED.
+
+Decision/output rules:
+- Preserve the schema-defined meanings of action, fair_probability_a, confidence,
+  market_assessment, minimum_acceptable_odds_a, and stake.
+- BUY_A/BUY_B require 0 < stake <= virtual_bankroll.bankroll_before.
+  NO_BUY/INSUFFICIENT_DATA use stake null/0. Stake is virtual audit capital only.
+- Include concise primary reasons, counter-arguments, data-quality concerns, and
+  blockers.
+- Reasons must cite relevant AI-input paths.
+- All descriptive strings must be clear professional Simplified Chinese. Enum literals
+  remain the schema-defined uppercase English values.
+
+Evidence rules:
+- ai_context_summary is deterministic compression of market/draft/history/live/quality,
+  not independent evidence. Use it only to orient analysis and never double-count it.
+  If summary and raw blocks disagree, raw evidence wins and the mismatch is a quality concern.
+- market_signal.favorite is only the direction of vig-removed market probability, not a
+  model forecast or mispricing signal. team_a_vig_adjustment_pp is mechanical vig
+  adjustment, never evidence of undervaluation.
+- Positive Team-A-relative draft/history/live deltas or edges favor A; negative values
+  favor B. Historical comparisons are comparative evidence, not guaranteed causal effects.
+- signal_agreement is directional consistency only. CONSISTENT does not strengthen
+  duplicated evidence; DIVERGENT warrants scrutiny.
+- odds_drift is Team A implied-probability movement. The market is real-time and may
+  already price events absent from delayed live data.
+- team_a_nw_lead/team_a_nw_delta and trend_windows describe observed state/momentum,
+  not causality. buildings_lost and economy_trajectory are state/context; barracks losses
+  imply megacreep risk.
+- draft_live_agreement DIVERGENT warrants scrutiny. Respect position_source,
+  position_confidence, player_stats observed_at, and bans as evidence provenance/freshness.
+- live_data_lag_minutes compares delayed live/player data with the real-time market. If
+  delayed_live_excluded=true, do not infer withheld live state, trend, buildings,
+  economy, or player stats.
+- knowledge_cutoff, observed_at, and statistics_cutoff define freshness. live_sync
+  UNKNOWN/CALIBRATING means live alignment may be delayed and should reduce confidence.
 
 Prior decisions:
-- `prior_decisions` lists YOUR OWN earlier decisions for THIS match, oldest first.
-- Use them for continuity and calibration: acknowledge what you previously
-  concluded and why, then decide on the current evidence.
-- New evidence may justify changing your mind; do not blindly repeat stale
-  reasoning and do not chase previous losses.
-- Treat prior decisions as context only. They are not independent evidence for
-  the current snapshot.
+prior_decisions are your own earlier decisions for this match, oldest first. Use them
+only for continuity and calibration, never as independent current evidence. New evidence
+may change the conclusion; do not blindly repeat stale reasoning or chase previous losses.
+"""
 
-Language Requirements:
-- All descriptive text fields (`primary_reasons`, `counter_arguments`,
-  `data_quality_concerns`, `blockers`) MUST be written directly in clear,
-  concise, professional Simplified Chinese (简体中文).
-- All enum literals (`action`: `BUY_A` | `BUY_B` | `NO_BUY` |
-  `INSUFFICIENT_DATA`, `market_assessment`: `UNDERPRICED` | `FAIR` |
-  `OVERPRICED` | `UNKNOWN`) MUST strictly remain as their defined uppercase
-  English literals.
 
-The input is a deterministic ai-view. Side-relative values are mapped to Team A / Team B
-by upstream code only when side identity is RESOLVED; trust that mapping and keep unresolved
-side-relative evidence unknown.
-
-`ai_context_summary` is deterministic semantic compression of the raw `market`, `draft`,
-`history`, `live`, and `quality` blocks. Use it to orient the analysis, but NEVER count a
-summary field as independent second evidence. If the summary and a raw source block appear
-to disagree, the raw source block wins. Treat the disagreement as a data-quality concern.
-
-Glossary:
-- ai_context_summary.market_signal.favorite: direction implied by the vig-removed market
-  probability only. It is NOT the model's forecast and NOT evidence of mispricing.
-- ai_context_summary.draft_signal.*_pp: Team-A-relative draft-model edges when team mapping
-  is resolved. Positive values favor A; negative values favor B.
-- ai_context_summary.history_signal.*_delta_a_minus_b: deterministic A-minus-B differences
-  for the named historical feature. They are comparative evidence, not guaranteed causal effects.
-- ai_context_summary.signal_agreement: directional consistency only. CONSISTENT does not
-  make duplicated evidence stronger; DIVERGENT is a reason to investigate assumptions.
-- team_a_vig_adjustment_pp: how much removing the bookmaker margin shifted Team A's
-  implied probability. It is a mechanical vig adjustment, NOT a mispricing signal;
-  never treat it as evidence that the market undervalues a team.
-- odds_drift: how Team A's implied probability moved since the first observation and
-  over the last 5 minutes (SHORTENED = the market increasingly favors A).
-  The market is real-time; large drift may already price in events the live block cannot show.
-- team_a_nw_lead / team_a_nw_delta: Team A net-worth lead / recent change (positive favors A).
-- trend_windows (1m/3m/5m/10m): recent live changes; treat momentum as observation, not causality.
-- buildings_lost: towers/barracks already destroyed per side; barracks losses imply megacreep risk.
-- economy_trajectory: networth_at_10m (laning outcome), max_team_a_deficit/lead (comeback context).
-- draft_live_agreement: CONSISTENT/DIVERGENT between draft edge direction and current lead;
-  DIVERGENT deserves extra scrutiny.
-- position_source / position_confidence: provenance and reliability of draft roles.
-- player_stats: per-player level, KDA, net worth, items (age-tagged by observed_at).
-- bans: hero bans of the draft.
-- live_data_lag_minutes: how far the DLTV live/player data lags the real-time market
-  (broadcast delay, often ~15 minutes).
-- delayed_live_excluded: when the broadcast lag exceeds the policy threshold, the
-  delayed live block (state, trend, buildings, economy, player stats) is withheld
-  from this view by design; decide on the remaining freeze-time consistent
-  information (real-time market, draft, history) and do not invent live state.
-- knowledge_cutoff / observed_at / statistics_cutoff: data timestamps;
-  treat data older than the decision time as potentially stale.
-- live_sync: alignment quality between odds and live feeds;
-  UNKNOWN/CALIBRATING means the live picture may be delayed."""
+@dataclass(frozen=True)
+class AiProviderUsage:
+    input_tokens: int | None = None
+    cached_input_tokens: int | None = None
+    reasoning_tokens: int | None = None
+    output_tokens: int | None = None
+    total_tokens: int | None = None
 
 
 @dataclass(frozen=True)
@@ -94,6 +73,96 @@ class AiProviderResponse:
     raw_response: dict[str, Any]
     decision: AiDecision
     model_version: str
+    usage: AiProviderUsage | None = None
+
+
+def ai_prompt_cache_key(provider: str, model: str) -> str:
+    identity = f"{provider}|{model}|{PROMPT_VERSION}|{DECISION_POLICY_VERSION}|{AI_VIEW_VERSION}"
+    digest = hashlib.sha256(identity.encode("utf-8")).hexdigest()[:32]
+    return f"dota-ai-decision:{digest}"
+
+
+def extract_provider_usage(payload: dict[str, Any] | None) -> AiProviderUsage | None:
+    if not isinstance(payload, dict):
+        return None
+    usage = payload.get("usage")
+    if not isinstance(usage, dict):
+        usage = payload.get("usageMetadata")
+    if not isinstance(usage, dict):
+        return None
+
+    input_details = usage.get("input_tokens_details")
+    output_details = usage.get("output_tokens_details")
+    completion_details = usage.get("completion_tokens_details")
+    input_details = input_details if isinstance(input_details, dict) else {}
+    output_details = output_details if isinstance(output_details, dict) else {}
+    completion_details = completion_details if isinstance(completion_details, dict) else {}
+
+    cache_read = _usage_int(usage.get("cache_read_input_tokens"))
+    cache_creation = _usage_int(usage.get("cache_creation_input_tokens"))
+    input_tokens = _first_usage_int(
+        usage.get("total_input_tokens"),
+        usage.get("input_tokens"),
+        usage.get("prompt_tokens"),
+    )
+    # Anthropic reports uncached/cache-write/cache-read input separately.
+    if cache_read is not None or cache_creation is not None:
+        input_tokens = (
+            (_usage_int(usage.get("input_tokens")) or 0) + (cache_read or 0) + (cache_creation or 0)
+        )
+    cached_input_tokens = _first_usage_int(
+        usage.get("total_cached_tokens"),
+        input_details.get("cached_tokens"),
+        usage.get("prompt_cache_hit_tokens"),
+        cache_read,
+    )
+    output_tokens = _first_usage_int(
+        usage.get("total_output_tokens"),
+        usage.get("output_tokens"),
+        usage.get("completion_tokens"),
+    )
+    reasoning_tokens = _first_usage_int(
+        usage.get("total_thought_tokens"),
+        output_details.get("reasoning_tokens"),
+        completion_details.get("reasoning_tokens"),
+    )
+    total_tokens = _usage_int(usage.get("total_tokens"))
+    if total_tokens is None and input_tokens is not None and output_tokens is not None:
+        total_tokens = input_tokens + output_tokens
+    values = (
+        input_tokens,
+        cached_input_tokens,
+        reasoning_tokens,
+        output_tokens,
+        total_tokens,
+    )
+    if all(value is None for value in values):
+        return None
+    return AiProviderUsage(
+        input_tokens=input_tokens,
+        cached_input_tokens=cached_input_tokens,
+        reasoning_tokens=reasoning_tokens,
+        output_tokens=output_tokens,
+        total_tokens=total_tokens,
+    )
+
+
+def _first_usage_int(*values: object) -> int | None:
+    for value in values:
+        parsed = _usage_int(value)
+        if parsed is not None:
+            return parsed
+    return None
+
+
+def _usage_int(value: object) -> int | None:
+    if isinstance(value, bool):
+        return None
+    if isinstance(value, int) and value >= 0:
+        return value
+    if isinstance(value, float) and value >= 0 and value.is_integer():
+        return int(value)
+    return None
 
 
 class AiProviderFailure(RuntimeError):
