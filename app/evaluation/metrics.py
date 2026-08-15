@@ -113,7 +113,7 @@ class EvaluationService:
                 ),
                 "virtual_pnl": virtual_pnl,
                 "virtual_odds": virtual_odds,
-                  "unit_pnl": unit_pnl,
+                "unit_pnl": unit_pnl,
                 "evaluated_at": datetime.now(UTC),
                 "metrics_version": METRICS_VERSION,
             }
