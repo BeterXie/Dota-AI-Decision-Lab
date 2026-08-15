@@ -4,7 +4,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db import Base
@@ -180,8 +180,10 @@ async def test_duplicate_socket_state_keeps_raw_but_not_normalized_duplicate() -
         "radiant_lead": -6643,
     }
     event_name = f"__nd2_match_{valve_match_id}"
-    await collector.collect(event_name, payload, "connection-a", 1)
-    await collector.collect(event_name, payload, "connection-b", 2)
+    first_at = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
+    second_at = datetime(2026, 8, 12, 12, 0, 7, tzinfo=UTC)
+    await collector.collect(event_name, payload, "connection-a", 1, received_at=first_at)
+    await collector.collect(event_name, payload, "connection-b", 2, received_at=second_at)
 
     async with factory() as session:
         raw = list(
@@ -191,9 +193,16 @@ async def test_duplicate_socket_state_keeps_raw_but_not_normalized_duplicate() -
                 )
             ).all()
         )
-        normalized_count = await session.scalar(
-            select(func.count()).select_from(DltvLiveObservationRecord)
+        normalized = list(
+            (
+                await session.scalars(
+                    select(DltvLiveObservationRecord).order_by(
+                        DltvLiveObservationRecord.received_at
+                    )
+                )
+            ).all()
         )
+        normalized_count = len(normalized)
 
     assert len(raw) == 2
     assert normalized_count == 1
@@ -202,6 +211,12 @@ async def test_duplicate_socket_state_keeps_raw_but_not_normalized_duplicate() -
     assert raw[0].normalized_state_hash == raw[1].normalized_state_hash
     assert raw[1].connection_id == "connection-b"
     assert raw[1].reconnect_generation == 2
+    # The duplicate packet refreshes message freshness without creating a new
+    # state row: live phase stays LIVE while state-change age remains frozen.
+    assert normalized[0].received_at == first_at.replace(tzinfo=None)
+    assert normalized[0].last_message_received_at == second_at.replace(tzinfo=None)
+    assert normalized[0].last_state_change_received_at == first_at.replace(tzinfo=None)
+    assert normalized[0].game_time_seconds == 1061
     await engine.dispose()
 
 

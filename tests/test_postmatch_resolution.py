@@ -1,4 +1,6 @@
+import json
 from datetime import UTC, datetime
+from pathlib import Path
 from types import SimpleNamespace
 from uuid import uuid4
 
@@ -8,11 +10,42 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db import Base
 from app.domain.history import HistoricalMap, HistoricalMatchBundle
+from app.domain.jobs import DurableJob, JobStatus, JobType
+from app.evaluation.settlement import SettlementService
+from app.events.outbox import EventRepository
 from app.history.identity import HistoricalTeamResolver
+from app.history.repository import HistoricalRepository
 from app.jobs.handlers import ApplicationJobHandlers
-from app.models import CanonicalTeam, ProviderRawEvent, ProviderTeamMapping
+from app.models import (
+    CanonicalMap,
+    CanonicalSeries,
+    CanonicalTeam,
+    HistoricalMapRecord,
+    MapResultEvidenceRecord,
+    MapResultRecord,
+    ProviderRawEvent,
+    ProviderTeamMapping,
+)
 from app.providers.common import TimedPayload
+from app.providers.dltv.results import DltvResultProvider, normalize_match_result
 from app.repositories.raw import RawEventRepository
+
+FIXTURES = Path(__file__).parent / "fixtures"
+
+
+class _DltvClient:
+    def __init__(self, payload: dict) -> None:
+        self._payload = payload
+        self.calls = 0
+
+    async def get_live(self, match_id: int) -> TimedPayload:
+        self.calls += 1
+        now = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
+        return TimedPayload(
+            payload=self._payload,
+            request_started_at=now,
+            received_at=now,
+        )
 
 
 class _Provider:
@@ -177,5 +210,196 @@ async def test_observed_postmatch_team_ids_resolve_only_by_expected_aliases() ->
         )
         assert {item.provider_team_id for item in mappings} == {"9247354", "10150538"}
         assert {item.canonical_team_id for item in mappings} == {team_a_id, team_b_id}
+
+    await engine.dispose()
+
+
+def test_dltv_result_normalizer_maps_winner_through_explicit_side_flags() -> None:
+    payload = json.loads((FIXTURES / "dltv_result.json").read_text(encoding="utf-8"))
+    fetched_at = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
+
+    bundle = normalize_match_result(payload, fetched_at=fetched_at)
+
+    # Recorded DLTV provider ordering is reversed: first_team is Dire.
+    assert bundle.match.provider == "dltv"
+    assert bundle.match.provider_match_id == "8940730389"
+    assert bundle.match.radiant_team_id == "8006"
+    assert bundle.match.dire_team_id == "6014"
+    assert bundle.match.winner_team_id == "6014"
+    assert bundle.match.first_usable_at == fetched_at
+    assert bundle.advanced_available is False
+    assert bundle.players == ()
+
+
+def test_dltv_result_normalizer_keeps_unpublished_winner_unknown() -> None:
+    payload = json.loads((FIXTURES / "dltv_result.json").read_text(encoding="utf-8"))
+    payload.pop("winner")
+
+    with pytest.raises(ValueError, match="winner is not published"):
+        normalize_match_result(payload, fetched_at=datetime(2026, 8, 12, 12, 0, tzinfo=UTC))
+
+
+def test_dltv_result_normalizer_requires_explicit_radiant_dire_evidence() -> None:
+    payload = json.loads((FIXTURES / "dltv_result.json").read_text(encoding="utf-8"))
+    payload["db"]["first_team"].pop("is_radiant")
+
+    with pytest.raises(ValueError, match="side identity is incomplete"):
+        normalize_match_result(payload, fetched_at=datetime(2026, 8, 12, 12, 0, tzinfo=UTC))
+
+
+@pytest.mark.asyncio
+async def test_postmatch_falls_back_to_dltv_when_other_providers_have_no_winner() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    team_a_id = uuid4()
+    team_b_id = uuid4()
+    payload = json.loads((FIXTURES / "dltv_result.json").read_text(encoding="utf-8"))
+    dltv_client = _DltvClient(payload)
+    dltv = DltvResultProvider(dltv_client)
+    async with factory() as session, session.begin():
+        session.add_all(
+            (
+                CanonicalTeam(id=team_a_id, name="Level UP"),
+                CanonicalTeam(id=team_b_id, name="Spirit Academy"),
+                ProviderTeamMapping(
+                    provider="dltv",
+                    provider_team_id="6014",
+                    canonical_team_id=team_a_id,
+                ),
+                ProviderTeamMapping(
+                    provider="dltv",
+                    provider_team_id="8006",
+                    canonical_team_id=team_b_id,
+                ),
+            )
+        )
+
+    primary = _Provider("stratz", _bundle("stratz", winner_team_id=None))
+    fallback = _Provider("opendota", _bundle("opendota", winner_team_id=None))
+    handlers = ApplicationJobHandlers(
+        SimpleNamespace(
+            historical_primary=primary,
+            opendota=fallback,
+            dltv_result=dltv,
+            session_factory=factory,
+            raw_events=RawEventRepository(),
+            historical_team_resolver=_TeamResolver(),
+        )
+    )
+
+    provider, _response, bundle, raw_event_id = await handlers._postmatch_response(
+        8940730389,
+        expected_team_ids={team_a_id, team_b_id},
+    )
+
+    assert provider is dltv
+    assert bundle.match.winner_team_id == "6014"
+    assert primary.calls == 1
+    assert fallback.calls == 1
+    assert dltv_client.calls == 1
+    async with factory() as session:
+        raw = await session.scalar(
+            select(ProviderRawEvent).where(ProviderRawEvent.id == raw_event_id)
+        )
+        assert raw is not None
+        assert raw.provider == "dltv"
+        assert raw.event_type == "DLTV_POSTMATCH"
+        assert raw.provider_key == "8940730389"
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_resolve_postmatch_settles_from_dltv_result_evidence() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    payload = json.loads((FIXTURES / "dltv_result.json").read_text(encoding="utf-8"))
+    dltv = DltvResultProvider(_DltvClient(payload))
+    handlers = ApplicationJobHandlers(
+        SimpleNamespace(
+            historical_primary=None,
+            opendota=None,
+            dltv_result=dltv,
+            session_factory=factory,
+            raw_events=RawEventRepository(),
+            historical_team_resolver=HistoricalTeamResolver(RawEventRepository()),
+            historical_repository=HistoricalRepository(),
+            settlement=SettlementService(),
+            events=EventRepository(),
+        )
+    )
+    async with factory() as session, session.begin():
+        team_a = CanonicalTeam(name="Level UP")
+        team_b = CanonicalTeam(name="Spirit Academy")
+        session.add_all((team_a, team_b))
+        await session.flush()
+        series = CanonicalSeries(team_a_id=team_a.id, team_b_id=team_b.id)
+        session.add(series)
+        await session.flush()
+        canonical_map = CanonicalMap(
+            series_id=series.id,
+            valve_match_id=8940730389,
+            map_number=2,
+        )
+        session.add(canonical_map)
+        await session.flush()
+        session.add_all(
+            (
+                ProviderTeamMapping(
+                    provider="dltv",
+                    provider_team_id="6014",
+                    canonical_team_id=team_a.id,
+                ),
+                ProviderTeamMapping(
+                    provider="dltv",
+                    provider_team_id="8006",
+                    canonical_team_id=team_b.id,
+                ),
+            )
+        )
+        canonical_map_id = canonical_map.id
+
+    job = DurableJob(
+        id=uuid4(),
+        job_type=JobType.RESOLVE_POSTMATCH,
+        dedupe_key="dltv-postmatch-fixture",
+        payload={"canonical_map_id": str(canonical_map_id)},
+        status=JobStatus.RUNNING,
+        priority=100,
+        not_before=datetime(2026, 8, 12, 12, 0, tzinfo=UTC),
+        attempt_count=1,
+        max_attempts=10,
+        locked_by="fixture",
+        locked_at=datetime(2026, 8, 12, 12, 0, tzinfo=UTC),
+    )
+
+    await handlers.resolve_postmatch(job)
+
+    async with factory() as session:
+        fact = await session.scalar(
+            select(HistoricalMapRecord).where(
+                HistoricalMapRecord.provider == "dltv",
+                HistoricalMapRecord.provider_match_id == "8940730389",
+            )
+        )
+        result = await session.scalar(
+            select(MapResultRecord).where(MapResultRecord.canonical_map_id == canonical_map_id)
+        )
+        evidence = await session.scalar(
+            select(MapResultEvidenceRecord).where(
+                MapResultEvidenceRecord.canonical_map_id == canonical_map_id
+            )
+        )
+        assert fact is not None and fact.winner_team_id == team_a.id
+        assert result is not None and result.winner_team_id == team_a.id
+        assert result.provider_conflict is False
+        assert evidence is not None
+        assert evidence.provider == "dltv"
+        assert evidence.conflict_status == "CONFIRMED"
+        assert evidence.normalizer_version == dltv.normalizer_version
 
     await engine.dispose()

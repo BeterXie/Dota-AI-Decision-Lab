@@ -1,0 +1,22 @@
+{
+  "match_id": 8940730389,
+  "radiant_score": 11,
+  "dire_score": 28,
+  "game_time": 1936,
+  "winner": "dire",
+  "is_picks_ended": true,
+  "db": {
+    "first_team": {"id": 6014, "title": "Level UP", "is_radiant": false},
+    "second_team": {"id": 8006, "title": "Spirit Academy", "is_radiant": true},
+    "scores": {"first_team": 2, "second_team": 0},
+    "series": {
+      "id": 427634,
+      "event_id": 6628,
+      "status": 1,
+      "first_team_id": 6014,
+      "second_team_id": 8006,
+      "started_at": "2026-08-11T15:01:54.000Z",
+      "ended_at": null
+    }
+  }
+}

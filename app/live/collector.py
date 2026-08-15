@@ -163,7 +163,17 @@ class DltvSocketCollector:
                     reduction.state.state_hash if reduction.state is not None else None
                 )
                 raw_record.is_duplicate = reduction.duplicate
-            if not reduction.changed or reduction.state is None:
+            if reduction.state is None:
+                return
+            if not reduction.changed:
+                # Duplicate socket packets still prove the DLTV stream is alive.
+                # Refresh only the message-freshness metadata on the latest
+                # normalized row; do NOT create a new observation or move
+                # last_state_change_received_at, because the state did not change.
+                if latest is not None:
+                    latest.last_message_received_at = reduction.state.last_message_received_at
+                    latest.connection_id = reduction.state.connection_id
+                    latest.reconnect_generation = reduction.state.reconnect_generation
                 return
             state = reduction.state
             session.add(
