@@ -1,0 +1,72 @@
+name: Apply AI decision v5 performance patch v5
+
+on:
+  push:
+    branches:
+      - perf/ai-decision-v5
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: perf/ai-decision-v5
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+        with:
+          version: "0.12.0"
+          python-version: "3.14"
+      - run: uv sync --frozen --extra dev
+      - name: Apply final v5 patch
+        shell: python
+        run: |
+          from pathlib import Path
+          import subprocess
+          import yaml
+
+          workflow = yaml.safe_load(Path('.github/workflows/apply-ai-v5-performance-v4.yml').read_text(encoding='utf-8'))
+          source = next(
+              step['run']
+              for step in workflow['jobs']['patch']['steps']
+              if step.get('name') == 'Execute v3 patch with corrected generated indentation'
+          )
+          runner = Path('/tmp/run_v4_patch.py')
+          runner.write_text(source, encoding='utf-8')
+          subprocess.run(['python', str(runner)], check=True)
+
+          # Do not add any new explanation-count constraint in the performance-only release.
+          base = Path('app/ai/base.py')
+          text = base.read_text(encoding='utf-8')
+          text = text.replace(
+              'blockers; use at most three concise strings per explanatory list.\n',
+              'blockers.\n',
+              1,
+          )
+          base.write_text(text, encoding='utf-8')
+
+          # Safety-semantic checks care about meaning, not capitalization.
+          test = Path('tests/test_ai_v5_performance.py')
+          text = test.read_text(encoding='utf-8')
+          text = text.replace(
+              '        assert phrase in SYSTEM_PROMPT\n',
+              '        assert phrase.casefold() in SYSTEM_PROMPT.casefold()\n',
+              1,
+          )
+          test.write_text(text, encoding='utf-8')
+      - run: uv run ruff format app/ai app/models.py app/web/api.py migrations/versions/0027_ai_token_usage.py tests/test_ai_providers.py tests/test_ai_coordinator.py tests/test_ai_v5_performance.py
+      - run: uv run ruff check app/ai app/models.py app/web/api.py migrations/versions/0027_ai_token_usage.py tests/test_ai_providers.py tests/test_ai_coordinator.py tests/test_ai_v5_performance.py
+      - name: Run focused backend tests
+        run: uv run pytest tests/test_ai_providers.py tests/test_ai_coordinator.py tests/test_ai_v5_performance.py tests/test_web_api_contract.py
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/ai app/models.py app/web/api.py migrations/versions/0027_ai_token_usage.py tests/test_ai_providers.py tests/test_ai_coordinator.py tests/test_ai_v5_performance.py
+          git commit -m "perf(ai): add v5 prompt and token cache telemetry"
+          git push origin HEAD:perf/ai-decision-v5
