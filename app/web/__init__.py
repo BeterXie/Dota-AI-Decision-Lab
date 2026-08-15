@@ -19,6 +19,7 @@ def create_app(
     live_state_max_age_seconds: float = 45.0,
     live_market_max_age_seconds: float = 30.0,
     market_max_pair_skew_seconds: float = 5.0,
+    ai_min_game_time_seconds: int = 600,
 ) -> FastAPI:
     # Build API routes first without the SPA catch-all, so detail-scoped
     # extension routes remain reachable before the frontend fallback route.
@@ -29,6 +30,7 @@ def create_app(
         live_state_max_age_seconds=live_state_max_age_seconds,
         live_market_max_age_seconds=live_market_max_age_seconds,
         market_max_pair_skew_seconds=market_max_pair_skew_seconds,
+        ai_min_game_time_seconds=ai_min_game_time_seconds,
     )
     register_player_hero_recent_routes(app, session_factory)
 

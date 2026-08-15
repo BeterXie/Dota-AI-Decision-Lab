@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
-import { App } from "./App";
+import { App, isReviewRoute } from "./App";
 
 const runtime = {
   overall: "ACTION_REQUIRED",
@@ -212,4 +212,13 @@ test("renders a detail error instead of leaving a failed request in loading stat
   renderApp();
   expect(await screen.findByText("Failed to load match intelligence")).toBeInTheDocument();
   expect(screen.queryByText("Loading match intelligence")).not.toBeInTheDocument();
+});
+
+
+
+test("review route predicate does not capture unrelated prefixes", () => {
+  expect(isReviewRoute("/review")).toBe(true);
+  expect(isReviewRoute("/review/map-1")).toBe(true);
+  expect(isReviewRoute("/reviewfoo")).toBe(false);
+  expect(isReviewRoute("/review-anything")).toBe(false);
 });

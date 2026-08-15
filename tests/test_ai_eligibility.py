@@ -1,7 +1,7 @@
 from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
-from app.ai.eligibility import ai_decision_is_game_time_eligible
+from app.ai.eligibility import ai_decision_is_game_time_eligible, ai_record_is_game_time_eligible
 from app.domain.snapshot import DecisionSnapshot
 
 
@@ -59,3 +59,21 @@ def test_falls_back_to_broadcast_game_time_without_anchor() -> None:
         )
         is False
     )
+
+
+def test_record_eligibility_uses_real_time_anchor_before_broadcast_clock() -> None:
+    decision_at = datetime(2026, 8, 14, 3, 3, 15, tzinfo=UTC)
+    payload = {
+        "decision_at": decision_at.isoformat(),
+        "quality": {
+            "live_anchors": {
+                "real_start_anchor": (decision_at - timedelta(minutes=5)).isoformat(),
+            }
+        },
+        "live": {"game_time_seconds": 800},
+    }
+    assert ai_record_is_game_time_eligible(payload, min_game_time_seconds=600) is False
+    payload["quality"]["live_anchors"]["real_start_anchor"] = (
+        decision_at - timedelta(minutes=11)
+    ).isoformat()
+    assert ai_record_is_game_time_eligible(payload, min_game_time_seconds=600) is True

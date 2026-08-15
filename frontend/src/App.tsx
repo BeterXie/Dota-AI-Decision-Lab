@@ -15,12 +15,16 @@ import { AppShell } from "./components/AppShell";
 import { ReviewPage } from "./components/ReviewPage";
 
 export function App() {
-  const reviewRoute = typeof window !== "undefined" && window.location.pathname.startsWith("/review");
+  const reviewRoute = typeof window !== "undefined" && isReviewRoute(window.location.pathname);
   return (
     <I18nProvider>
       {reviewRoute ? <ReviewPage /> : <DashboardApp />}
     </I18nProvider>
   );
+}
+
+export function isReviewRoute(pathname: string): boolean {
+  return pathname === "/review" || pathname.startsWith("/review/");
 }
 
 function DashboardApp() {
