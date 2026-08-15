@@ -1,0 +1,173 @@
+name: Apply WeChat stale notification fix
+
+on:
+  push:
+    branches:
+      - fix/wechat-stale-decision-notifications
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: fix/wechat-stale-decision-notifications
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+        with:
+          version: "0.12.0"
+          python-version: "3.14"
+      - run: uv sync --frozen --extra dev
+      - name: Apply exact patch
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace(path: str, old: str, new: str, count: int = 1) -> None:
+              file = Path(path)
+              text = file.read_text(encoding="utf-8")
+              if text.count(old) < count:
+                  raise SystemExit(f"expected patch target missing: {path}: {old!r}")
+              file.write_text(text.replace(old, new, count), encoding="utf-8")
+
+          replace(
+              "app/config.py",
+              '    wechat_clawbot_long_poll_timeout_seconds: float = Field(default=40.0, gt=0)\n',
+              '    wechat_clawbot_long_poll_timeout_seconds: float = Field(default=40.0, gt=0)\n'
+              '    # Decision alerts are live signals, not a backlog feed. Old snapshots are\n'
+              '    # discarded even if durable jobs are recovered much later.\n'
+              '    wechat_clawbot_decision_max_age_seconds: float = Field(default=600.0, gt=0)\n',
+          )
+          replace(
+              "app/main.py",
+              '            market_max_pair_skew_seconds=settings.market_max_pair_skew_seconds,\n',
+              '            market_max_pair_skew_seconds=settings.market_max_pair_skew_seconds,\n'
+              '            max_decision_age_seconds=settings.wechat_clawbot_decision_max_age_seconds,\n',
+          )
+          replace(
+              ".env.example",
+              'WECHAT_CLAWBOT_LONG_POLL_TIMEOUT_SECONDS=40\n',
+              'WECHAT_CLAWBOT_LONG_POLL_TIMEOUT_SECONDS=40\n'
+              '# Never deliver a decision alert more than 10 minutes after its snapshot.\n'
+              'WECHAT_CLAWBOT_DECISION_MAX_AGE_SECONDS=600\n',
+          )
+
+          path = "app/providers/wechat_clawbot/service.py"
+          replace(
+              path,
+              '        market_max_pair_skew_seconds: float = 5.0,\n    ) -> None:\n',
+              '        market_max_pair_skew_seconds: float = 5.0,\n'
+              '        max_decision_age_seconds: float = 600.0,\n'
+              '    ) -> None:\n',
+          )
+          replace(
+              path,
+              '        self._market_max_pair_skew_seconds = market_max_pair_skew_seconds\n',
+              '        self._market_max_pair_skew_seconds = market_max_pair_skew_seconds\n'
+              '        self._max_decision_age_seconds = max_decision_age_seconds\n',
+          )
+          replace(
+              path,
+              '        if not self._store.accounts():\n            return\n        decision_ids = ",".join(sorted(str(item.id) for item in decisions))\n',
+              '        if not self._store.accounts():\n'
+              '            return\n'
+              '        reason = await self._decision_notification_block_reason(session, snapshot)\n'
+              '        if reason is not None:\n'
+              '            logger.info(\n'
+              '                "wechat_clawbot_decision_suppressed",\n'
+              '                phase="prepare",\n'
+              '                snapshot_id=str(snapshot.snapshot_id),\n'
+              '                reason=reason,\n'
+              '            )\n'
+              '            return\n'
+              '        decision_ids = ",".join(sorted(str(item.id) for item in decisions))\n',
+          )
+          replace(
+              path,
+              '        accounts = list(self._store.accounts())\n        if not accounts:\n            return 0\n        text = _render_decision_notification(snapshot, decisions)\n',
+              '        accounts = list(self._store.accounts())\n'
+              '        if not accounts:\n'
+              '            return 0\n'
+              '        reason = self._decision_age_block_reason(snapshot)\n'
+              '        if reason is None and self._session_factory is not None:\n'
+              '            async with self._session_factory() as session:\n'
+              '                reason = await self._decision_notification_block_reason(\n'
+              '                    session, snapshot, check_age=False\n'
+              '                )\n'
+              '        if reason is not None:\n'
+              '            logger.info(\n'
+              '                "wechat_clawbot_decision_suppressed",\n'
+              '                phase="send",\n'
+              '                snapshot_id=str(snapshot.snapshot_id),\n'
+              '                reason=reason,\n'
+              '            )\n'
+              '            return 0\n'
+              '        text = _render_decision_notification(snapshot, decisions)\n',
+          )
+          replace(
+              path,
+              '    async def _handle_message(\n',
+              '    def _decision_age_block_reason(self, snapshot: DecisionSnapshot) -> str | None:\n'
+              '        age = (datetime.now(UTC) - ensure_utc(snapshot.decision_at)).total_seconds()\n'
+              '        if age > self._max_decision_age_seconds:\n'
+              '            return (\n'
+              '                f"stale_snapshot:{age:.0f}s>"\n'
+              '                f"{self._max_decision_age_seconds:.0f}s"\n'
+              '            )\n'
+              '        return None\n\n'
+              '    async def _decision_notification_block_reason(\n'
+              '        self,\n'
+              '        session: AsyncSession,\n'
+              '        snapshot: DecisionSnapshot,\n'
+              '        *,\n'
+              '        check_age: bool = True,\n'
+              '    ) -> str | None:\n'
+              '        if check_age:\n'
+              '            reason = self._decision_age_block_reason(snapshot)\n'
+              '            if reason is not None:\n'
+              '                return reason\n'
+              '        snapshot_record = await session.get(\n'
+              '            DecisionSnapshotRecord, snapshot.snapshot_id\n'
+              '        )\n'
+              '        if snapshot_record is None or snapshot_record.canonical_map_id is None:\n'
+              '            return None\n'
+              '        result_id = await session.scalar(\n'
+              '            select(MapResultRecord.id)\n'
+              '            .where(MapResultRecord.canonical_map_id == snapshot_record.canonical_map_id)\n'
+              '            .limit(1)\n'
+              '        )\n'
+              '        return "map_result_available" if result_id is not None else None\n\n'
+              '    async def _handle_message(\n',
+          )
+
+          # Existing unit fixtures intentionally use fixed timestamps. Keep those tests\n          # focused on idempotency/rendering rather than freshness policy.
+          test_path = "tests/test_wechat_clawbot.py"
+          replace(
+              test_path,
+              '        session_factory=factory,\n        jobs=jobs,\n    )\n',
+              '        session_factory=factory,\n'
+              '        jobs=jobs,\n'
+              '        max_decision_age_seconds=10**9,\n'
+              '    )\n',
+          )
+          replace(
+              test_path,
+              '        session_factory=None,\n        jobs=JobRepository(),\n    )\n',
+              '        session_factory=None,\n'
+              '        jobs=JobRepository(),\n'
+              '        max_decision_age_seconds=10**9,\n'
+              '    )\n',
+          )
+      - run: uv run ruff format app/config.py app/main.py app/providers/wechat_clawbot/service.py tests/test_wechat_clawbot.py
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/config.py app/main.py app/providers/wechat_clawbot/service.py tests/test_wechat_clawbot.py .env.example
+          git commit -m "fix(wechat): suppress stale and completed-match decisions"
+          git push origin HEAD:fix/wechat-stale-decision-notifications
