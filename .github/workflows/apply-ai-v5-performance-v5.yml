@@ -49,12 +49,17 @@ jobs:
           )
           base.write_text(text, encoding='utf-8')
 
-          # Safety-semantic checks care about meaning, not capitalization.
+          # Safety-semantic checks care about meaning, not capitalization/line wrapping.
           test = Path('tests/test_ai_v5_performance.py')
           text = test.read_text(encoding='utf-8')
           text = text.replace(
               '        assert phrase in SYSTEM_PROMPT\n',
               '        assert phrase.casefold() in SYSTEM_PROMPT.casefold()\n',
+              1,
+          )
+          text = text.replace(
+              '        "Deterministic quality blockers",\n',
+              '        "blockers override model judgment",\n',
               1,
           )
           test.write_text(text, encoding='utf-8')
