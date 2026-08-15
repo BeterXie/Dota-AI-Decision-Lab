@@ -7,6 +7,8 @@ interface SnapshotDecisionPayload {
   decisions?: AiDecision[];
 }
 
+const CURRENT_ATTEMPT_REFRESH_MS = 4_000;
+
 export function PlayerAiDecisionPanel({
   decisions,
   currentSnapshotId
@@ -19,27 +21,34 @@ export function PlayerAiDecisionPanel({
 
   useEffect(() => {
     let cancelled = false;
+    let timer: number | null = null;
+
     if (!currentSnapshotId) {
       setAttempts([]);
       return () => { cancelled = true; };
     }
 
-    void fetch(`/api/snapshots/${currentSnapshotId}`, {
-      cache: "no-store",
-      headers: { Accept: "application/json" }
-    })
-      .then(async (response) => {
+    const refresh = async () => {
+      try {
+        const response = await fetch(`/api/snapshots/${currentSnapshotId}`, {
+          cache: "no-store",
+          headers: { Accept: "application/json" }
+        });
         if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-        return response.json() as Promise<SnapshotDecisionPayload>;
-      })
-      .then((payload) => {
+        const payload = await response.json() as SnapshotDecisionPayload;
         if (!cancelled) setAttempts(latestAttempts(payload.decisions ?? []));
-      })
-      .catch(() => {
+      } catch {
         if (!cancelled) setAttempts([]);
-      });
+      } finally {
+        if (!cancelled) timer = window.setTimeout(refresh, CURRENT_ATTEMPT_REFRESH_MS);
+      }
+    };
 
-    return () => { cancelled = true; };
+    void refresh();
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearTimeout(timer);
+    };
   }, [currentSnapshotId]);
 
   const latest = useMemo(() => latestAttempts(attempts), [attempts]);
