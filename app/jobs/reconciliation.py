@@ -159,9 +159,6 @@ class ReconciliationService:
                 crossed_seconds = elapsed_seconds - minute * 60
                 if 0 <= crossed_seconds <= self._checkpoint_sweep_grace_seconds:
                     due_minutes.append(minute)
-            # First sight of a map with a fresh anchor: only the latest
-            # crossed minute fires (mirrors the collector), so a map first
-            # seen at minute 30 does not retroactively fire 10-29.
             if not recorded_minutes and due_minutes:
                 due_minutes = [due_minutes[-1]]
             for minute in due_minutes:
@@ -284,7 +281,7 @@ class ReconciliationService:
 
         A provider identity merge can make an earlier, correctly failed
         BUILD_SNAPSHOT job eligible on replay (for example, the market and
-        DLTV map used to point at different canonical series).  The original
+        DLTV map used to point at different canonical series). The original
         job must remain immutable for auditability, so reconciliation creates
         one durable replay job per trigger instead of mutating job history.
         """
@@ -335,8 +332,6 @@ class ReconciliationService:
                     )
                 except ValueError:
                     continue
-                # Per-checkpoint reconciliation: a snapshot for one checkpoint
-                # must not hide a later checkpoint that still has no snapshot.
                 checkpoint_snapshot = await session.scalar(
                     select(DecisionSnapshotRecord.id)
                     .where(
@@ -386,7 +381,25 @@ class ReconciliationService:
         return created
 
     async def _reconcile_ai(self, session: AsyncSession) -> int:
-        snapshots = list((await session.scalars(select(DecisionSnapshotRecord))).all())
+        """Recover only snapshots that never entered the durable AI lane.
+
+        Experiment versions are deliberately *not* inferred here. If a snapshot
+        already has any AI record or RUN_AI_PROVIDER job, it has an audit trail
+        and reconciliation leaves it alone. A later prompt/policy/view version
+        therefore cannot silently replay historical snapshots. Historical
+        experiments must be scheduled explicitly through AiExperimentReplayService.
+        """
+        if not self._ai_experiments:
+            return 0
+        snapshots = list(
+            (
+                await session.scalars(
+                    select(DecisionSnapshotRecord).order_by(
+                        DecisionSnapshotRecord.decision_at.asc()
+                    )
+                )
+            ).all()
+        )
         created = 0
         for snapshot in snapshots:
             if not ai_record_is_game_time_eligible(
@@ -394,43 +407,32 @@ class ReconciliationService:
                 min_game_time_seconds=self._ai_min_game_time_seconds,
             ):
                 continue
-            completed = set(
-                (
-                    await session.execute(
-                        select(
-                            AiDecisionRecord.provider,
-                            AiDecisionRecord.model,
-                            AiDecisionRecord.prompt_version,
-                            AiDecisionRecord.decision_policy_version,
-                            AiDecisionRecord.ai_view_version,
-                        ).where(AiDecisionRecord.snapshot_id == snapshot.id)
-                    )
-                ).all()
+            any_record = await session.scalar(
+                select(AiDecisionRecord.id)
+                .where(AiDecisionRecord.snapshot_id == snapshot.id)
+                .limit(1)
             )
+            if any_record is not None:
+                continue
+            any_job = await session.scalar(
+                select(DurableJobRecord.id)
+                .where(
+                    DurableJobRecord.job_type == JobType.RUN_AI_PROVIDER.value,
+                    DurableJobRecord.dedupe_key.like(f"ai:{snapshot.snapshot_hash}%"),
+                )
+                .limit(1)
+            )
+            if any_job is not None:
+                continue
             for experiment in self._ai_experiments:
-                if experiment in completed:
-                    continue
                 provider, model = experiment[:2]
-                dedupe_key = ai_job_dedupe_key_for_experiment(
-                    snapshot.snapshot_hash, experiment
-                )
-                existing_job = await session.scalar(
-                    select(DurableJobRecord.id).where(
-                        DurableJobRecord.job_type == JobType.RUN_AI_PROVIDER.value,
-                        DurableJobRecord.dedupe_key == dedupe_key,
-                    )
-                )
-                if existing_job is not None:
-                    continue
                 await self._jobs.enqueue(
                     session,
                     job_type=JobType.RUN_AI_PROVIDER,
-                    # One durable job per provider/model. The dedupe key is
-                    # version-scoped: a succeeded v1-era job with the same
-                    # snapshot must not block the v2 experiment re-run (and
-                    # vice versa). Priority 150 makes backfills yield to every
-                    # live event path.
-                    dedupe_key=dedupe_key,
+                    dedupe_key=ai_job_dedupe_key_for_experiment(
+                        snapshot.snapshot_hash,
+                        experiment,
+                    ),
                     payload=ai_job_payload(snapshot.id, provider, model),
                     priority=150,
                 )
@@ -564,8 +566,6 @@ class ReconciliationService:
             await self._jobs.enqueue(
                 session,
                 job_type=JobType.EVALUATE_DECISION,
-                # Version-scoped so a completed v1 evaluation does not block the
-                # virtual-PnL backfill under the durable job dedupe key.
                 dedupe_key=f"reconcile-evaluation:{METRICS_VERSION}:{snapshot.id}",
                 payload={"snapshot_id": str(snapshot.id)},
             )
