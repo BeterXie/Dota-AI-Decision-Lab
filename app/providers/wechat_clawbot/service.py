@@ -54,6 +54,7 @@ class WeChatClawBotService:
         live_state_max_age_seconds: float = 120.0,
         live_market_max_age_seconds: float = 90.0,
         market_max_pair_skew_seconds: float = 5.0,
+        max_decision_age_seconds: float = 600.0,
     ) -> None:
         self._client = client
         self._store = store
@@ -63,6 +64,7 @@ class WeChatClawBotService:
         self._live_state_max_age_seconds = live_state_max_age_seconds
         self._live_market_max_age_seconds = live_market_max_age_seconds
         self._market_max_pair_skew_seconds = market_max_pair_skew_seconds
+        self._max_decision_age_seconds = max_decision_age_seconds
         self._stop = asyncio.Event()
         self._inbound_task: asyncio.Task | None = None
         self._closed = False
@@ -83,6 +85,15 @@ class WeChatClawBotService:
         decisions: list[AiDecisionRecord],
     ) -> None:
         if not self._store.accounts():
+            return
+        reason = await self._decision_notification_block_reason(session, snapshot)
+        if reason is not None:
+            logger.info(
+                "wechat_clawbot_decision_suppressed",
+                phase="prepare",
+                snapshot_id=str(snapshot.snapshot_id),
+                reason=reason,
+            )
             return
         decision_ids = ",".join(sorted(str(item.id) for item in decisions))
         await self._jobs.enqueue(
@@ -107,6 +118,20 @@ class WeChatClawBotService:
             return 0
         accounts = list(self._store.accounts())
         if not accounts:
+            return 0
+        reason = self._decision_age_block_reason(snapshot)
+        if reason is None and self._session_factory is not None:
+            async with self._session_factory() as session:
+                reason = await self._decision_notification_block_reason(
+                    session, snapshot, check_age=False
+                )
+        if reason is not None:
+            logger.info(
+                "wechat_clawbot_decision_suppressed",
+                phase="send",
+                snapshot_id=str(snapshot.snapshot_id),
+                reason=reason,
+            )
             return 0
         text = _render_decision_notification(snapshot, decisions)
         decision_batch_key = ",".join(sorted(str(item.id) for item in decisions))
@@ -202,6 +227,33 @@ class WeChatClawBotService:
             except asyncio.CancelledError:
                 pass
         await self._client.close()
+
+    def _decision_age_block_reason(self, snapshot: DecisionSnapshot) -> str | None:
+        age = (datetime.now(UTC) - ensure_utc(snapshot.decision_at)).total_seconds()
+        if age > self._max_decision_age_seconds:
+            return f"stale_snapshot:{age:.0f}s>{self._max_decision_age_seconds:.0f}s"
+        return None
+
+    async def _decision_notification_block_reason(
+        self,
+        session: AsyncSession,
+        snapshot: DecisionSnapshot,
+        *,
+        check_age: bool = True,
+    ) -> str | None:
+        if check_age:
+            reason = self._decision_age_block_reason(snapshot)
+            if reason is not None:
+                return reason
+        snapshot_record = await session.get(DecisionSnapshotRecord, snapshot.snapshot_id)
+        if snapshot_record is None or snapshot_record.canonical_map_id is None:
+            return None
+        result_id = await session.scalar(
+            select(MapResultRecord.id)
+            .where(MapResultRecord.canonical_map_id == snapshot_record.canonical_map_id)
+            .limit(1)
+        )
+        return "map_result_available" if result_id is not None else None
 
     async def _handle_message(
         self,

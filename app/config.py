@@ -106,6 +106,9 @@ class Settings(BaseSettings):
     wechat_clawbot_bot_agent: str = "Dota-AI-Decision-Lab/0.1.0"
     wechat_clawbot_timeout_seconds: float = Field(default=15.0, gt=0)
     wechat_clawbot_long_poll_timeout_seconds: float = Field(default=40.0, gt=0)
+    # Decision alerts are live signals, not a backlog feed. Old snapshots are
+    # discarded even if durable jobs are recovered much later.
+    wechat_clawbot_decision_max_age_seconds: float = Field(default=600.0, gt=0)
 
     # Calibrated against production RayBet/DLTV signal cadence: DLTV state
     # changes arrive event-driven every ~40-60s with a median pairing lag of

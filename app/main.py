@@ -218,6 +218,7 @@ async def run() -> None:
             live_state_max_age_seconds=settings.live_state_max_age_seconds,
             live_market_max_age_seconds=settings.live_market_max_age_seconds,
             market_max_pair_skew_seconds=settings.market_max_pair_skew_seconds,
+            max_decision_age_seconds=settings.wechat_clawbot_decision_max_age_seconds,
         )
         if settings.wechat_clawbot_enabled
         else None

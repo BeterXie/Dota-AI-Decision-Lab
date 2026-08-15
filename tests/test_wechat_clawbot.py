@@ -162,6 +162,7 @@ async def test_service_prepare_notification_is_idempotent(tmp_path: Path) -> Non
         store=store,
         session_factory=factory,
         jobs=jobs,
+        max_decision_age_seconds=10**9,
     )
     async with factory() as session, session.begin():
         snapshot = await SnapshotRepository().persist(
@@ -260,6 +261,7 @@ async def test_service_renders_and_sends_decision_notification(tmp_path: Path) -
         store=store,
         session_factory=None,
         jobs=JobRepository(),
+        max_decision_age_seconds=10**9,
     )
 
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
