@@ -1,0 +1,141 @@
+name: Finalize AI output simplification
+
+on:
+  push:
+    branches:
+      - perf/ai-output-simplification
+
+permissions:
+  contents: write
+
+jobs:
+  finalize:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: perf/ai-output-simplification
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+        with:
+          version: "0.12.0"
+          python-version: "3.14"
+      - uses: actions/setup-node@v6
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Align docs and add legacy UI regression
+        shell: python
+        run: |
+          from pathlib import Path
+
+          docs = Path("docs/ARCHITECTURE.md")
+          text = docs.read_text(encoding="utf-8")
+          old = '''    primary_reasons: list[str]
+    counter_arguments: list[str]
+    data_quality_concerns: list[str]
+    blockers: list[str]
+```
+
+强制要求：
+
+```text
+counter_arguments
+```
+
+避免只生成单向解释。
+'''
+          new = '''    primary_reasons: list[str]
+    blockers: list[str]
+```
+
+模型在形成最终概率、信心与 action 前，仍必须内部审查最强反方证据与数据质量限制；
+这些因素应体现在 `fair_probability_a`、`confidence` 以及必要时的 `primary_reasons` 中，
+但当前输出合同不再要求单独生成 `counter_arguments` 或 `data_quality_concerns` 文本数组。
+`blockers` 只用于会阻止可靠决策的条件。旧实验记录中的两个退役字段保留在历史 JSON 中用于审计，
+读取历史记录时兼容，但不会被当前模型重新输出。
+'''
+          if text.count(old) != 1:
+              raise SystemExit(f"architecture schema block mismatch: {text.count(old)}")
+          text = text.replace(old, new, 1)
+          text = text.replace(
+              '''virtual_bankroll: {
+    initial
+    bankroll_before
+    unsettled_stakes
+    units
+    policy
+}
+''',
+              '''virtual_bankroll: {
+    initial
+    bankroll_before
+    unsettled_stakes
+    units
+}
+''',
+              1,
+          )
+          text = text.replace(
+              '''snapshot_id
+provider
+model_version
+prompt_version
+decision_policy_version
+''',
+              '''snapshot_id
+provider
+model
+prompt_version
+decision_policy_version
+ai_view_version
+''',
+              1,
+          )
+          docs.write_text(text, encoding="utf-8")
+
+          test = Path("frontend/src/components/player-ai-decisions.test.tsx")
+          text = test.read_text(encoding="utf-8")
+          old = '''      primary_reasons: ["Draft and price align"],
+      counter_arguments: ["Crossover risk"],
+      data_quality_concerns: [],
+      blockers: [],
+'''
+          new = '''      primary_reasons: ["Draft and price align"],
+      counter_arguments: ["Crossover risk"],
+      data_quality_concerns: ["Legacy quality concern"],
+      blockers: [],
+'''
+          if text.count(old) != 1:
+              raise SystemExit(f"frontend legacy fixture mismatch: {text.count(old)}")
+          text = text.replace(old, new, 1)
+          anchor = '''  expect(screen.getByText("Draft and price align")).toBeInTheDocument();
+  expect(screen.getByText("Momentum flipped")).toBeInTheDocument();
+'''
+          replacement = '''  expect(screen.getByText("Draft and price align")).toBeInTheDocument();
+  expect(screen.getByText("Momentum flipped")).toBeInTheDocument();
+  expect(screen.queryByText("Crossover risk")).not.toBeInTheDocument();
+  expect(screen.queryByText("Legacy quality concern")).not.toBeInTheDocument();
+'''
+          if text.count(anchor) != 1:
+              raise SystemExit(f"frontend assertion anchor mismatch: {text.count(anchor)}")
+          test.write_text(text.replace(anchor, replacement, 1), encoding="utf-8")
+      - name: Verify focused backend contracts
+        run: |
+          uv sync --frozen --extra dev
+          uv run pytest tests/test_ai_v5_performance.py tests/test_ai_coordinator.py tests/test_ai_decision_integrity.py
+      - name: Verify frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm test
+          npm run build
+      - name: Commit finalization
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add docs/ARCHITECTURE.md frontend/src/components/player-ai-decisions.test.tsx
+          git commit -m "test(ai): cover retired explanation fields"
+          git push origin HEAD:perf/ai-output-simplification
