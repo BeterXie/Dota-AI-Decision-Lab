@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.ai.base import ai_experiment_key
 from app.ai.coordinator import AiCoordinator, PreparedAiDecision
 from app.ai.eligibility import ai_decision_is_game_time_eligible
+from app.ai.lanes import AiExperimentLaneRegistry, ai_experiment_lane_key
 from app.config import Settings
 from app.domain.events import DomainEvent, DomainEventType
 from app.domain.jobs import DurableJob, JobType
@@ -78,6 +79,7 @@ class JobHandlerDependencies:
 class ApplicationJobHandlers:
     def __init__(self, dependencies: JobHandlerDependencies) -> None:
         self._d = dependencies
+        self._ai_lanes = AiExperimentLaneRegistry()
 
     def mapping(self):
         return {
@@ -136,13 +138,6 @@ class ApplicationJobHandlers:
             )
 
     async def repair_legacy_draft(self, job: DurableJob) -> None:
-        """Re-resolve a legacy draft from its archived raw bootstrap payload.
-
-        Legacy drafts stored the DLTV provider ``team_slot`` ordering as Dota
-        positions.  Replaying the original archived payload through the current
-        position resolver appends a corrected draft snapshot without touching the
-        legacy rows and without depending on DLTV still serving the match.
-        """
         valve_match_id = _required_int(job.payload, "valve_match_id")
         async with self._d.session_factory() as session, session.begin():
             event = await session.scalar(
@@ -390,56 +385,63 @@ class ApplicationJobHandlers:
         snapshot_id = _required_uuid(job.payload, "snapshot_id")
         provider = _optional_str(job.payload.get("provider"))
         model = _optional_str(job.payload.get("model"))
+        runtime_effects = job.payload.get("experiment_replay") is not True
         if provider is None and model is None:
-            # Jobs enqueued before the per-experiment fan-out carry only
-            # snapshot_id.  Run the batch path (prepare -> inference ->
-            # persist) so deploying this change does not strand old jobs.
-            await self._run_ai_legacy(job, snapshot_id)
+            await asyncio.gather(
+                *(
+                    self._run_ai_provider(
+                        job,
+                        snapshot_id,
+                        experiment[0],
+                        experiment[1],
+                        runtime_effects=runtime_effects,
+                    )
+                    for experiment in self._d.ai.experiments
+                )
+            )
             return
         if provider is None or model is None:
             raise ValueError("RUN_AI_PROVIDER payload requires provider and model")
-        self._d.ai.get_provider(provider, model)
-
-        # Phase 1: PREPARE in a short read transaction.  No provider HTTP call
-        # happens while a database session/transaction is open.
-        async with self._d.session_factory() as session, session.begin():
-            snapshot = await self._eligible_ai_snapshot(session, snapshot_id)
-            if snapshot is None:
-                return
-            prepared = await self._d.ai.prepare(
-                session,
-                snapshot,
-                provider=provider,
-                model=model,
-                job_enqueued_at=job.created_at,
-                job_claimed_at=job.locked_at,
-            )
-
-        # Phase 2: INFERENCE with no DB transaction held.
-        record = await self._d.ai.run_inference(prepared)
-
-        # Phase 3: PERSIST in a new short transaction.  Each provider result
-        # is committed and visible in the UI as soon as it finishes.
-        await self._persist_ai_results(prepared.snapshot, [(prepared, record)])
-
-    async def _run_ai_legacy(self, job: DurableJob, snapshot_id: UUID) -> None:
-        async with self._d.session_factory() as session, session.begin():
-            snapshot = await self._eligible_ai_snapshot(session, snapshot_id)
-            if snapshot is None:
-                return
-            prepared_jobs = await self._d.ai.prepare_all(
-                session,
-                snapshot,
-                job_enqueued_at=job.created_at,
-                job_claimed_at=job.locked_at,
-            )
-        if not prepared_jobs:
-            return
-        records = await asyncio.gather(*(self._d.ai.run_inference(item) for item in prepared_jobs))
-        await self._persist_ai_results(
-            snapshot,
-            list(zip(prepared_jobs, records, strict=True)),
+        await self._run_ai_provider(
+            job,
+            snapshot_id,
+            provider,
+            model,
+            runtime_effects=runtime_effects,
         )
+
+    async def _run_ai_provider(
+        self,
+        job: DurableJob,
+        snapshot_id: UUID,
+        provider: str,
+        model: str,
+        *,
+        runtime_effects: bool,
+    ) -> None:
+        self._d.ai.get_provider(provider, model)
+        async with self._d.session_factory() as session:
+            snapshot = await self._eligible_ai_snapshot(session, snapshot_id)
+        if snapshot is None:
+            return
+        lane_key = ai_experiment_lane_key(snapshot, provider=provider, model=model)
+        async with self._ai_lanes.hold(lane_key, snapshot.decision_at):
+            async with self._d.session_factory() as session, session.begin():
+                prepared = await self._d.ai.prepare(
+                    session,
+                    snapshot,
+                    provider=provider,
+                    model=model,
+                    job_enqueued_at=job.created_at,
+                    job_claimed_at=job.locked_at,
+                )
+
+            record = await self._d.ai.run_inference(prepared)
+            await self._persist_ai_results(
+                prepared.snapshot,
+                [(prepared, record)],
+                runtime_effects=runtime_effects,
+            )
 
     async def _eligible_ai_snapshot(
         self,
@@ -460,10 +462,10 @@ class ApplicationJobHandlers:
         self,
         snapshot: DecisionSnapshot,
         results: list[tuple[PreparedAiDecision, AiDecisionRecord]],
+        *,
+        runtime_effects: bool = True,
     ) -> None:
         async with self._d.session_factory() as session, session.begin():
-            # Serialize the per-snapshot completion gate so concurrent provider
-            # jobs cannot race each other while preparing notifications.
             await session.execute(
                 select(DecisionSnapshotRecord.id)
                 .where(DecisionSnapshotRecord.id == snapshot.snapshot_id)
@@ -497,6 +499,8 @@ class ApplicationJobHandlers:
                 )
                 == ai_experiment_key(record.provider, record.model)
             ]
+            if not runtime_effects:
+                return
             await self._update_ai_health(current_records)
 
             expected = set(self._d.ai.experiments)
@@ -554,12 +558,6 @@ class ApplicationJobHandlers:
         snapshot: DecisionSnapshot,
         current_records: list[AiDecisionRecord],
     ) -> None:
-        # Emails/WeChat messages are only sent after every configured
-        # experiment has produced a persisted record (success OR failure), so
-        # one aggregate notification contains the complete multi-AI picture.
-        # Repeating the same side, NO_BUY, and INSUFFICIENT_DATA checkpoints
-        # stay silent; only a side change (for example BUY_A -> BUY_B) or a
-        # new buy decision produces a new notification.
         buy_decisions = [
             record
             for record in current_records
@@ -569,29 +567,25 @@ class ApplicationJobHandlers:
         ]
         if not buy_decisions:
             return
-        prior_buy_sides = await _prior_buy_sides(
+        prior_actions = await _latest_prior_actions(
             session,
             canonical_map_id=await _email_scope_map_id(session, snapshot),
             decision_at=snapshot.decision_at,
+            provider_models={(record.provider, record.model) for record in current_records},
         )
-        new_side_decisions = [
-            record
-            for record in buy_decisions
-            if record.normalized_response.get("action") not in prior_buy_sides
-        ]
-        if not new_side_decisions:
+        if not _new_buy_decisions(buy_decisions, prior_actions):
             return
         if self._d.email_notifications is not None:
             await self._d.email_notifications.prepare(
                 session,
                 snapshot=snapshot,
-                decisions=buy_decisions,
+                decisions=current_records,
             )
         if getattr(self._d, "wechat_clawbot", None) is not None:
             await self._d.wechat_clawbot.prepare_decision_notification(
                 session,
                 snapshot=snapshot,
-                decisions=buy_decisions,
+                decisions=current_records,
             )
 
     async def send_decision_email(self, job: DurableJob) -> None:
@@ -926,12 +920,6 @@ async def _email_scope_map_id(
     session: AsyncSession,
     snapshot: DecisionSnapshot,
 ) -> UUID | None:
-    """Resolve the map used to deduplicate decision email sides.
-
-    Snapshots persisted at series level carry ``canonical_map_id = NULL``; when
-    the identity already contains a Valve Match ID, fall back to the canonical
-    map lookup so side-change suppression still applies.
-    """
     record = await session.get(DecisionSnapshotRecord, snapshot.snapshot_id)
     if record is not None and record.canonical_map_id is not None:
         return record.canonical_map_id
@@ -944,31 +932,58 @@ async def _email_scope_map_id(
     )
 
 
-async def _prior_buy_sides(
+async def _latest_prior_actions(
     session: AsyncSession,
     *,
     canonical_map_id: UUID | None,
     decision_at: datetime,
-) -> set[str]:
-    if canonical_map_id is None:
-        return set()
-    responses = (
-        await session.scalars(
-            select(AiDecisionRecord.normalized_response)
+    provider_models: set[tuple[str, str]],
+) -> dict[tuple[str, str], str]:
+    if canonical_map_id is None or not provider_models:
+        return {}
+    providers = tuple({provider for provider, _model in provider_models})
+    models = tuple({model for _provider, model in provider_models})
+    rows = (
+        await session.execute(
+            select(AiDecisionRecord, DecisionSnapshotRecord.decision_at)
             .join(DecisionSnapshotRecord, DecisionSnapshotRecord.id == AiDecisionRecord.snapshot_id)
             .where(
                 DecisionSnapshotRecord.canonical_map_id == canonical_map_id,
                 DecisionSnapshotRecord.decision_at < decision_at,
+                AiDecisionRecord.provider.in_(providers),
+                AiDecisionRecord.model.in_(models),
                 AiDecisionRecord.parse_status == "SUCCESS",
                 AiDecisionRecord.normalized_response.is_not(None),
             )
+            .order_by(
+                DecisionSnapshotRecord.decision_at.desc(),
+                AiDecisionRecord.request_started_at.desc(),
+            )
         )
     ).all()
-    return {
-        str(response["action"])
-        for response in responses
-        if isinstance(response, dict) and response.get("action") in {"BUY_A", "BUY_B"}
-    }
+    latest: dict[tuple[str, str], str] = {}
+    for record, _prior_decision_at in rows:
+        key = (record.provider, record.model)
+        if key not in provider_models or key in latest:
+            continue
+        response = record.normalized_response
+        action = response.get("action") if isinstance(response, dict) else None
+        if action in {"BUY_A", "BUY_B", "NO_BUY", "INSUFFICIENT_DATA"}:
+            latest[key] = str(action)
+    return latest
+
+
+def _new_buy_decisions(
+    buy_decisions: list[AiDecisionRecord],
+    prior_actions: dict[tuple[str, str], str],
+) -> list[AiDecisionRecord]:
+    return [
+        record
+        for record in buy_decisions
+        if isinstance(record.normalized_response, dict)
+        and prior_actions.get((record.provider, record.model))
+        != record.normalized_response.get("action")
+    ]
 
 
 def _required_int(payload: dict, key: str) -> int:
