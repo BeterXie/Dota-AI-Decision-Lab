@@ -16,6 +16,8 @@ interface HeroSlotData {
   position: number;
   playerName: string;
   heroName: string;
+  heroPicked: boolean;
+  playerResolved: boolean;
   heroRecent: HeroRecentUseSummary | null;
   heroRecentState: HeroRecentLoadState;
 }
@@ -27,6 +29,15 @@ export const LineupCard: React.FC<LineupCardProps> = ({ match }) => {
   const [heroRecentState, setHeroRecentState] = useState<HeroRecentLoadState>("idle");
   const apiSlots = match.draft?.slots;
   const sides = resolveVerifiedMapSides(match);
+  // Refetch when the latest draft actually changes: a live match can mount
+  // while heroes are still unknown and the draft completes moments later.
+  const draftRevision = React.useMemo(() => {
+    const observedAt = match.draft?.observed_at ?? "";
+    const slotIdentity = (apiSlots ?? [])
+      .map((slot) => `${slot.canonical_player_id}:${slot.hero_id}:${slot.position}`)
+      .join("|");
+    return `${observedAt}|${slotIdentity}`;
+  }, [apiSlots, match.draft?.observed_at]);
 
   useEffect(() => {
     const canonicalMapId = match.canonical_map_id;
@@ -51,7 +62,7 @@ export const LineupCard: React.FC<LineupCardProps> = ({ match }) => {
       });
 
     return () => controller.abort();
-  }, [match.canonical_map_id]);
+  }, [match.canonical_map_id, draftRevision]);
 
   const heroRecentBySlot = React.useMemo(() => {
     const result = new Map<string, HeroRecentUseSummary | null>();
@@ -68,6 +79,8 @@ export const LineupCard: React.FC<LineupCardProps> = ({ match }) => {
       position: slot.position,
       playerName: slot.player_name || t("playerUnknown"),
       heroName: slot.hero_name || t("heroUnknown"),
+      heroPicked: slot.hero_id != null,
+      playerResolved: slot.canonical_player_id != null,
       heroRecent: heroRecentBySlot.get(slotKey("radiant", slot.position)) ?? null,
       heroRecentState,
     }));
@@ -80,6 +93,8 @@ export const LineupCard: React.FC<LineupCardProps> = ({ match }) => {
       position: slot.position,
       playerName: slot.player_name || t("playerUnknown"),
       heroName: slot.hero_name || t("heroUnknown"),
+      heroPicked: slot.hero_id != null,
+      playerResolved: slot.canonical_player_id != null,
       heroRecent: heroRecentBySlot.get(slotKey("dire", slot.position)) ?? null,
       heroRecentState,
     }));
@@ -112,7 +127,7 @@ export const LineupCard: React.FC<LineupCardProps> = ({ match }) => {
               <div className="slot-stat-row"><span>{locale === "zh-CN" ? "阵营" : "Side"}:</span><strong>{sideLabel(selectedSlot.side, locale, selectedSlot.side === "radiant" ? sides?.radiant.name : sides?.dire.name)}</strong></div>
               <div className="slot-stat-row"><span>{locale === "zh-CN" ? "位置" : "Role"}:</span><strong>{getPositionRole(selectedSlot.position)}</strong></div>
               <div className="slot-stat-row"><span>{locale === "zh-CN" ? "位置编号" : "Position"}:</span><strong>{getPositionLabel(selectedSlot.position)}</strong></div>
-              <div className="slot-stat-row"><span>{locale === "zh-CN" ? "当前英雄近期战绩" : "Recent games on hero"}:</span><strong>{heroRecentLabel(selectedSlot.heroRecent, selectedSlot.heroRecentState, locale)}</strong></div>
+              <div className="slot-stat-row"><span>{locale === "zh-CN" ? "当前英雄近期战绩" : "Recent games on hero"}:</span><strong>{heroRecentLabel(selectedSlot.heroRecent, selectedSlot.heroRecentState, locale, selectedSlot.heroPicked, selectedSlot.playerResolved)}</strong></div>
             </div>
           </div>
         </div>
@@ -138,7 +153,7 @@ function HeroSide({ side, teamName, slots, locale, onSelect }: { side: "radiant"
               <div className="slot-meta">
                 <span className="player-name">{slot.playerName}</span>
                 <span className="hero-name">{slot.heroName}</span>
-                <span className="hero-name">{heroRecentLabel(slot.heroRecent, slot.heroRecentState, locale)}</span>
+                <span className="hero-name">{heroRecentLabel(slot.heroRecent, slot.heroRecentState, locale, slot.heroPicked, slot.playerResolved)}</span>
               </div>
             </button>
           );
@@ -156,7 +171,15 @@ export function heroRecentLabel(
   recent: HeroRecentUseSummary | null,
   state: HeroRecentLoadState,
   locale: string,
+  heroPicked = true,
+  playerResolved = true,
 ): string {
+  if (!heroPicked) {
+    return locale === "zh-CN" ? "英雄未确定" : "Hero not picked";
+  }
+  if (!playerResolved) {
+    return locale === "zh-CN" ? "选手身份未解析" : "Player identity unresolved";
+  }
   if (state === "loading") {
     return locale === "zh-CN" ? "近期战绩加载中…" : "Loading recent hero games…";
   }

@@ -120,3 +120,124 @@ test("lineup cards show the actual recent sample, win rate, and record", async (
     expect.objectContaining({ cache: "no-store" }),
   );
 });
+
+function recentResponse(recent: unknown) {
+  return {
+    ok: true,
+    json: async () => ({
+      canonical_map_id: match.canonical_map_id,
+      statistics_cutoff: "2026-08-15T00:00:00Z",
+      window: 10,
+      slots: [
+        {
+          side: "radiant",
+          position: 1,
+          canonical_player_id: "player-1",
+          hero_id: 36,
+          recent,
+        },
+      ],
+    }),
+  };
+}
+
+test("unknown heroes are labelled hero-not-picked instead of data unavailable", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(recentResponse(null)),
+  );
+  const partialDraft = {
+    ...match,
+    draft: {
+      observed_at: "2026-08-15T01:00:00Z",
+      slots: [
+        {
+          side: "radiant",
+          position: 1,
+          canonical_player_id: "player-1",
+          player_name: "watson",
+          hero_id: null,
+          hero_name: null,
+        },
+      ],
+    },
+  } as MapDetail;
+
+  render(
+    <I18nProvider>
+      <LineupCard match={partialDraft} />
+    </I18nProvider>,
+  );
+
+  expect(await screen.findByText("英雄未确定")).toBeInTheDocument();
+  expect(screen.queryByText("近期数据不可用")).not.toBeInTheDocument();
+});
+
+test("refetches hero recent data when the draft completes on a live match", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi
+      .fn()
+      .mockResolvedValueOnce(recentResponse(null))
+      .mockResolvedValueOnce(
+        recentResponse({
+          maps: 10,
+          wins: 7,
+          losses: 3,
+          win_rate: 0.7,
+          knowledge_cutoff: "2026-08-14T00:00:00Z",
+          last_included_match_id: "match-10",
+        }),
+      ),
+  );
+  const beforePick = {
+    ...match,
+    draft: {
+      observed_at: "2026-08-15T01:00:00Z",
+      slots: [
+        {
+          side: "radiant",
+          position: 1,
+          canonical_player_id: "player-1",
+          player_name: "watson",
+          hero_id: null,
+          hero_name: null,
+        },
+      ],
+    },
+  } as MapDetail;
+  const afterPick = {
+    ...match,
+    draft: {
+      observed_at: "2026-08-15T01:05:00Z",
+      slots: [
+        {
+          side: "radiant",
+          position: 1,
+          canonical_player_id: "player-1",
+          player_name: "watson",
+          hero_id: 36,
+          hero_name: "Necrophos",
+        },
+      ],
+    },
+  } as MapDetail;
+
+  const view = render(
+    <I18nProvider>
+      <LineupCard match={beforePick} />
+    </I18nProvider>,
+  );
+
+  expect(await screen.findByText("英雄未确定")).toBeInTheDocument();
+  expect(fetch).toHaveBeenCalledTimes(1);
+
+  view.rerender(
+    <I18nProvider>
+      <LineupCard match={afterPick} />
+    </I18nProvider>,
+  );
+
+  expect(await screen.findByText("近10场 70% · 7–3")).toBeInTheDocument();
+  expect(fetch).toHaveBeenCalledTimes(2);
+});
