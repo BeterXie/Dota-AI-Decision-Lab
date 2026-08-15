@@ -335,8 +335,7 @@ async def test_reconciliation_only_enqueues_ai_after_ten_minutes() -> None:
         # Version-scoped dedupe so an ai-view bump always re-runs, and the
         # backfill yields to live event jobs.
         assert records[0].dedupe_key == (
-            f"ai:{eligible.snapshot_hash}:openai:fixture-model:"
-            "prompt-v1:policy-v1:ai-view-v2"
+            f"ai:{eligible.snapshot_hash}:openai:fixture-model:prompt-v1:policy-v1:ai-view-v2"
         )
         assert records[0].priority == 150
         assert await session.scalar(select(func.count()).select_from(DecisionSnapshotRecord)) == 2

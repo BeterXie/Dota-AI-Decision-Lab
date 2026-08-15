@@ -116,7 +116,7 @@ def test_decision_payload_exposes_virtual_pnl_settlement() -> None:
         result_correct=True,
         virtual_pnl=Decimal("85.00"),
         virtual_odds=Decimal("1.85000"),
-          unit_pnl=Decimal("0.75"),
+        unit_pnl=Decimal("0.75"),
         metrics_version="decision-evaluation-v2",
     )
 
@@ -810,7 +810,7 @@ async def test_map_detail_exposes_checkpoint_decisions_beyond_the_latest_snapsho
                     ai_view_version="ai-view-v2",
                     request_started_at=now,
                     parse_status="SUCCESS",
-                      normalized_response={"action": "NO_BUY"},
+                    normalized_response={"action": "NO_BUY"},
                 ),
                 AiDecisionRecord(
                     id=uuid4(),
@@ -824,7 +824,7 @@ async def test_map_detail_exposes_checkpoint_decisions_beyond_the_latest_snapsho
                     ai_view_version="ai-view-v2",
                     request_started_at=now,
                     parse_status="SUCCESS",
-                      normalized_response={"action": "NO_BUY"},
+                    normalized_response={"action": "NO_BUY"},
                 ),
             )
         )
@@ -1052,9 +1052,7 @@ def test_canonical_decision_rounds_keeps_latest_successful_attempt_per_snapshot_
             if key not in {"parse_status", "normalized_response"}
         },
     )
-    newest_success = AiDecisionRecord(
-        id=uuid4(), request_started_at=now, **base
-    )
+    newest_success = AiDecisionRecord(id=uuid4(), request_started_at=now, **base)
     other_model = AiDecisionRecord(
         id=uuid4(),
         request_started_at=now,
