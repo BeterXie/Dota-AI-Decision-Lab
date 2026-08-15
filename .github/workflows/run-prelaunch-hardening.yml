@@ -1,0 +1,81 @@
+name: Run prelaunch hardening
+
+on:
+  push:
+    branches: [fix/prelaunch-hardening]
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:18-alpine
+        env:
+          POSTGRES_DB: dota_ai_decision_lab
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d dota_ai_decision_lab"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/dota_ai_decision_lab
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: fix/prelaunch-hardening
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+        with:
+          version: "0.12.0"
+          python-version: "3.14"
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: frontend/.node-version
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Apply hardening patch
+        run: python tools/_apply_prelaunch_hardening.py
+      - name: Install backend
+        run: uv sync --frozen --extra dev
+      - name: Format patched backend
+        run: uv run ruff format app migrations tests tools
+      - name: Lint backend
+        run: uv run ruff check app migrations tests tools
+      - name: Migrate database
+        run: |
+          uv run alembic upgrade head
+          uv run alembic check
+      - name: Run focused hardening tests
+        run: >-
+          uv run pytest
+          tests/test_runtime_startup_smoke.py
+          tests/test_web_static_security.py
+          tests/test_wechat_clawbot.py
+          tests/test_evaluation.py
+          tests/test_job_recovery.py
+          tests/test_checkpoint_dedupe.py
+          tests/test_ai_view_version.py
+          tests/test_review_api.py
+          tests/test_ai_eligibility.py
+      - name: Validate frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm test
+          npm run build
+      - name: Remove patch plumbing and commit
+        run: |
+          rm tools/_apply_prelaunch_hardening.py
+          rm .github/workflows/run-prelaunch-hardening.yml
+          uv run ruff format app migrations tests tools
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "fix: harden prelaunch runtime safety and recovery"
+          git push origin HEAD:fix/prelaunch-hardening
