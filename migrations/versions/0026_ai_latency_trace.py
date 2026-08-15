@@ -16,8 +16,12 @@ depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:
-    op.add_column("ai_decisions", sa.Column("job_enqueued_at", sa.DateTime(timezone=True), nullable=True))
-    op.add_column("ai_decisions", sa.Column("job_claimed_at", sa.DateTime(timezone=True), nullable=True))
+    op.add_column(
+        "ai_decisions", sa.Column("job_enqueued_at", sa.DateTime(timezone=True), nullable=True)
+    )
+    op.add_column(
+        "ai_decisions", sa.Column("job_claimed_at", sa.DateTime(timezone=True), nullable=True)
+    )
     op.add_column(
         "ai_decisions",
         sa.Column("input_prepare_started_at", sa.DateTime(timezone=True), nullable=True),
