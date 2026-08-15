@@ -6,7 +6,9 @@ from app.ai.base import (
     SYSTEM_PROMPT,
     AiProviderFailure,
     AiProviderResponse,
+    ai_prompt_cache_key,
     decision_json_schema,
+    extract_provider_usage,
     parse_decision,
 )
 from app.providers.common import create_system_ssl_context
@@ -36,23 +38,25 @@ class OpenAiDecisionProvider:
         )
 
     async def decide(self, snapshot_input: str) -> AiProviderResponse:
-        response = await self._client.post(
-            "/responses",
-            json={
-                "model": self.model,
-                "reasoning": {"effort": self.reasoning_effort},
-                "instructions": SYSTEM_PROMPT,
-                "input": snapshot_input,
-                "text": {
-                    "format": {
-                        "type": "json_schema",
-                        "name": "dota_ai_decision",
-                        "schema": decision_json_schema(),
-                        "strict": True,
-                    }
-                },
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "reasoning": {"effort": self.reasoning_effort},
+            "instructions": SYSTEM_PROMPT,
+            "input": snapshot_input,
+            "text": {
+                "format": {
+                    "type": "json_schema",
+                    "name": "dota_ai_decision",
+                    "schema": decision_json_schema(),
+                    "strict": True,
+                }
             },
-        )
+        }
+        # Keep OpenAI-compatible/local and DeepSeek adapters conservative: they may
+        # reject OpenAI-specific cache controls even when their response shape matches.
+        if self.name == "openai":
+            payload["prompt_cache_key"] = ai_prompt_cache_key(self.name, self.model)
+        response = await self._client.post("/responses", json=payload)
         response.raise_for_status()
         raw = _object(response.json(), f"{self.name} response")
         if raw.get("status") != "completed":
@@ -66,6 +70,7 @@ class OpenAiDecisionProvider:
             raw_response=raw,
             decision=parse_decision(text, raw),
             model_version=str(raw.get("model") or self.model),
+            usage=extract_provider_usage(raw),
         )
 
     async def close(self) -> None:

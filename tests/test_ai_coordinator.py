@@ -13,6 +13,7 @@ from app.ai.base import (
     PROMPT_VERSION,
     AiProviderFailure,
     AiProviderResponse,
+    AiProviderUsage,
 )
 from app.ai.coordinator import AiCoordinator
 from app.db import Base
@@ -42,6 +43,7 @@ class FakeProvider:
     mode: str = "success"
     decision: AiDecision | None = None
     inputs: list[str] = field(default_factory=list)
+    usage: AiProviderUsage | None = None
 
     async def decide(self, snapshot_input: str) -> AiProviderResponse:
         self.inputs.append(snapshot_input)
@@ -57,6 +59,7 @@ class FakeProvider:
             raw_response={"provider": self.name},
             decision=self.decision or _decision(),
             model_version=self.model,
+            usage=self.usage,
         )
 
     async def close(self) -> None:
@@ -70,7 +73,16 @@ async def test_same_snapshot_goes_to_all_models_and_failures_are_isolated() -> N
         await connection.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     providers = [
-        FakeProvider("ok"),
+        FakeProvider(
+            "ok",
+            usage=AiProviderUsage(
+                input_tokens=1000,
+                cached_input_tokens=750,
+                reasoning_tokens=120,
+                output_tokens=180,
+                total_tokens=1180,
+            ),
+        ),
         FakeProvider("bad", mode="parse_failure"),
         FakeProvider("slow", mode="timeout"),
     ]
@@ -96,6 +108,9 @@ async def test_same_snapshot_goes_to_all_models_and_failures_are_isolated() -> N
         "bad": "PARSE_FAILED",
         "slow": "TIMEOUT",
     }
+    ok = next(record for record in records if record.provider == "ok")
+    assert (ok.input_tokens, ok.cached_input_tokens, ok.reasoning_tokens) == (1000, 750, 120)
+    assert (ok.output_tokens, ok.total_tokens) == (180, 1180)
     bad = next(record for record in records if record.provider == "bad")
     assert bad.normalized_response is None
     assert bad.raw_response == {"text": "not-json"}
@@ -178,7 +193,7 @@ async def test_ai_view_version_bump_reruns_and_records_input_hash() -> None:
     assert len(records) == 1
     record = records[0]
     assert record.ai_view_version == AI_VIEW_VERSION
-    assert record.ai_view_version == "ai-view-v4"
+    assert record.ai_view_version == "ai-view-v5"
     assert record.ai_input_hash is not None and len(record.ai_input_hash) == 64
 
     async with factory() as session, session.begin():
@@ -232,11 +247,12 @@ async def test_provider_receives_versioned_context_summary() -> None:
         records = await AiCoordinator([provider], timeout_seconds=1).run_all(session, snapshot)
 
     payload = json.loads(provider.inputs[0])
-    assert payload["base_ai_view_version"] == "ai-view-v2"
-    assert payload["ai_view_version"] == "ai-view-v4"
-    assert payload["ai_context_summary"]["context_summary_version"] == "ai-context-summary-v1"
+    assert "base_ai_view_version" not in payload
+    assert "ai_view_version" not in payload
+    assert "context_summary_version" not in payload["ai_context_summary"]
+    assert "policy" not in payload["virtual_bankroll"]
     assert payload["ai_context_summary"]["market_signal"]["favorite"] == "A"
-    assert records[0].ai_view_version == "ai-view-v4"
+    assert records[0].ai_view_version == "ai-view-v5"
     await engine.dispose()
 
 

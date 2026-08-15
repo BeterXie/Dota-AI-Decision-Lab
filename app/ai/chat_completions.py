@@ -6,6 +6,7 @@ from app.ai.base import (
     SYSTEM_PROMPT,
     AiProviderFailure,
     AiProviderResponse,
+    extract_provider_usage,
     parse_decision,
 )
 from app.providers.common import create_system_ssl_context
@@ -94,6 +95,7 @@ class ChatCompletionsDecisionProvider:
             raw_response=raw,
             decision=parse_decision(content, raw),
             model_version=str(raw.get("model") or self.model),
+            usage=extract_provider_usage(raw),
         )
 
     async def close(self) -> None:

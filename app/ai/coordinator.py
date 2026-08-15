@@ -16,6 +16,7 @@ from app.ai.base import (
     AiProvider,
     AiProviderFailure,
     ai_experiment_key,
+    extract_provider_usage,
     validate_ai_decision,
 )
 from app.ai.input import build_ai_input
@@ -247,6 +248,7 @@ class AiCoordinator:
         parse_status = "SUCCESS"
         error = None
         model_version = prepared.provider.model
+        usage = None
         received_at = None
         try:
             result = await asyncio.wait_for(
@@ -255,6 +257,7 @@ class AiCoordinator:
             )
             received_at = datetime.now(UTC)
             raw_response = result.raw_response
+            usage = result.usage
             validate_ai_decision(
                 result.decision,
                 bankroll_before=prepared.bankroll_before,
@@ -270,6 +273,7 @@ class AiCoordinator:
         except AiProviderFailure as exc:
             received_at = datetime.now(UTC)
             raw_response = exc.raw_response
+            usage = extract_provider_usage(raw_response)
             parse_status = exc.parse_status
             error = str(exc)
         except Exception as exc:
@@ -291,6 +295,11 @@ class AiCoordinator:
             request_started_at=started_at,
             response_received_at=received_at,
             latency_seconds=perf_counter() - started_clock,
+            input_tokens=usage.input_tokens if usage is not None else None,
+            cached_input_tokens=(usage.cached_input_tokens if usage is not None else None),
+            reasoning_tokens=usage.reasoning_tokens if usage is not None else None,
+            output_tokens=usage.output_tokens if usage is not None else None,
+            total_tokens=usage.total_tokens if usage is not None else None,
             raw_response=(to_jsonable_python(raw_response) if raw_response is not None else None),
             normalized_response=normalized_response,
             parse_status=parse_status,
@@ -448,11 +457,6 @@ class AiCoordinator:
             "bankroll_before": bankroll_before,
             "unsettled_stakes": round(self._virtual_bankroll - bankroll_before, 2),
             "units": "virtual-units",
-            "policy": (
-                "Independent virtual shadow bankroll for this provider/model and match. "
-                "BUY_A/BUY_B require 0 < stake <= bankroll_before; other actions require "
-                "stake null/0. No real money and no automatic execution."
-            ),
             # Accounting covers every canonical prior round. Only the most
             # recent rounds are shown to the model, keeping token usage and
             # bankroll correctness as two independent controls.
