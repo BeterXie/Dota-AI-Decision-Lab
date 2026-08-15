@@ -779,6 +779,7 @@ async def test_ai_handler_emails_only_when_the_buy_side_changes() -> None:
             _decision("NO_BUY"),
             _decision("BUY_A"),
             _decision("BUY_B"),
+            _decision("BUY_A"),
         ]
     )
     wechat_service = RecordingWeChatService()
@@ -795,7 +796,7 @@ async def test_ai_handler_emails_only_when_the_buy_side_changes() -> None:
     )
     canonical_map_id = uuid4()
     now = datetime.now(UTC)
-    for offset in range(4):
+    for offset in range(5):
         decision_at = now + timedelta(minutes=offset)
         async with factory() as session, session.begin():
             snapshot = await _persist_checkpoint_snapshot(
@@ -809,14 +810,14 @@ async def test_ai_handler_emails_only_when_the_buy_side_changes() -> None:
             job_type=JobType.RUN_AI_PROVIDER,
             dedupe_key=f"ai-side-change-{offset}",
             payload={
-            "snapshot_id": str(snapshot.snapshot_id),
-            "provider": provider.name,
-            "model": provider.model,
-        },
+                "snapshot_id": str(snapshot.snapshot_id),
+                "provider": provider.name,
+                "model": provider.model,
+            },
             status=JobStatus.RUNNING,
             priority=100,
             not_before=decision_at,
-        created_at=decision_at,
+            created_at=decision_at,
             attempt_count=1,
             max_attempts=8,
             locked_by="fixture",
@@ -827,7 +828,7 @@ async def test_ai_handler_emails_only_when_the_buy_side_changes() -> None:
     async with factory() as session:
         assert (
             await session.scalar(select(func.count()).select_from(DecisionEmailNotificationRecord))
-            == 2
+            == 3
         )
         notifications = list(
             (
@@ -840,8 +841,9 @@ async def test_ai_handler_emails_only_when_the_buy_side_changes() -> None:
         )
     assert "BUY A" in notifications[0].subject
     assert "BUY B" in notifications[1].subject
-    assert provider.calls == 4
-    assert len(wechat_service.prepared_batches) == 2
+    assert "BUY A" in notifications[2].subject
+    assert provider.calls == 5
+    assert len(wechat_service.prepared_batches) == 3
     await engine.dispose()
 
 

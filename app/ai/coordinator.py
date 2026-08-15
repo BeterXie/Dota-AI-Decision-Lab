@@ -291,9 +291,7 @@ class AiCoordinator:
             request_started_at=started_at,
             response_received_at=received_at,
             latency_seconds=perf_counter() - started_clock,
-            raw_response=(
-                to_jsonable_python(raw_response) if raw_response is not None else None
-            ),
+            raw_response=(to_jsonable_python(raw_response) if raw_response is not None else None),
             normalized_response=normalized_response,
             parse_status=parse_status,
             error=error,
@@ -382,10 +380,7 @@ class AiCoordinator:
             by_provider_model.setdefault((record.provider, record.model), []).append(
                 (record, decision_at, mode)
             )
-        return {
-            key: _prior_from_rows(value)
-            for key, value in by_provider_model.items()
-        }
+        return {key: _prior_from_rows(value) for key, value in by_provider_model.items()}
 
     async def _prior_rows(
         self,
@@ -497,9 +492,7 @@ def _prior_from_rows(
             best_by_snapshot[record.snapshot_id] = (attempt, record, decision_at, mode)
 
     prior: list[_PriorDecision] = []
-    for _, record, decision_at, mode in sorted(
-        best_by_snapshot.values(), key=lambda item: item[2]
-    ):
+    for _, record, decision_at, mode in sorted(best_by_snapshot.values(), key=lambda item: item[2]):
         if record.normalized_response is None:
             continue
         try:

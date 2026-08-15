@@ -387,7 +387,6 @@ async def test_no_buy_with_nonzero_stake_is_policy_failed() -> None:
     await engine.dispose()
 
 
-
 @pytest.mark.asyncio
 async def test_bankroll_accounting_uses_all_history_while_context_window_is_limited() -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")

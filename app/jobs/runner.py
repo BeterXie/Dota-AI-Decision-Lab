@@ -41,9 +41,7 @@ class JobRunner:
         self._stop.set()
 
     async def _worker_loop(self, index: int) -> None:
-        worker_id = (
-            self._worker_id if self._concurrency == 1 else f"{self._worker_id}:{index}"
-        )
+        worker_id = self._worker_id if self._concurrency == 1 else f"{self._worker_id}:{index}"
         while not self._stop.is_set():
             job = await self._claim_one(worker_id)
             if job is None:

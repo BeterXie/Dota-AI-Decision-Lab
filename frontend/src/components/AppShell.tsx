@@ -4,7 +4,7 @@ import { TopBar } from "./TopBar";
 import { PlayerMatchRail } from "./PlayerMatchRail";
 import { PlayerMatchHeader } from "./PlayerMatchHeader";
 import { DecisionStatusBanner } from "./DecisionStatusBanner";
-import { PlayerAiDecisionStrip } from "./PlayerAiDecisionStrip";
+import { PlayerAiDecisionPanel } from "./PlayerAiDecisionPanel";
 import { CanonicalMarketCard } from "./CanonicalMarketCard";
 import { PlayerDraftAdvantageCard } from "./PlayerDraftAdvantageCard";
 import { LiveStateCard } from "./LiveStateCard";
@@ -63,7 +63,10 @@ export const AppShell: React.FC<AppShellProps> = ({ runtime, jobs, matches, sele
               ) : (
                 <>
                   <DecisionStatusBanner match={activeMatch} />
-                  <PlayerAiDecisionStrip decisions={(activeMatch as MapDetail).checkpoint_decisions ?? activeMatch.decisions ?? []} />
+                  <PlayerAiDecisionPanel
+                    decisions={(activeMatch as MapDetail).checkpoint_decisions ?? activeMatch.decisions ?? []}
+                    currentSnapshotId={activeMatch.latest_snapshot?.id}
+                  />
                   <div className="secondary-nav-bar" aria-label={t("mapIntelligenceViews")}>
                     <button className={`nav-tab-btn ${activeTab === "OVERVIEW" ? "active" : ""}`} onClick={() => setActiveTab("OVERVIEW")}>{t("matchOverview")}</button>
                     <button className={`nav-tab-btn ${activeTab === "DRAFT" ? "active" : ""}`} onClick={() => setActiveTab("DRAFT")}>{t("draftIntelligence")}</button>

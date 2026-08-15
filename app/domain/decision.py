@@ -21,9 +21,7 @@ class AiDecision(BaseModel):
     blockers: list[str]
 
 
-def target_probability(
-    action: str | None, fair_probability_a: float | None
-) -> float | None:
+def target_probability(action: str | None, fair_probability_a: float | None) -> float | None:
     """Return the win probability for the side targeted by ``action``.
 
     The model emits ``fair_probability_a`` (Team A's win probability) for every
