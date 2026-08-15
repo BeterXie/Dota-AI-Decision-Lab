@@ -1,0 +1,45 @@
+name: Run review i18n fix
+
+on:
+  push:
+    branches: [fix/review-audit-contracts]
+
+permissions:
+  contents: write
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: fix/review-audit-contracts
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Apply cleanup
+        run: python tools/_apply_review_i18n_fix.py
+      - name: Validate backend regression tests
+        run: |
+          uv sync --frozen --extra dev
+          uv run ruff format tests/test_review_api.py
+          uv run ruff check tests/test_review_api.py
+          uv run pytest tests/test_review_api.py tests/test_ai_eligibility.py
+      - name: Validate frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm test -- --run
+          npm run build
+      - name: Remove patch plumbing and commit
+        run: |
+          rm tools/_apply_review_i18n_fix.py
+          rm .github/workflows/run-review-i18n-fix.yml
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "refactor(review): align copy with shared i18n"
+          git push origin HEAD:fix/review-audit-contracts
