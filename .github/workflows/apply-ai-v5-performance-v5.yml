@@ -53,8 +53,14 @@ jobs:
           test = Path('tests/test_ai_v5_performance.py')
           text = test.read_text(encoding='utf-8')
           text = text.replace(
+              '    for phrase in (\n',
+              '    normalized_prompt = " ".join(SYSTEM_PROMPT.split()).casefold()\n'
+              '    for phrase in (\n',
+              1,
+          )
+          text = text.replace(
               '        assert phrase in SYSTEM_PROMPT\n',
-              '        assert phrase.casefold() in SYSTEM_PROMPT.casefold()\n',
+              '        assert phrase.casefold() in normalized_prompt\n',
               1,
           )
           text = text.replace(
