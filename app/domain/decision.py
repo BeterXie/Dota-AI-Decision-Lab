@@ -2,7 +2,6 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
-
 LEGACY_EXPLANATION_FIELDS = frozenset({"counter_arguments", "data_quality_concerns"})
 
 

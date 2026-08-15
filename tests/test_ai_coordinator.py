@@ -193,7 +193,7 @@ async def test_ai_view_version_bump_reruns_and_records_input_hash() -> None:
     assert len(records) == 1
     record = records[0]
     assert record.ai_view_version == AI_VIEW_VERSION
-    assert record.ai_view_version == "ai-view-v5"
+    assert record.ai_view_version == "ai-view-v6"
     assert record.ai_input_hash is not None and len(record.ai_input_hash) == 64
 
     async with factory() as session, session.begin():
@@ -252,7 +252,7 @@ async def test_provider_receives_versioned_context_summary() -> None:
     assert "context_summary_version" not in payload["ai_context_summary"]
     assert "policy" not in payload["virtual_bankroll"]
     assert payload["ai_context_summary"]["market_signal"]["favorite"] == "A"
-    assert records[0].ai_view_version == "ai-view-v5"
+    assert records[0].ai_view_version == "ai-view-v6"
     await engine.dispose()
 
 
@@ -330,6 +330,9 @@ async def test_prior_decisions_and_virtual_bankroll_flow_into_next_input() -> No
     assert prior["stake"] == 500.0
     assert prior["bankroll_before"] == 10_000.0
     assert prior["bankroll_after"] == 9_500.0
+    assert "counter_arguments" not in prior
+    assert "data_quality_concerns" not in prior
+    assert prior["blockers"] == []
     assert second_records[0].bankroll_before == 9_500.0
     await engine.dispose()
 

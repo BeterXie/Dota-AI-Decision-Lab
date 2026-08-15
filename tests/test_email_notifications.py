@@ -250,7 +250,8 @@ async def test_email_content_uses_the_immutable_snapshot_and_all_ai_results() ->
     assert "队伍基础评分：1680" in text_body
     assert "赔率与比赛数据可能存在时间差" in text_body
     assert "主要理由：market.observations favors A" in text_body
-    assert "可能出错的地方：quality.live_sync is CAUTION" in text_body
+    assert "可能出错的地方" not in text_body
+    assert "数据方面的顾虑" not in text_body
     assert "模型状态：回答格式异常" in text_body
     assert "Spirit" in html_body and "各 AI 的判断" in html_body
     await engine.dispose()
@@ -497,7 +498,10 @@ async def test_deepseek_email_translation_keeps_decision_identity() -> None:
         payload = json.loads(request.content)
         assert payload["model"] == "deepseek-v4-flash"
         assert "普通Dota 2玩家" in payload["instructions"]
-        ids = [item["decision_id"] for item in json.loads(payload["input"])]
+        source = json.loads(payload["input"])
+        assert all("counter_arguments" not in item for item in source)
+        assert all("data_quality_concerns" not in item for item in source)
+        ids = [item["decision_id"] for item in source]
         return httpx.Response(
             200,
             json={
@@ -515,8 +519,6 @@ async def test_deepseek_email_translation_keeps_decision_identity() -> None:
                                             {
                                                 "decision_id": decision_id,
                                                 "primary_reasons": ["市场价格支持该判断"],
-                                                "counter_arguments": ["同步可能有延迟"],
-                                                "data_quality_concerns": ["实时数据需要谨慎"],
                                                 "blockers": [],
                                                 "error": None,
                                             }

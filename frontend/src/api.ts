@@ -128,7 +128,9 @@ export interface AiDecision {
     minimum_acceptable_odds_a?: number | null;
     stake?: number | null;
     primary_reasons?: string[];
+    /** Legacy records from prompt versions before v5.1-output only. */
     counter_arguments?: string[];
+    /** Legacy records from prompt versions before v5.1-output only. */
     data_quality_concerns?: string[];
     blockers?: string[];
   } | null;

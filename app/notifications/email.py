@@ -308,9 +308,6 @@ def render_decision_email(
                 f"虚拟下注：{_display(normalized.get('stake'))}",
                 f"可用虚拟资金：{_display(decision.bankroll_before)}",
                 f"主要理由：{_translated_list(translated, normalized, 'primary_reasons')}",
-                f"可能出错的地方：{_translated_list(translated, normalized, 'counter_arguments')}",
-                "数据方面的顾虑："
-                f"{_translated_list(translated, normalized, 'data_quality_concerns')}",
                 f"无法给出结论的原因：{_translated_list(translated, normalized, 'blockers')}",
                 f"模型状态：{_parse_status_label(decision.parse_status)}",
             ]
@@ -419,8 +416,6 @@ def _decision_html(
         ("虚拟下注", _display(value.get("stake"))),
         ("可用虚拟资金", _display(record.bankroll_before)),
         ("主要理由", _translated_list(translated, value, "primary_reasons")),
-        ("可能出错的地方", _translated_list(translated, value, "counter_arguments")),
-        ("数据方面的顾虑", _translated_list(translated, value, "data_quality_concerns")),
         ("无法给出结论的原因", _translated_list(translated, value, "blockers")),
         ("模型状态", _parse_status_label(record.parse_status)),
     )

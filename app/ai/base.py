@@ -1,11 +1,12 @@
 import hashlib
+import json
 from dataclasses import dataclass
 from typing import Any, Protocol
 
 from app.ai.input import AI_VIEW_VERSION
-from app.domain.decision import AiDecision
+from app.domain.decision import LEGACY_EXPLANATION_FIELDS, AiDecision
 
-PROMPT_VERSION = "decision-analyst-v5-performance"
+PROMPT_VERSION = "decision-analyst-v5.1-output"
 DECISION_POLICY_VERSION = "shadow-decision-v2"
 
 SYSTEM_PROMPT = """You are an independent Dota 2 decision analyst.
@@ -22,8 +23,11 @@ Decision/output rules:
   market_assessment, minimum_acceptable_odds_a, and stake.
 - BUY_A/BUY_B require 0 < stake <= virtual_bankroll.bankroll_before.
   NO_BUY/INSUFFICIENT_DATA use stake null/0. Stake is virtual audit capital only.
-- Include concise primary reasons, counter-arguments, data-quality concerns, and
-  blockers.
+- Before finalizing, internally challenge the leading conclusion with the strongest
+  contrary evidence and data-quality limitations. Reflect material uncertainty in
+  fair_probability_a/confidence and, when decision-relevant, primary_reasons.
+- Do not output separate counter-argument or data-quality-concern lists. Use blockers
+  only for conditions that prevent a reliable decision.
 - Reasons must cite relevant AI-input paths.
 - All descriptive strings must be clear professional Simplified Chinese. Enum literals
   remain the schema-defined uppercase English values.
@@ -238,7 +242,13 @@ def _strict_schema_type(node: dict[str, Any]) -> dict[str, Any]:
 
 def parse_decision(text: str, raw_response: dict[str, Any]) -> AiDecision:
     try:
-        return AiDecision.model_validate_json(text)
+        payload = json.loads(text)
+        if not isinstance(payload, dict):
+            raise ValueError("AI decision must be a JSON object")
+        retired = sorted(LEGACY_EXPLANATION_FIELDS.intersection(payload))
+        if retired:
+            raise ValueError("AI decision contains retired output fields: " + ", ".join(retired))
+        return AiDecision.model_validate(payload)
     except Exception as exc:
         raise AiProviderFailure(
             f"invalid AI decision JSON: {type(exc).__name__}: {exc}",
