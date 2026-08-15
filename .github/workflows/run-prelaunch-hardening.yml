@@ -40,13 +40,27 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - name: Apply hardening patch
-        run: python tools/_apply_prelaunch_hardening.py
+        run: |
+          python tools/_apply_prelaunch_hardening.py
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("app/ai/input.py")
+          text = path.read_text(encoding="utf-8")
+          text = text.replace(
+              "from app.ai.versions import AI_VIEW_VERSION\n",
+              "from app.ai.versions import AI_VIEW_VERSION as AI_VIEW_VERSION\n",
+              1,
+          )
+          path.write_text(text, encoding="utf-8")
+          PY
       - name: Install backend
         run: uv sync --frozen --extra dev
       - name: Format patched backend
-        run: uv run ruff format app migrations tests tools
+        run: uv run ruff format app migrations tests
+      - name: Autofix patched backend lint
+        run: uv run ruff check --fix app migrations tests
       - name: Lint backend
-        run: uv run ruff check app migrations tests tools
+        run: uv run ruff check app migrations tests
       - name: Migrate database
         run: |
           uv run alembic upgrade head
@@ -74,6 +88,8 @@ jobs:
           rm tools/_apply_prelaunch_hardening.py
           rm .github/workflows/run-prelaunch-hardening.yml
           uv run ruff format app migrations tests tools
+          uv run ruff check --fix app migrations tests tools
+          uv run ruff check app migrations tests tools
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git add -A
