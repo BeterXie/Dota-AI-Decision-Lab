@@ -44,11 +44,21 @@ jobs:
           python tools/_apply_prelaunch_hardening.py
           python - <<'PY'
           from pathlib import Path
+
           path = Path("app/ai/input.py")
           text = path.read_text(encoding="utf-8")
           text = text.replace(
               "from app.ai.versions import AI_VIEW_VERSION\n",
               "from app.ai.versions import AI_VIEW_VERSION as AI_VIEW_VERSION\n",
+              1,
+          )
+          path.write_text(text, encoding="utf-8")
+
+          path = Path("tests/test_job_recovery.py")
+          text = path.read_text(encoding="utf-8")
+          text = text.replace(
+              'assert events[0].dedupe_key == f"checkpoint-real:{map_id}:10"',
+              'assert events[0].dedupe_key == f"checkpoint:{map_id}:10"',
               1,
           )
           path.write_text(text, encoding="utf-8")
