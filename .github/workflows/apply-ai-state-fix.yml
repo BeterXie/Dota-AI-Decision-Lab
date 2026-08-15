@@ -1,0 +1,85 @@
+name: Apply AI notification state patch
+
+on:
+  push:
+    branches:
+      - fix/ai-decision-sequencing-and-notifications
+
+permissions:
+  contents: write
+
+jobs:
+  patch:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          ref: fix/ai-decision-sequencing-and-notifications
+          fetch-depth: 0
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+        with:
+          version: "0.12.0"
+          python-version: "3.14"
+      - run: uv sync --frozen --extra dev
+      - name: Apply exact patches
+        shell: python
+        run: |
+          from pathlib import Path
+
+          def replace(path: str, old: str, new: str) -> None:
+              file = Path(path)
+              text = file.read_text(encoding="utf-8")
+              if old not in text:
+                  raise SystemExit(f"expected patch target missing: {path}: {old!r}")
+              file.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          replace(
+              "app/jobs/handlers.py",
+              "prior_actions = await _latest_prior_actions(",
+              "prior_actions = await _latest_prior_buy_actions(",
+          )
+          replace(
+              "app/jobs/handlers.py",
+              "async def _latest_prior_actions(\n",
+              "async def _latest_prior_buy_actions(\n",
+          )
+          replace(
+              "app/jobs/handlers.py",
+              '        if action in {"BUY_A", "BUY_B", "NO_BUY", "INSUFFICIENT_DATA"}:\n            latest[key] = str(action)\n',
+              '        if action in {"BUY_A", "BUY_B"}:\n            latest[key] = str(action)\n',
+          )
+          replace(
+              "tests/test_ai_decision_integrity.py",
+              '    assert _new_buy_decisions([buy_a], {("openai", "fixture-model"): "NO_BUY"}) == [buy_a]\n',
+              "",
+          )
+          replace(
+              "tests/test_email_notifications.py",
+              '            _decision("BUY_B"),\n        ]',
+              '            _decision("BUY_B"),\n            _decision("BUY_A"),\n        ]',
+          )
+          replace(
+              "tests/test_email_notifications.py",
+              "    for offset in range(4):\n",
+              "    for offset in range(5):\n",
+          )
+          replace(
+              "tests/test_email_notifications.py",
+              "            == 2\n        )\n        notifications = list(\n",
+              "            == 3\n        )\n        notifications = list(\n",
+          )
+          replace(
+              "tests/test_email_notifications.py",
+              '    assert "BUY A" in notifications[0].subject\n    assert "BUY B" in notifications[1].subject\n    assert provider.calls == 4\n    assert len(wechat_service.prepared_batches) == 2\n',
+              '    assert "BUY A" in notifications[0].subject\n    assert "BUY B" in notifications[1].subject\n    assert "BUY A" in notifications[2].subject\n    assert provider.calls == 5\n    assert len(wechat_service.prepared_batches) == 3\n',
+          )
+      - run: uv run ruff format app/jobs/handlers.py tests/test_ai_decision_integrity.py tests/test_email_notifications.py
+      - name: Commit patch
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/jobs/handlers.py tests/test_ai_decision_integrity.py tests/test_email_notifications.py
+          git commit -m "fix(notifications): track latest notified buy side"
+          git push origin HEAD:fix/ai-decision-sequencing-and-notifications
