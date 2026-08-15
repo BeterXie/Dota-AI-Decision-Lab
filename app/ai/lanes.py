@@ -49,9 +49,7 @@ class AiExperimentLaneRegistry:
         await asyncio.sleep(0)
 
         async with lane.condition:
-            await lane.condition.wait_for(
-                lambda: not lane.active and token == min(lane.waiters)
-            )
+            await lane.condition.wait_for(lambda: not lane.active and token == min(lane.waiters))
             lane.waiters.remove(token)
             lane.active = True
         try:
