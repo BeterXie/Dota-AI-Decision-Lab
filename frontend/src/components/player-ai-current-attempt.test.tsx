@@ -67,8 +67,12 @@ test("keeps canonical success visible while exposing a newer current timeout", a
 
   expect(screen.getAllByText("BUY A").length).toBeGreaterThan(0);
   expect(await screen.findByText("Current experiment status")).toBeInTheDocument();
-  expect(screen.getByText(/GPT TIMEOUT · decision-analyst-v5/)).toBeInTheDocument();
-  expect(screen.getByText(/provider exceeded 50.0s timeout/)).toBeInTheDocument();
+  const currentStatus = screen.getByText(
+    (_text, element) =>
+      element?.tagName === "SPAN" &&
+      (element.textContent ?? "").includes("GPT TIMEOUT · decision-analyst-v5")
+  );
+  expect(currentStatus).toHaveTextContent("provider exceeded 50.0s timeout");
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/snapshots/snapshot-1",
     expect.objectContaining({ cache: "no-store" })
