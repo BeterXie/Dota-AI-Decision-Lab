@@ -567,7 +567,7 @@ class ApplicationJobHandlers:
         ]
         if not buy_decisions:
             return
-        prior_actions = await _latest_prior_actions(
+        prior_actions = await _latest_prior_buy_actions(
             session,
             canonical_map_id=await _email_scope_map_id(session, snapshot),
             decision_at=snapshot.decision_at,
@@ -932,7 +932,7 @@ async def _email_scope_map_id(
     )
 
 
-async def _latest_prior_actions(
+async def _latest_prior_buy_actions(
     session: AsyncSession,
     *,
     canonical_map_id: UUID | None,
@@ -968,7 +968,7 @@ async def _latest_prior_actions(
             continue
         response = record.normalized_response
         action = response.get("action") if isinstance(response, dict) else None
-        if action in {"BUY_A", "BUY_B", "NO_BUY", "INSUFFICIENT_DATA"}:
+        if action in {"BUY_A", "BUY_B"}:
             latest[key] = str(action)
     return latest
 

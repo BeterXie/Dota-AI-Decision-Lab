@@ -295,4 +295,3 @@ def test_buy_notification_transition_compares_latest_action_not_historical_set()
     assert _new_buy_decisions([buy_a], {("openai", "fixture-model"): "BUY_A"}) == []
     assert _new_buy_decisions([buy_b], {("openai", "fixture-model"): "BUY_A"}) == [buy_b]
     assert _new_buy_decisions([buy_a], {("openai", "fixture-model"): "BUY_B"}) == [buy_a]
-    assert _new_buy_decisions([buy_a], {("openai", "fixture-model"): "NO_BUY"}) == [buy_a]
