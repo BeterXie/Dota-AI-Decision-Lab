@@ -8,14 +8,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.ai.jobs import ai_job_dedupe_key_for_experiment, ai_job_payload
 from app.domain.jobs import JobType
 from app.jobs.repository import JobRepository
-from app.models import DecisionSnapshotRecord
+from app.models import DecisionSnapshotRecord, DurableJobRecord
 
 
 class AiExperimentReplayService:
     """Explicitly enqueue historical AI experiment replays.
 
     Production reconciliation must not infer a new historical experiment merely
-    because prompt/policy/view versions changed.  Replay is an explicit action:
+    because prompt/policy/view versions changed. Replay is an explicit action:
     callers choose the snapshots/range and the experiment identities to run.
     Replay jobs are marked so persistence remains auditable but runtime health
     and decision notifications are not affected by historical experiments.
@@ -85,10 +85,11 @@ class AiExperimentReplayService:
                     snapshot.snapshot_hash,
                     experiment,
                 )
-                existing = await self._jobs.find_by_type_and_dedupe_key(
-                    session,
-                    job_type=JobType.RUN_AI_PROVIDER,
-                    dedupe_key=dedupe_key,
+                existing = await session.scalar(
+                    select(DurableJobRecord.id).where(
+                        DurableJobRecord.job_type == JobType.RUN_AI_PROVIDER.value,
+                        DurableJobRecord.dedupe_key == dedupe_key,
+                    )
                 )
                 if existing is not None:
                     continue
