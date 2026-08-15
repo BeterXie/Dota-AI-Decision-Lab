@@ -1288,6 +1288,61 @@ button {
     color: var(--text-muted);
     text-align: center;
   }
+
+  .eval-pnl-section {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-top: 14px;
+    padding-top: 14px;
+    border-top: 1px solid var(--border-subtle);
+  }
+
+  .eval-pnl-heading {
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    color: var(--analysis);
+  }
+
+  .eval-pnl-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1.3fr) repeat(3, minmax(0, 1fr));
+    gap: 10px;
+    align-items: center;
+    padding: 8px 10px;
+    border-radius: 10px;
+    background: var(--surface-2);
+    border: 1px solid var(--border-subtle);
+  }
+
+  .eval-pnl-ai {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+
+    strong { font-size: 12px; color: var(--text-primary); }
+    span { overflow: hidden; font-size: 9px; color: var(--text-muted); text-overflow: ellipsis; white-space: nowrap; }
+  }
+
+  .eval-pnl-metric {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+
+    span { font-size: 9px; color: var(--text-muted); }
+    strong {
+      overflow: hidden;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+
+      &.positive { color: var(--radiant); }
+      &.negative { color: var(--dire); }
+      &.flat, &.unsettled { color: var(--text-muted); }
+    }
+  }
 }
 
 /* Sliding Diagnostics Drawer */
@@ -1774,4 +1829,149 @@ button {
   margin-left: auto;
   margin-right: 6px;
 }
+
+/* Grouped AI decision cards + multi-round modal */
+.player-ai-rounds-badge {
+  color: var(--text-muted);
+  font-size: 9px;
+  letter-spacing: 0.03em;
+}
+
+.player-ai-bankroll {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  padding-top: 10px;
+  border-top: 1px solid var(--border-subtle);
+
+  div {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+  }
+
+  span {
+    color: var(--text-muted);
+    font-size: 9px;
+  }
+
+  strong {
+    overflow: hidden;
+    font-family: var(--font-mono);
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
+.player-ai-pnl {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding-top: 8px;
+
+  span { color: var(--text-muted); font-size: 9px; }
+  strong { font-family: var(--font-mono); font-size: 12px; }
+
+  &.positive strong { color: var(--radiant); }
+  &.negative strong { color: var(--dire); }
+  &.unsettled strong { color: var(--text-muted); }
+}
+
+.modal-card.ai-rounds-modal {
+  width: 760px;
+  max-height: 84vh;
+
+  .modal-body {
+    overflow-y: auto;
+    padding-right: 4px;
+  }
+}
+
+.ai-bankroll-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+
+  div {
+    display: grid;
+    gap: 3px;
+    padding: 10px 12px;
+    border-radius: 10px;
+    background: var(--surface-2);
+    border: 1px solid var(--border-subtle);
+  }
+
+  span { color: var(--text-muted); font-size: 10px; }
+  strong { font-family: var(--font-mono); font-size: 14px; color: var(--text-primary); }
+  strong.positive { color: var(--radiant); }
+  strong.negative { color: var(--dire); }
+  strong.flat, strong.unsettled { color: var(--text-muted); }
+}
+
+.ai-round-timeline {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.ai-round {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 12px;
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-2);
+
+  .ai-round-header {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+
+    .ai-round-index {
+      font-family: var(--font-mono);
+      font-size: 11px;
+      font-weight: 800;
+      color: var(--analysis);
+      background: rgba(124, 156, 255, 0.1);
+      border-radius: 6px;
+      padding: 3px 7px;
+    }
+
+    .ai-round-checkpoint {
+      color: var(--text-muted);
+      font-size: 10px;
+    }
+
+    .player-ai-action { margin-left: auto; }
+  }
+
+  .ai-round-metrics {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px 12px;
+
+    div { display: grid; gap: 2px; min-width: 0; }
+    span { color: var(--text-muted); font-size: 9px; }
+    strong {
+      overflow: hidden;
+      font-family: var(--font-mono);
+      font-size: 12px;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+    strong.positive { color: var(--radiant); }
+    strong.negative { color: var(--dire); }
+    strong.flat, strong.unsettled { color: var(--text-muted); }
+  }
+}
+
+@media (max-width: 720px) {
+  .modal-card.ai-rounds-modal { width: 94vw; }
+  .ai-bankroll-summary { grid-template-columns: 1fr; }
+  .ai-round .ai-round-metrics { grid-template-columns: 1fr 1fr; }
+}
+
 

@@ -102,6 +102,7 @@ export interface LiveObservation {
 
 export interface AiDecision {
   id: string;
+  snapshot_id?: string;
   provider: string;
   model: string;
   model_version: string;
@@ -112,16 +113,32 @@ export interface AiDecision {
   response_received_at: string | null;
   parse_status: string;
   latency_seconds: number | null;
+  bankroll_before?: number | null;
+  stake?: number | null;
   decision: {
     action?: string;
     confidence?: number;
     fair_probability_a?: number | null;
+    market_assessment?: string;
+    minimum_acceptable_odds_a?: number | null;
+    stake?: number | null;
     primary_reasons?: string[];
     counter_arguments?: string[];
     data_quality_concerns?: string[];
     blockers?: string[];
   } | null;
   error: string | null;
+  evaluation?: {
+    result_correct?: boolean | null;
+    brier_score?: number | null;
+    log_loss?: number | null;
+    clv?: number | null;
+    future_odds_direction?: string | null;
+    virtual_pnl?: number | null;
+    virtual_odds?: number | null;
+    evaluated_at?: string | null;
+    metrics_version?: string | null;
+  } | null;
   /** Checkpoint annotation on checkpoint_decisions entries. */
   snapshot_decision_at?: string;
   snapshot_mode?: string;
