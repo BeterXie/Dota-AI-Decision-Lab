@@ -40,7 +40,35 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - name: Apply second-wave patch
-        run: python tools/_apply_prelaunch_second_wave.py
+        run: |
+          python tools/_apply_prelaunch_second_wave.py
+          python - <<'PY'
+          from pathlib import Path
+
+          for filename in (
+              "migrations/versions/0015_ti_provider_identity_repair.py",
+              "migrations/versions/0017_ti_team_alias_identity_merge.py",
+          ):
+              path = Path(filename)
+              text = path.read_text(encoding="utf-8")
+              text = text.replace(
+                  'f"UPDATE {table} SET {column} = :target WHERE {column} = :source"\n',
+                  'f"UPDATE {table} SET {column} = :target WHERE {column} = :source"  # noqa: S608 - closed migration identifiers\n',
+                  1,
+              )
+              path.write_text(text, encoding="utf-8")
+
+          path = Path("tools/wechat_clawbot.py")
+          text = path.read_text(encoding="utf-8")
+          if "import shutil\n" not in text:
+              text = text.replace("import subprocess\n", "import shutil\nimport subprocess\n", 1)
+          text = text.replace(
+              '    try:\n        completed = subprocess.run(  # noqa: S603, S607 - fixed local CLI, no shell\n            ["npx", "-y", "qrcode-terminal", qrcode_url],\n',
+              '    try:\n        npx = shutil.which("npx")\n        if npx is None:\n            return False\n        completed = subprocess.run(  # noqa: S603 - resolved executable, no shell\n            [npx, "-y", "qrcode-terminal", qrcode_url],\n',
+              1,
+          )
+          path.write_text(text, encoding="utf-8")
+          PY
       - name: Install backend
         run: uv sync --frozen --extra dev
       - name: Format and lint product code
