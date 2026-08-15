@@ -253,13 +253,9 @@ async def test_explicit_replay_is_marked_and_deduplicated() -> None:
         experiments=(("openai", "fixture-gpt", "new-prompt", "policy-v1", "view-v1"),),
     )
     async with factory() as session, session.begin():
-        assert await replay.enqueue_snapshots(
-            session, snapshot_ids=(snapshot.snapshot_id,)
-        ) == 1
+        assert await replay.enqueue_snapshots(session, snapshot_ids=(snapshot.snapshot_id,)) == 1
     async with factory() as session, session.begin():
-        assert await replay.enqueue_snapshots(
-            session, snapshot_ids=(snapshot.snapshot_id,)
-        ) == 0
+        assert await replay.enqueue_snapshots(session, snapshot_ids=(snapshot.snapshot_id,)) == 0
 
     async with factory() as session:
         job_record = await session.scalar(
@@ -267,9 +263,7 @@ async def test_explicit_replay_is_marked_and_deduplicated() -> None:
                 DurableJobRecord.job_type == JobType.RUN_AI_PROVIDER.value
             )
         )
-        count_jobs = await session.scalar(
-            select(func.count()).select_from(DurableJobRecord)
-        )
+        count_jobs = await session.scalar(select(func.count()).select_from(DurableJobRecord))
     assert count_jobs == 1
     assert job_record is not None
     assert job_record.payload["experiment_replay"] is True
@@ -298,7 +292,7 @@ def test_buy_notification_transition_compares_latest_action_not_historical_set()
     buy_a = _buy_record("BUY_A")
     buy_b = _buy_record("BUY_B")
 
-    assert _new_buy_decisions(buy_a and [buy_a], {("openai", "fixture-model"): "BUY_A"}) == []
+    assert _new_buy_decisions([buy_a], {("openai", "fixture-model"): "BUY_A"}) == []
     assert _new_buy_decisions([buy_b], {("openai", "fixture-model"): "BUY_A"}) == [buy_b]
     assert _new_buy_decisions([buy_a], {("openai", "fixture-model"): "BUY_B"}) == [buy_a]
     assert _new_buy_decisions([buy_a], {("openai", "fixture-model"): "NO_BUY"}) == [buy_a]
