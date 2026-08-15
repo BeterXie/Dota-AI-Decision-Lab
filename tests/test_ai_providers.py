@@ -16,8 +16,6 @@ DECISION = {
     "market_assessment": "UNKNOWN",
     "minimum_acceptable_odds_a": None,
     "primary_reasons": ["Evidence is incomplete"],
-    "counter_arguments": ["The market may already price known strength"],
-    "data_quality_concerns": ["Historical sample is small"],
     "blockers": [],
 }
 

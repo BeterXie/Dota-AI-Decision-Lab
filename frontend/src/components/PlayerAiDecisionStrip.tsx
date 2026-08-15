@@ -125,8 +125,6 @@ export function PlayerAiDecisionStrip({ decisions }: { decisions: AiDecision[] }
                       <div className="confidence-track"><i style={{ width: `${Math.max(0, Math.min(100, (numberOrNull(item.decision?.confidence) ?? 0) * 100))}%` }} /></div>
                       {item.error && <div className="model-error">{item.error}</div>}
                       <ReasonList title={t("reasons")} values={item.decision?.primary_reasons} />
-                      <ReasonList title={t("counterArguments")} values={item.decision?.counter_arguments} />
-                      <ReasonList title={t("qualityConcerns")} values={item.decision?.data_quality_concerns} />
                       <div className="detail-section inline-meta">
                         <span>{item.model_version}</span>
                         <span>{item.prompt_version}</span>

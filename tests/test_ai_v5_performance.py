@@ -1,13 +1,17 @@
 from app.ai.base import (
     PROMPT_VERSION,
     SYSTEM_PROMPT,
+    AiProviderFailure,
     ai_prompt_cache_key,
+    decision_json_schema,
     extract_provider_usage,
+    parse_decision,
 )
+from app.domain.decision import AiDecision
 
 
 def test_v5_prompt_preserves_safety_semantics_and_is_compact() -> None:
-    assert PROMPT_VERSION == "decision-analyst-v5-performance"
+    assert PROMPT_VERSION == "decision-analyst-v5.1-output"
     normalized_prompt = " ".join(SYSTEM_PROMPT.split()).casefold()
     for phrase in (
         "UNKNOWN/null",
@@ -20,9 +24,59 @@ def test_v5_prompt_preserves_safety_semantics_and_is_compact() -> None:
         "never as independent current evidence",
         "Simplified Chinese",
         "stake <= virtual_bankroll.bankroll_before",
+        "internally challenge the leading conclusion",
+        "data-quality limitations",
+        "do not output separate counter-argument",
     ):
         assert phrase.casefold() in normalized_prompt
     assert len(SYSTEM_PROMPT) < 5000
+
+
+def test_output_schema_omits_verbose_explanation_lists_but_reads_legacy_records() -> None:
+    schema = decision_json_schema()
+    assert "counter_arguments" not in schema["properties"]
+    assert "data_quality_concerns" not in schema["properties"]
+    assert "primary_reasons" in schema["properties"]
+    assert "blockers" in schema["properties"]
+
+    legacy = AiDecision.model_validate(
+        {
+            "action": "NO_BUY",
+            "fair_probability_a": 0.5,
+            "confidence": 0.6,
+            "market_assessment": "FAIR",
+            "minimum_acceptable_odds_a": None,
+            "stake": None,
+            "primary_reasons": ["legacy"],
+            "counter_arguments": ["legacy counter"],
+            "data_quality_concerns": ["legacy quality"],
+            "blockers": [],
+        }
+    )
+    dumped = legacy.model_dump(mode="json")
+    assert "counter_arguments" not in dumped
+    assert "data_quality_concerns" not in dumped
+
+
+def test_provider_output_rejects_retired_explanation_fields() -> None:
+    payload = {
+        "action": "NO_BUY",
+        "fair_probability_a": 0.5,
+        "confidence": 0.6,
+        "market_assessment": "FAIR",
+        "minimum_acceptable_odds_a": None,
+        "stake": None,
+        "primary_reasons": ["current"],
+        "counter_arguments": ["should not be emitted"],
+        "blockers": [],
+    }
+    try:
+        parse_decision(__import__("json").dumps(payload), {"fixture": True})
+    except AiProviderFailure as exc:
+        assert exc.parse_status == "PARSE_FAILED"
+        assert "retired output fields" in str(exc)
+    else:
+        raise AssertionError("retired provider output field was accepted")
 
 
 def test_prompt_cache_key_is_stable_per_experiment() -> None:

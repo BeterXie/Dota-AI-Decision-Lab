@@ -447,8 +447,7 @@ class AiCoordinator:
                     "bankroll_before": bankroll_before,
                     "bankroll_after": round(bankroll_before - stake, 2),
                     "primary_reasons": item.decision.primary_reasons,
-                    "counter_arguments": item.decision.counter_arguments,
-                    "data_quality_concerns": item.decision.data_quality_concerns,
+                    "blockers": item.decision.blockers,
                 }
             )
             bankroll_before = round(bankroll_before - stake, 2)

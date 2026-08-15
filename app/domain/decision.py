@@ -1,6 +1,8 @@
-from typing import Literal
+from typing import Any, Literal
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, model_validator
+
+LEGACY_EXPLANATION_FIELDS = frozenset({"counter_arguments", "data_quality_concerns"})
 
 
 class AiDecision(BaseModel):
@@ -16,9 +18,22 @@ class AiDecision(BaseModel):
     # never real money or an automatic execution instruction.
     stake: float | None = Field(default=None, ge=0)
     primary_reasons: list[str]
-    counter_arguments: list[str]
-    data_quality_concerns: list[str]
     blockers: list[str]
+
+    @model_validator(mode="before")
+    @classmethod
+    def _discard_legacy_explanation_fields(cls, value: Any) -> Any:
+        """Read historical normalized decisions without re-emitting retired fields.
+
+        Provider responses are checked separately before validation, so this compatibility
+        path is only for stored/fixture payloads created by older prompt versions.
+        """
+        if not isinstance(value, dict) or LEGACY_EXPLANATION_FIELDS.isdisjoint(value):
+            return value
+        cleaned = dict(value)
+        for field in LEGACY_EXPLANATION_FIELDS:
+            cleaned.pop(field, None)
+        return cleaned
 
 
 def target_probability(action: str | None, fair_probability_a: float | None) -> float | None:

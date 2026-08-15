@@ -44,10 +44,6 @@ class DeepSeekEmailTranslator:
                 "provider": record.provider,
                 "model": record.model,
                 "primary_reasons": _strings(record.normalized_response, "primary_reasons"),
-                "counter_arguments": _strings(record.normalized_response, "counter_arguments"),
-                "data_quality_concerns": _strings(
-                    record.normalized_response, "data_quality_concerns"
-                ),
                 "blockers": _strings(record.normalized_response, "blockers"),
                 "error": record.error,
             }
@@ -112,8 +108,6 @@ def _translation_schema() -> dict[str, Any]:
     properties: dict[str, Any] = {
         "decision_id": {"type": "string"},
         "primary_reasons": {"type": "array", "items": {"type": "string"}},
-        "counter_arguments": {"type": "array", "items": {"type": "string"}},
-        "data_quality_concerns": {"type": "array", "items": {"type": "string"}},
         "blockers": {"type": "array", "items": {"type": "string"}},
         "error": {"type": ["string", "null"]},
     }

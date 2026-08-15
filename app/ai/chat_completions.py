@@ -48,8 +48,7 @@ class ChatCompletionsDecisionProvider:
                             '"fair_probability_a":null,"confidence":0.0,'
                             '"market_assessment":"UNDERPRICED|FAIR|OVERPRICED|UNKNOWN",'
                             '"minimum_acceptable_odds_a":null,"stake":null,'
-                            '"primary_reasons":[],'
-                            '"counter_arguments":[],"data_quality_concerns":[],"blockers":[]}. '
+                            '"primary_reasons":[],"blockers":[]}. '
                             "Use at most three concise strings in each array. No markdown."
                         ),
                     },
