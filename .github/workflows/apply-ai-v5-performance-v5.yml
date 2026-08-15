@@ -68,6 +68,11 @@ jobs:
               '        "blockers override model judgment",\n',
               1,
           )
+          text = text.replace(
+              '        "not independent current evidence",\n',
+              '        "never as independent current evidence",\n',
+              1,
+          )
           test.write_text(text, encoding='utf-8')
       - run: uv run ruff format app/ai app/models.py app/web/api.py migrations/versions/0027_ai_token_usage.py tests/test_ai_providers.py tests/test_ai_coordinator.py tests/test_ai_v5_performance.py
       - run: uv run ruff check app/ai app/models.py app/web/api.py migrations/versions/0027_ai_token_usage.py tests/test_ai_providers.py tests/test_ai_coordinator.py tests/test_ai_v5_performance.py
