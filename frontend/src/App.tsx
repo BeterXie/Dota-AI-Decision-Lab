@@ -12,11 +12,13 @@ import {
 } from "./api";
 import { I18nProvider } from "./i18n";
 import { AppShell } from "./components/AppShell";
+import { ReviewPage } from "./components/ReviewPage";
 
 export function App() {
+  const reviewRoute = typeof window !== "undefined" && window.location.pathname.startsWith("/review");
   return (
     <I18nProvider>
-      <DashboardApp />
+      {reviewRoute ? <ReviewPage /> : <DashboardApp />}
     </I18nProvider>
   );
 }
