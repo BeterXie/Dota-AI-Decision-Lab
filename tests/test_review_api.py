@@ -257,10 +257,11 @@ def _review_snapshot_record(
     snapshot_eligible: bool = True,
     market_eligible: bool = True,
     curve_points: list[dict] | None = None,
+    canonical_map_id: UUID | None = None,
 ) -> DecisionSnapshotRecord:
     return DecisionSnapshotRecord(
         id=uuid4(),
-        canonical_map_id=uuid4(),
+        canonical_map_id=canonical_map_id or uuid4(),
         decision_at=decision_at,
         created_at=decision_at,
         mode="LIVE_BASIC",
@@ -347,10 +348,12 @@ def test_review_odds_start_requires_snapshot_market_and_ai_time_eligibility() ->
 def test_rosh_review_keeps_earliest_frozen_curve_when_later_snapshot_changes() -> None:
     now = datetime(2026, 8, 15, 12, 0, tzinfo=UTC)
     team_a_id, team_b_id = uuid4(), uuid4()
+    canonical_map_id = uuid4()
     early = _review_snapshot_record(
         decision_at=now,
         team_a_id=team_a_id,
         team_b_id=team_b_id,
+        canonical_map_id=canonical_map_id,
         curve_points=[
             {"minute": 20, "pure_radiant_edge": 2.0, "adjusted_radiant_edge": 1.0},
             {"minute": 30, "pure_radiant_edge": 4.0, "adjusted_radiant_edge": -2.0},
@@ -361,6 +364,7 @@ def test_rosh_review_keeps_earliest_frozen_curve_when_later_snapshot_changes() -
         decision_at=now + timedelta(minutes=5),
         team_a_id=team_a_id,
         team_b_id=team_b_id,
+        canonical_map_id=canonical_map_id,
         curve_points=[
             {"minute": 20, "pure_radiant_edge": -20.0, "adjusted_radiant_edge": 20.0},
             {"minute": 30, "pure_radiant_edge": -30.0, "adjusted_radiant_edge": 30.0},
