@@ -4,8 +4,8 @@ from typing import Any, Protocol
 from app.ai.input import AI_VIEW_VERSION
 from app.domain.decision import AiDecision
 
-PROMPT_VERSION = "decision-analyst-v3"
-DECISION_POLICY_VERSION = "shadow-decision-v1"
+PROMPT_VERSION = "decision-analyst-v4"
+DECISION_POLICY_VERSION = "shadow-decision-v2"
 
 SYSTEM_PROMPT = """You are an independent Dota 2 decision analyst.
 Use only the supplied immutable DecisionSnapshot-derived AI input.
@@ -16,6 +16,24 @@ Include counter-arguments and data-quality concerns.
 When giving reasons, cite the relevant AI input paths.
 Assess team A versus team B exactly as identified in the input.
 Do not assume team A is Radiant or team B is Dire.
+
+Virtual shadow bankroll:
+- `virtual_bankroll` describes YOUR independent virtual bankroll for THIS match.
+- `bankroll_before` is the exact virtual capital available before this decision.
+- For `BUY_A` or `BUY_B` you MUST set `stake` to the amount you choose to risk:
+  a plain number greater than 0 and no larger than `bankroll_before`.
+- For `NO_BUY` or `INSUFFICIENT_DATA`, set `stake` to null (or 0).
+- The bankroll and stake are virtual analysis capital used only for
+  audit/calibration. They are never real money and never execute a bet.
+
+Prior decisions:
+- `prior_decisions` lists YOUR OWN earlier decisions for THIS match, oldest first.
+- Use them for continuity and calibration: acknowledge what you previously
+  concluded and why, then decide on the current evidence.
+- New evidence may justify changing your mind; do not blindly repeat stale
+  reasoning and do not chase previous losses.
+- Treat prior decisions as context only. They are not independent evidence for
+  the current snapshot.
 
 Language Requirements:
 - All descriptive text fields (`primary_reasons`, `counter_arguments`,
@@ -158,3 +176,37 @@ def parse_decision(text: str, raw_response: dict[str, Any]) -> AiDecision:
             parse_status="PARSE_FAILED",
             raw_response=raw_response,
         ) from exc
+
+
+def validate_ai_decision(
+    decision: AiDecision,
+    *,
+    bankroll_before: float,
+    raw_response: dict[str, Any] | None = None,
+) -> None:
+    """Enforce the virtual-shadow-bankroll policy on a parsed decision.
+
+    The model output itself is never rewritten. A violation is a parse-level
+    failure: the raw provider response stays stored while the normalized
+    decision is withheld from downstream consumers.
+    """
+    stake = decision.stake
+    if decision.action in {"BUY_A", "BUY_B"}:
+        if stake is None or stake <= 0:
+            raise AiProviderFailure(
+                f"{decision.action} requires a positive virtual stake (stake={stake})",
+                parse_status="POLICY_FAILED",
+                raw_response=raw_response,
+            )
+        if stake > bankroll_before + 0.005:
+            raise AiProviderFailure(
+                f"virtual stake {stake} exceeds available bankroll {bankroll_before}",
+                parse_status="POLICY_FAILED",
+                raw_response=raw_response,
+            )
+    elif stake is not None and stake != 0:
+        raise AiProviderFailure(
+            f"{decision.action} must have stake null/0, got {stake}",
+            parse_status="POLICY_FAILED",
+            raw_response=raw_response,
+        )

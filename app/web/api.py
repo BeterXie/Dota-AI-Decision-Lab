@@ -25,6 +25,7 @@ from app.models import (
     CanonicalPlayer,
     CanonicalSeries,
     CanonicalTeam,
+    DecisionEvaluationRecord,
     DecisionFutureOdds,
     DecisionSnapshotRecord,
     DltvLiveObservationRecord,
@@ -203,6 +204,21 @@ def create_app(
                     )
                 ).all()
             )
+            decision_ids = [item.id for item in decisions]
+            evaluation_by_decision = (
+                {
+                    item.ai_decision_id: item
+                    for item in (
+                        await session.scalars(
+                            select(DecisionEvaluationRecord).where(
+                                DecisionEvaluationRecord.ai_decision_id.in_(decision_ids)
+                            )
+                        )
+                    ).all()
+                }
+                if decision_ids
+                else {}
+            )
             return {
                 "id": snapshot.id,
                 "decision_at": snapshot.decision_at,
@@ -210,7 +226,10 @@ def create_app(
                 "mode": snapshot.mode,
                 "snapshot_hash": snapshot.snapshot_hash,
                 "payload": snapshot.canonical_payload,
-                "decisions": [_decision_payload(item) for item in decisions],
+                "decisions": [
+                    _decision_payload(item, evaluation_by_decision.get(item.id))
+                    for item in decisions
+                ],
             }
 
     @app.get("/api/jobs/summary")
@@ -1074,7 +1093,6 @@ async def _map_payload(
                 select(DecisionSnapshotRecord)
                 .where(DecisionSnapshotRecord.canonical_map_id == canonical_map.id)
                 .order_by(DecisionSnapshotRecord.decision_at.desc())
-                .limit(5)
             )
         ).all()
     )
@@ -1099,6 +1117,20 @@ async def _map_payload(
                 )
             ).all()
         )
+    evaluation_by_decision: dict[UUID, DecisionEvaluationRecord] = {}
+    evaluation_decision_ids = {item.id for item in decisions}
+    evaluation_decision_ids.update(item.id for item in checkpoint_decisions)
+    if evaluation_decision_ids:
+        evaluation_by_decision = {
+            item.ai_decision_id: item
+            for item in (
+                await session.scalars(
+                    select(DecisionEvaluationRecord).where(
+                        DecisionEvaluationRecord.ai_decision_id.in_(evaluation_decision_ids)
+                    )
+                )
+            ).all()
+        }
     future_odds = []
     result = await session.scalar(
         select(MapResultRecord).where(MapResultRecord.canonical_map_id == canonical_map.id)
@@ -1259,7 +1291,9 @@ async def _map_payload(
             if snapshot
             else None
         ),
-        "decisions": [_decision_payload(item) for item in decisions],
+        "decisions": [
+            _decision_payload(item, evaluation_by_decision.get(item.id)) for item in decisions
+        ],
         "historical_prewarm": {
             "team_strength_ready_count": sum(
                 item["base_rating"] is not None for item in team_histories
@@ -1278,7 +1312,7 @@ async def _map_payload(
         payload["future_odds"] = []
     if detailed:
         payload["checkpoint_decisions"] = [
-            _decision_payload(item)
+            _decision_payload(item, evaluation_by_decision.get(item.id))
             | {
                 "snapshot_decision_at": snapshot_by_id[item.snapshot_id].decision_at,
                 "snapshot_mode": snapshot_by_id[item.snapshot_id].mode,
@@ -1581,9 +1615,13 @@ def _series_market_rows(rows):
     return list(rows)
 
 
-def _decision_payload(record: AiDecisionRecord) -> dict:
+def _decision_payload(
+    record: AiDecisionRecord,
+    evaluation: DecisionEvaluationRecord | None = None,
+) -> dict:
     return {
         "id": record.id,
+        "snapshot_id": record.snapshot_id,
         "provider": record.provider,
         "model": record.model,
         "model_version": record.model_version,
@@ -1594,8 +1632,31 @@ def _decision_payload(record: AiDecisionRecord) -> dict:
         "response_received_at": record.response_received_at,
         "parse_status": record.parse_status,
         "latency_seconds": record.latency_seconds,
+        "bankroll_before": float(record.bankroll_before)
+        if record.bankroll_before is not None
+        else None,
+        "stake": float(record.stake) if record.stake is not None else None,
         "decision": record.normalized_response,
         "error": record.error,
+        "evaluation": (
+            {
+                "result_correct": evaluation.result_correct,
+                "brier_score": evaluation.brier_score,
+                "log_loss": evaluation.log_loss,
+                "clv": evaluation.clv,
+                "future_odds_direction": evaluation.future_odds_direction,
+                "virtual_pnl": float(evaluation.virtual_pnl)
+                if evaluation.virtual_pnl is not None
+                else None,
+                "virtual_odds": float(evaluation.virtual_odds)
+                if evaluation.virtual_odds is not None
+                else None,
+                "evaluated_at": evaluation.evaluated_at,
+                "metrics_version": evaluation.metrics_version,
+            }
+            if evaluation is not None
+            else None
+        ),
     }
 
 

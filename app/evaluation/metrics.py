@@ -14,7 +14,7 @@ from app.models import (
     MapResultRecord,
 )
 
-METRICS_VERSION = "decision-evaluation-v1"
+METRICS_VERSION = "decision-evaluation-v2"
 
 
 class EvaluationService:
@@ -59,11 +59,11 @@ class EvaluationService:
         created = 0
         for record in decisions:
             existing = await session.scalar(
-                select(DecisionEvaluationRecord.id).where(
+                select(DecisionEvaluationRecord).where(
                     DecisionEvaluationRecord.ai_decision_id == record.id
                 )
             )
-            if existing is not None:
+            if existing is not None and existing.metrics_version == METRICS_VERSION:
                 continue
             decision = AiDecision.model_validate(record.normalized_response)
             initial_a, initial_b = _initial_prices(snapshot)
@@ -83,38 +83,46 @@ class EvaluationService:
                 ),
                 None,
             )
-            session.add(
-                DecisionEvaluationRecord(
-                    ai_decision_id=record.id,
-                    result_correct=_result_correct(decision.action, team_a_won),
-                    brier_score=brier_score(decision.fair_probability_a, team_a_won),
-                    log_loss=log_loss(decision.fair_probability_a, team_a_won),
-                    clv=_clv(
-                        decision.action,
-                        initial_a,
-                        initial_b,
-                        float(closing.odds_a) if closing and closing.odds_a else None,
-                        float(closing.odds_b) if closing and closing.odds_b else None,
-                    ),
-                    future_odds_direction=_future_direction(
-                        decision.action,
-                        initial_a,
-                        initial_b,
-                        (
-                            float(first_future.odds_a)
-                            if first_future and first_future.odds_a
-                            else None
-                        ),
-                        (
-                            float(first_future.odds_b)
-                            if first_future and first_future.odds_b
-                            else None
-                        ),
-                    ),
-                    evaluated_at=datetime.now(UTC),
-                    metrics_version=METRICS_VERSION,
-                )
+            stake = (
+                float(record.stake)
+                if record.stake is not None
+                else float(decision.stake)
+                if decision.stake is not None
+                else None
             )
+            virtual_odds = _virtual_settlement_odds(decision.action, initial_a, initial_b)
+            virtual_pnl = _virtual_pnl(decision.action, stake, virtual_odds, team_a_won)
+            values = {
+                "result_correct": _result_correct(decision.action, team_a_won),
+                "brier_score": brier_score(decision.fair_probability_a, team_a_won),
+                "log_loss": log_loss(decision.fair_probability_a, team_a_won),
+                "clv": _clv(
+                    decision.action,
+                    initial_a,
+                    initial_b,
+                    float(closing.odds_a) if closing and closing.odds_a else None,
+                    float(closing.odds_b) if closing and closing.odds_b else None,
+                ),
+                "future_odds_direction": _future_direction(
+                    decision.action,
+                    initial_a,
+                    initial_b,
+                    (float(first_future.odds_a) if first_future and first_future.odds_a else None),
+                    (float(first_future.odds_b) if first_future and first_future.odds_b else None),
+                ),
+                "virtual_pnl": virtual_pnl,
+                "virtual_odds": virtual_odds,
+                "evaluated_at": datetime.now(UTC),
+                "metrics_version": METRICS_VERSION,
+            }
+            if existing is None:
+                session.add(DecisionEvaluationRecord(ai_decision_id=record.id, **values))
+                created += 1
+                continue
+            # Backfill pre-PnL evaluation rows with the new settlement fields
+            # while keeping the one-evaluation-per-decision identity.
+            for field, value in values.items():
+                setattr(existing, field, value)
             created += 1
         return created
 
@@ -138,6 +146,38 @@ def _result_correct(action: str, team_a_won: bool) -> bool | None:
     if action == "BUY_B":
         return not team_a_won
     return None
+
+
+def _virtual_settlement_odds(
+    action: str,
+    initial_a: float | None,
+    initial_b: float | None,
+) -> float | None:
+    if action == "BUY_A":
+        return initial_a
+    if action == "BUY_B":
+        return initial_b
+    return None
+
+
+def _virtual_pnl(
+    action: str,
+    stake: float | None,
+    odds: float | None,
+    team_a_won: bool,
+) -> float | None:
+    """Settle a virtual shadow stake at decision-time decimal odds.
+
+    NO_BUY/INSUFFICIENT_DATA are settled at 0. A BUY action without a recorded
+    stake or without usable odds remains unsettled (null) instead of inventing
+    a number.
+    """
+    if action in {"BUY_A", "BUY_B"}:
+        if stake is None or stake <= 0 or odds is None:
+            return None
+        won = team_a_won if action == "BUY_A" else not team_a_won
+        return round(stake * (odds - 1.0) if won else -stake, 2)
+    return 0.0
 
 
 def _clv(

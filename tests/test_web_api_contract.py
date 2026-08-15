@@ -1,4 +1,5 @@
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from pathlib import Path
 from uuid import uuid4
 
@@ -16,6 +17,7 @@ from app.models import (
     CanonicalPlayer,
     CanonicalSeries,
     CanonicalTeam,
+    DecisionEvaluationRecord,
     DecisionSnapshotRecord,
     DltvLiveObservationRecord,
     DraftSlotRecord,
@@ -27,7 +29,7 @@ from app.models import (
     TeamRatingSnapshotRecord,
 )
 from app.runtime.health import HealthRegistry
-from app.web.api import _match_phase, create_app
+from app.web.api import _decision_payload, _match_phase, create_app
 
 
 def test_match_phase_uses_result_and_fresh_live_facts() -> None:
@@ -88,6 +90,42 @@ def test_match_phase_uses_result_and_fresh_live_facts() -> None:
         )
         == "POSTMATCH"
     )
+
+
+def test_decision_payload_exposes_virtual_pnl_settlement() -> None:
+    now = datetime(2026, 8, 13, 12, 0, tzinfo=UTC)
+    snapshot_id = uuid4()
+    record = AiDecisionRecord(
+        id=uuid4(),
+        snapshot_id=snapshot_id,
+        snapshot_hash="fixture-snapshot-hash",
+        provider="openai",
+        model="fixture-model",
+        model_version="fixture-model",
+        prompt_version="decision-analyst-v4",
+        decision_policy_version="shadow-decision-v2",
+        ai_view_version="ai-view-v4",
+        request_started_at=now,
+        parse_status="SUCCESS",
+        normalized_response={"action": "BUY_A", "stake": 100.0},
+        bankroll_before=Decimal("1000.00"),
+        stake=Decimal("100.00"),
+    )
+    evaluation = DecisionEvaluationRecord(
+        ai_decision_id=record.id,
+        result_correct=True,
+        virtual_pnl=Decimal("85.00"),
+        virtual_odds=Decimal("1.85000"),
+        metrics_version="decision-evaluation-v2",
+    )
+
+    payload = _decision_payload(record, evaluation)
+
+    assert payload["stake"] == 100.0
+    assert payload["bankroll_before"] == 1000.0
+    assert payload["evaluation"]["virtual_pnl"] == 85.0
+    assert payload["evaluation"]["virtual_odds"] == 1.85
+    assert payload["evaluation"]["result_correct"] is True
 
 
 @pytest.mark.asyncio
@@ -798,6 +836,12 @@ async def test_map_detail_exposes_checkpoint_decisions_beyond_the_latest_snapsho
     by_provider = {item["provider"]: item for item in payload["checkpoint_decisions"]}
     assert set(by_provider) == {"openai", "kimi"}
     assert all(item["snapshot_mode"] == "LIVE_BASIC" for item in by_provider.values())
+    assert all(
+        item["snapshot_id"] in {str(first.id), str(second.id)} for item in by_provider.values()
+    )
+    assert all(
+        item["bankroll_before"] is None and item["stake"] is None for item in by_provider.values()
+    )
     assert by_provider["kimi"]["snapshot_decision_at"].startswith(
         second.decision_at.isoformat()[:16]
     )

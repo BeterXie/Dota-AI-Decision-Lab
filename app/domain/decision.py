@@ -11,6 +11,10 @@ class AiDecision(BaseModel):
     confidence: float = Field(ge=0, le=1)
     market_assessment: Literal["UNDERPRICED", "FAIR", "OVERPRICED", "UNKNOWN"]
     minimum_acceptable_odds_a: float | None = Field(default=None, gt=1)
+    # Virtual shadow capital chosen by the model for BUY actions. It is
+    # constrained upstream against the provider/match virtual bankroll and is
+    # never real money or an automatic execution instruction.
+    stake: float | None = Field(default=None, ge=0)
     primary_reasons: list[str]
     counter_arguments: list[str]
     data_quality_concerns: list[str]

@@ -10,6 +10,7 @@ from app.ai.view import AI_VIEW_VERSION
 from app.domain.events import DomainEvent, DomainEventType
 from app.domain.jobs import JobType
 from app.draft.engine import MODEL_VERSION
+from app.evaluation.metrics import METRICS_VERSION
 from app.events.outbox import EventRepository
 from app.jobs.repository import JobRepository
 from app.live.anchor import picks_ended_anchor
@@ -539,16 +540,18 @@ class ReconciliationService:
                 )
             )
             evaluation = await session.scalar(
-                select(DecisionEvaluationRecord.id).where(
+                select(DecisionEvaluationRecord.metrics_version).where(
                     DecisionEvaluationRecord.ai_decision_id == decision.id
                 )
             )
-            if result is None or evaluation is not None or snapshot.id in created_snapshots:
+            if result is None or evaluation == METRICS_VERSION or snapshot.id in created_snapshots:
                 continue
             await self._jobs.enqueue(
                 session,
                 job_type=JobType.EVALUATE_DECISION,
-                dedupe_key=f"reconcile-evaluation:{snapshot.id}",
+                # Version-scoped so a completed v1 evaluation does not block the
+                # virtual-PnL backfill under the durable job dedupe key.
+                dedupe_key=f"reconcile-evaluation:{METRICS_VERSION}:{snapshot.id}",
                 payload={"snapshot_id": str(snapshot.id)},
             )
             created_snapshots.add(snapshot.id)

@@ -683,6 +683,14 @@ class AiDecisionRecord(Base):
     # Canonical-hash of the exact bytes sent to the provider (audit evidence,
     # not part of the identity: the view version IS the semantic identity).
     ai_input_hash: Mapped[str | None] = mapped_column(String(64))
+    # Provider-scoped virtual shadow bankroll at decision time. Frozen with the
+    # record so later settlement/bankroll policy changes cannot rewrite the
+    # context a model actually saw.
+    bankroll_before: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    # Virtual stake chosen by the model for this attempt (null when the model
+    # produced no buy decision or the attempt failed). Mirrors the stake field
+    # in normalized_response for cheap bankroll reconstruction.
+    stake: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
     request_started_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     response_received_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     latency_seconds: Mapped[float | None] = mapped_column(Float)
@@ -802,6 +810,12 @@ class DecisionEvaluationRecord(Base):
     log_loss: Mapped[float | None] = mapped_column(Float)
     clv: Mapped[float | None] = mapped_column(Float)
     future_odds_direction: Mapped[str | None] = mapped_column(String(32))
+    # Virtual shadow settlement of the model's stake: profit/loss in the same
+    # virtual units as the bankroll, and the decimal odds used to settle it.
+    # Null means the bet could not be settled (missing result, conflicting
+    # result, or a BUY decision with no recorded stake/odds).
+    virtual_pnl: Mapped[Decimal | None] = mapped_column(Numeric(14, 2))
+    virtual_odds: Mapped[Decimal | None] = mapped_column(Numeric(12, 5))
     evaluated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     metrics_version: Mapped[str] = mapped_column(String(64), nullable=False)
 

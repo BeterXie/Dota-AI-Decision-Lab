@@ -1,7 +1,7 @@
 import asyncio
 import json
 from dataclasses import dataclass, field
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from uuid import uuid4
 
 import pytest
@@ -17,7 +17,7 @@ from app.ai.base import (
 from app.ai.coordinator import AiCoordinator
 from app.db import Base
 from app.domain.decision import AiDecision
-from app.models import AiDecisionRecord
+from app.models import AiDecisionRecord, CanonicalMap
 from app.snapshots.repository import SnapshotRepository
 
 
@@ -40,6 +40,7 @@ class FakeProvider:
     name: str
     model: str = "fixture-model"
     mode: str = "success"
+    decision: AiDecision | None = None
     inputs: list[str] = field(default_factory=list)
 
     async def decide(self, snapshot_input: str) -> AiProviderResponse:
@@ -54,7 +55,7 @@ class FakeProvider:
             await asyncio.sleep(1)
         return AiProviderResponse(
             raw_response={"provider": self.name},
-            decision=_decision(),
+            decision=self.decision or _decision(),
             model_version=self.model,
         )
 
@@ -153,7 +154,7 @@ async def test_ai_view_version_bump_reruns_and_records_input_hash() -> None:
             quality={"eligible": True},
         )
         # A legacy decision produced by the old ai-view-v2 semantics with the
-        # SAME provider/model/prompt/policy must not block the v3 run.
+        # SAME provider/model/prompt/policy must not block the v4 run.
         session.add(
             AiDecisionRecord(
                 id=uuid4(),
@@ -177,7 +178,7 @@ async def test_ai_view_version_bump_reruns_and_records_input_hash() -> None:
     assert len(records) == 1
     record = records[0]
     assert record.ai_view_version == AI_VIEW_VERSION
-    assert record.ai_view_version == "ai-view-v3"
+    assert record.ai_view_version == "ai-view-v4"
     assert record.ai_input_hash is not None and len(record.ai_input_hash) == 64
 
     async with factory() as session, session.begin():
@@ -232,8 +233,155 @@ async def test_provider_receives_versioned_context_summary() -> None:
 
     payload = json.loads(provider.inputs[0])
     assert payload["base_ai_view_version"] == "ai-view-v2"
-    assert payload["ai_view_version"] == "ai-view-v3"
+    assert payload["ai_view_version"] == "ai-view-v4"
     assert payload["ai_context_summary"]["context_summary_version"] == "ai-context-summary-v1"
     assert payload["ai_context_summary"]["market_signal"]["favorite"] == "A"
-    assert records[0].ai_view_version == "ai-view-v3"
+    assert records[0].ai_view_version == "ai-view-v4"
+    await engine.dispose()
+
+
+def _buy_decision(stake: float | None) -> AiDecision:
+    return AiDecision(
+        action="BUY_A",
+        fair_probability_a=0.61,
+        confidence=0.7,
+        market_assessment="UNDERPRICED",
+        minimum_acceptable_odds_a=1.65,
+        stake=stake,
+        primary_reasons=["价格与阵容优势一致"],
+        counter_arguments=["后期存在变数"],
+        data_quality_concerns=["样本有限"],
+        blockers=[],
+    )
+
+
+async def _persist_fixture_snapshot(session, *, canonical_map_id, decision_at):
+    return await SnapshotRepository().persist(
+        session,
+        canonical_map_id=canonical_map_id,
+        decision_at=decision_at,
+        mode="LIVE_BASIC",
+        identity={"team_a": {"id": "team-a", "name": "A"}, "team_b": {"id": "team-b", "name": "B"}},
+        market={},
+        draft=None,
+        history={},
+        live=None,
+        quality={"eligible": True, "blockers": [], "warnings": []},
+    )
+
+
+@pytest.mark.asyncio
+async def test_prior_decisions_and_virtual_bankroll_flow_into_next_input() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    now = datetime(2026, 1, 1, 12, 30, tzinfo=UTC)
+    provider = FakeProvider("openai", model="fixture-model")
+
+    async with factory() as session, session.begin():
+        canonical_map = CanonicalMap(map_number=1)
+        session.add(canonical_map)
+        await session.flush()
+        first = await _persist_fixture_snapshot(
+            session,
+            canonical_map_id=canonical_map.id,
+            decision_at=now - timedelta(minutes=5),
+        )
+        first_records = await AiCoordinator(
+            [FakeProvider("openai", model="fixture-model", decision=_buy_decision(500.0))],
+            timeout_seconds=1,
+            virtual_bankroll=10_000.0,
+        ).run_all(session, first)
+        second = await _persist_fixture_snapshot(
+            session,
+            canonical_map_id=canonical_map.id,
+            decision_at=now,
+        )
+        second_records = await AiCoordinator(
+            [provider], timeout_seconds=1, virtual_bankroll=10_000.0
+        ).run_all(session, second)
+
+    assert first_records[0].stake == 500.0
+    assert first_records[0].bankroll_before == 10_000.0
+    second_input = json.loads(provider.inputs[0])
+    assert second_input["virtual_bankroll"]["initial"] == 10_000.0
+    assert second_input["virtual_bankroll"]["bankroll_before"] == 9_500.0
+    assert second_input["virtual_bankroll"]["unsettled_stakes"] == 500.0
+    assert len(second_input["prior_decisions"]) == 1
+    prior = second_input["prior_decisions"][0]
+    assert prior["action"] == "BUY_A"
+    assert prior["stake"] == 500.0
+    assert prior["bankroll_before"] == 10_000.0
+    assert prior["bankroll_after"] == 9_500.0
+    assert second_records[0].bankroll_before == 9_500.0
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_stake_above_bankroll_is_policy_failed_and_raw_is_preserved() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session, session.begin():
+        snapshot = await SnapshotRepository().persist(
+            session,
+            canonical_map_id=None,
+            decision_at=datetime(2026, 1, 1, tzinfo=UTC),
+            mode="PREMATCH",
+            identity={},
+            market={},
+            draft=None,
+            history={},
+            live=None,
+            quality={"eligible": True},
+        )
+        records = await AiCoordinator(
+            [FakeProvider("openai", decision=_buy_decision(50_000.0))],
+            timeout_seconds=1,
+            virtual_bankroll=1_000.0,
+        ).run_all(session, snapshot)
+
+    record = records[0]
+    assert record.parse_status == "POLICY_FAILED"
+    assert record.normalized_response is None
+    assert record.stake is None
+    assert record.bankroll_before == 1_000.0
+    assert record.raw_response == {"provider": "openai"}
+    assert "exceeds available bankroll" in (record.error or "")
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_no_buy_with_nonzero_stake_is_policy_failed() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    invalid = _decision().model_copy(update={"stake": 100.0})
+
+    async with factory() as session, session.begin():
+        snapshot = await SnapshotRepository().persist(
+            session,
+            canonical_map_id=None,
+            decision_at=datetime(2026, 1, 1, tzinfo=UTC),
+            mode="PREMATCH",
+            identity={},
+            market={},
+            draft=None,
+            history={},
+            live=None,
+            quality={"eligible": True},
+        )
+        records = await AiCoordinator(
+            [FakeProvider("openai", decision=invalid)],
+            timeout_seconds=1,
+            virtual_bankroll=1_000.0,
+        ).run_all(session, snapshot)
+
+    record = records[0]
+    assert record.parse_status == "POLICY_FAILED"
+    assert record.normalized_response is None
     await engine.dispose()
