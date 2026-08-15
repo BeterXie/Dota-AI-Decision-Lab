@@ -68,9 +68,7 @@ async def build_review_payload(session: AsyncSession, *, limit: int = 100) -> di
 
     map_ids = [item.canonical_map_id for item in results]
     maps = list(
-        (
-            await session.scalars(select(CanonicalMap).where(CanonicalMap.id.in_(map_ids)))
-        ).all()
+        (await session.scalars(select(CanonicalMap).where(CanonicalMap.id.in_(map_ids)))).all()
     )
     map_by_id = {item.id: item for item in maps}
 
@@ -89,11 +87,7 @@ async def build_review_payload(session: AsyncSession, *, limit: int = 100) -> di
     series_by_id = {item.id: item for item in series_rows}
 
     team_ids = list(
-        {
-            team_id
-            for series in series_rows
-            for team_id in (series.team_a_id, series.team_b_id)
-        }
+        {team_id for series in series_rows for team_id in (series.team_a_id, series.team_b_id)}
     )
     teams = (
         list(
@@ -110,7 +104,9 @@ async def build_review_payload(session: AsyncSession, *, limit: int = 100) -> di
     events = (
         list(
             (
-                await session.scalars(select(CanonicalEvent).where(CanonicalEvent.id.in_(event_ids)))
+                await session.scalars(
+                    select(CanonicalEvent).where(CanonicalEvent.id.in_(event_ids))
+                )
             ).all()
         )
         if event_ids
@@ -361,10 +357,16 @@ def _rosh_review(
 
 
 def _curve_point(points: list[Any], minute: int) -> dict[str, Any] | None:
-    candidates = [item for item in points if isinstance(item, dict) and _number(item.get("minute")) is not None]
+    candidates = [
+        item
+        for item in points
+        if isinstance(item, dict) and _number(item.get("minute")) is not None
+    ]
     if not candidates:
         return None
-    exact = next((item for item in candidates if _number(item.get("minute")) == float(minute)), None)
+    exact = next(
+        (item for item in candidates if _number(item.get("minute")) == float(minute)), None
+    )
     if exact is not None:
         return exact
     nearest = min(candidates, key=lambda item: abs((_number(item.get("minute")) or 0.0) - minute))
@@ -482,7 +484,9 @@ def _odds_review(
     *,
     closings: list[DecisionFutureOdds],
 ) -> dict[str, Any] | None:
-    pairs = [pair for snapshot in snapshots if (pair := _snapshot_market_pair(snapshot)) is not None]
+    pairs = [
+        pair for snapshot in snapshots if (pair := _snapshot_market_pair(snapshot)) is not None
+    ]
     if not pairs:
         return None
     first = pairs[0]
@@ -490,7 +494,11 @@ def _odds_review(
     captured = [
         item
         for item in closings
-        if item.odds_a is not None and item.odds_b is not None and item.status == "CAPTURED"
+        if item.odds_a is not None
+        and item.odds_b is not None
+        and item.odds_a > 1
+        and item.odds_b > 1
+        and item.status == "CAPTURED"
     ]
     if captured:
         closing = max(
@@ -530,7 +538,11 @@ def _snapshot_market_pair(snapshot: DecisionSnapshotRecord) -> dict[str, Any] | 
     team_a_id = team_a.get("id") if isinstance(team_a, dict) else None
     team_b_id = team_b.get("id") if isinstance(team_b, dict) else None
     observations = market.get("observations")
-    if not isinstance(team_a_id, str) or not isinstance(team_b_id, str) or not isinstance(observations, list):
+    if (
+        not isinstance(team_a_id, str)
+        or not isinstance(team_b_id, str)
+        or not isinstance(observations, list)
+    ):
         return None
     by_team = {
         item.get("selection_team_id"): item
@@ -552,7 +564,7 @@ def _odds_pair_payload(odds_a: float, odds_b: float, *, observed_at: Any) -> dic
     fair_a = fair_b = None
     try:
         fair_a, fair_b, _ = remove_vig(odds_a, odds_b)
-    except (TypeError, ValueError, ZeroDivisionError):
+    except TypeError, ValueError, ZeroDivisionError:
         pass
     return {
         "odds_a": odds_a,
