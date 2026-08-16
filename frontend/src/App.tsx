@@ -53,6 +53,7 @@ function AuthenticatedApp() {
   });
   const session = auth.data;
   const hasAiAccess = Boolean(session?.entitlements?.includes(AI_DECISIONS_ENTITLEMENT));
+  const isSignedIn = Boolean(session?.enabled && session.authenticated && session.user);
 
   const handleAuthenticated = (next: AuthSessionState) => {
     queryClient.setQueryData(authSessionKey, next);
@@ -91,7 +92,7 @@ function AuthenticatedApp() {
       </Suspense>
     ) : (
       <PremiumReviewGate
-        authenticated={Boolean(session?.authenticated)}
+        authenticated={isSignedIn}
         authEnabled={session?.enabled !== false}
         onLogin={() => setLoginOpen(true)}
       />
@@ -138,7 +139,8 @@ function DashboardApp({
   const queryClient = useQueryClient();
   const [selectedMapId, setSelectedMapId] = useState<string | null>(null);
   const hasAiAccess = Boolean(session?.entitlements?.includes(AI_DECISIONS_ENTITLEMENT));
-  const canFetchOperationalData = Boolean(session && (!session.enabled || session.authenticated));
+  const isSignedIn = Boolean(session?.enabled && session.authenticated && session.user);
+  const canFetchOperationalData = Boolean(session && (!session.enabled || isSignedIn));
 
   const runtime = useQuery({ queryKey: queryKeys.runtime, queryFn: fetchRuntime, refetchInterval: 5000 });
   const maps = useQuery({ queryKey: queryKeys.maps, queryFn: fetchMaps, refetchInterval: 5000 });
@@ -217,7 +219,7 @@ function DashboardApp({
       onRefresh={handleRefresh}
       aiAccess={{
         authEnabled: session?.enabled !== false,
-        authenticated: Boolean(session?.authenticated),
+        authenticated: isSignedIn,
         entitled: hasAiAccess,
         loading: authLoading || premium.isLoading
       }}
@@ -305,6 +307,13 @@ function PremiumReviewGate({
         {authenticated && (
           <div className="auth-error" role="status">
             {locale === "zh-CN" ? "当前账号尚未拥有 AI Decision 权限。" : "This account does not have AI Decision access yet."}
+          </div>
+        )}
+        {!authEnabled && (
+          <div className="auth-error" role="status">
+            {locale === "zh-CN"
+              ? "当前运行环境尚未启用登录，因此 Pro AI 接口保持关闭。"
+              : "Authentication is disabled in this runtime, so Pro AI access remains closed."}
           </div>
         )}
       </section>
