@@ -76,7 +76,9 @@ def login() -> int:
     env["QQ_BOT_STATE_DIR"] = str(Path(settings.qq_bot_state_dir).resolve())
     env["QQ_BOT_CONNECTOR_INDEX"] = str(connector_index)
     print("请使用手机 QQ 扫描终端中的二维码完成机器人绑定。")
-    completed = subprocess.run([node, str(LOGIN_SCRIPT)], env=env, check=False)
+    completed = subprocess.run(  # noqa: S603 - no shell; executable is resolved and script is fixed
+        [node, str(LOGIN_SCRIPT)], env=env, check=False
+    )
     if completed.returncode != 0:
         print("❌ QQ Bot 绑定失败或已取消。")
         return completed.returncode or 1

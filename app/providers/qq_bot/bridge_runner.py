@@ -170,8 +170,8 @@ class QQBotBridgeRunner:
                             buffered_events=health.buffered_events,
                         )
                         return
-                except Exception:
-                    pass
+                except Exception as exc:
+                    logger.debug("qq_bot_bridge_health_check_failed", error=str(exc))
                 if asyncio.get_running_loop().time() >= deadline:
                     await self._update_health(
                         "DEGRADED",
@@ -183,7 +183,8 @@ class QQBotBridgeRunner:
             await client.close()
 
     async def _drain(self, process: asyncio.subprocess.Process) -> None:
-        assert process.stdout is not None
+        if process.stdout is None:
+            raise QQBotBridgeSetupError("QQ bridge stdout pipe is unavailable")
         while True:
             raw = await process.stdout.readline()
             if not raw:

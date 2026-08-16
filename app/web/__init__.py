@@ -5,8 +5,11 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.auth import EmailAuthService, ResendLoginCodeSender
+from app.config import Settings, get_settings
 from app.runtime.health import HealthRegistry
 from app.web.api import create_app as create_api_app
+from app.web.auth import register_auth
 from app.web.player_hero_recent import register_player_hero_recent_routes
 from app.web.server import WebServerWorker
 from app.web.spa import spa_file_response
@@ -21,7 +24,23 @@ def create_app(
     live_market_max_age_seconds: float = 30.0,
     market_max_pair_skew_seconds: float = 5.0,
     ai_min_game_time_seconds: int = 600,
+    auth_service: EmailAuthService | None = None,
+    auth_enabled: bool | None = None,
+    auth_cookie_secure: bool | None = None,
 ) -> FastAPI:
+    settings: Settings | None = None
+    owns_auth_service = False
+    if auth_enabled is None:
+        settings = get_settings()
+        auth_enabled = settings.auth_enabled
+    if auth_cookie_secure is None:
+        settings = settings or get_settings()
+        auth_cookie_secure = settings.auth_cookie_secure
+    if auth_enabled and auth_service is None:
+        settings = settings or get_settings()
+        auth_service = _configured_auth_service(settings, session_factory)
+        owns_auth_service = True
+
     # Build API routes first without the SPA catch-all, so detail-scoped
     # extension routes remain reachable before the frontend fallback route.
     app = create_api_app(
@@ -34,6 +53,14 @@ def create_app(
         ai_min_game_time_seconds=ai_min_game_time_seconds,
     )
     register_player_hero_recent_routes(app, session_factory)
+    register_auth(
+        app,
+        service=auth_service,
+        enabled=auth_enabled,
+        cookie_secure=auth_cookie_secure,
+    )
+    if owns_auth_service and auth_service is not None:
+        app.router.add_event_handler("shutdown", auth_service.close)
 
     if frontend_dist is not None and frontend_dist.is_dir():
         assets = frontend_dist / "assets"
@@ -45,6 +72,37 @@ def create_app(
             return spa_file_response(frontend_dist, full_path)
 
     return app
+
+
+def _configured_auth_service(
+    settings: Settings,
+    session_factory: async_sessionmaker[AsyncSession],
+) -> EmailAuthService:
+    if settings.auth_configuration_errors:
+        missing = ", ".join(settings.auth_configuration_errors)
+        raise RuntimeError(f"email authentication configuration is incomplete: {missing}")
+    if (
+        settings.auth_secret_key is None
+        or settings.resend_api_key is None
+        or not settings.resend_from
+    ):
+        raise RuntimeError("validated email authentication configuration is incomplete")
+    sender = ResendLoginCodeSender(
+        api_key=settings.resend_api_key.get_secret_value(),
+        sender_from=settings.resend_from,
+        base_url=settings.resend_base_url,
+        timeout_seconds=settings.resend_timeout_seconds,
+        subject_prefix=settings.auth_email_subject_prefix,
+    )
+    return EmailAuthService(
+        session_factory=session_factory,
+        sender=sender,
+        secret_key=settings.auth_secret_key.get_secret_value(),
+        login_code_ttl_seconds=settings.auth_login_code_ttl_seconds,
+        resend_cooldown_seconds=settings.auth_login_resend_cooldown_seconds,
+        max_attempts=settings.auth_login_max_attempts,
+        session_ttl_days=settings.auth_session_ttl_days,
+    )
 
 
 __all__ = ["WebServerWorker", "create_app"]

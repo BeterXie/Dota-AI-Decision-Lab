@@ -10,16 +10,87 @@ import {
   type MapDetail,
   type MapSummary
 } from "./api";
-import { I18nProvider } from "./i18n";
+import { fetchAuthSession, logout, type AuthSessionState } from "./authApi";
+import { I18nProvider, useI18n } from "./i18n";
 import { AppShell } from "./components/AppShell";
+import { AuthAccountBadge } from "./components/AuthAccountBadge";
+import { LoginPage } from "./components/LoginPage";
+
 const ReviewPage = lazy(() => import("./components/ReviewPage").then((module) => ({ default: module.ReviewPage })));
+const authSessionKey = ["auth", "session"] as const;
 
 export function App() {
-  const reviewRoute = typeof window !== "undefined" && isReviewRoute(window.location.pathname);
   return (
     <I18nProvider>
-      {reviewRoute ? <Suspense fallback={null}><ReviewPage /></Suspense> : <DashboardApp />}
+      <AuthenticatedApp />
     </I18nProvider>
+  );
+}
+
+function AuthenticatedApp() {
+  const queryClient = useQueryClient();
+  const { t } = useI18n();
+  const auth = useQuery({
+    queryKey: authSessionKey,
+    queryFn: fetchAuthSession,
+    staleTime: 30_000,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
+    retry: 1
+  });
+
+  if (auth.isLoading) {
+    return <div className="auth-bootstrap">Dota AI Decision Lab</div>;
+  }
+  if (auth.isError || !auth.data) {
+    return (
+      <div className="auth-bootstrap">
+        <div>
+          <strong>{t("authSessionUnavailable")}</strong>
+          <div style={{ marginTop: 10 }}>
+            <button type="button" onClick={() => void auth.refetch()}>
+              {t("authRetry")}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  if (auth.data.enabled && !auth.data.authenticated) {
+    return (
+      <LoginPage
+        onAuthenticated={(session: AuthSessionState) => {
+          queryClient.setQueryData(authSessionKey, session);
+        }}
+      />
+    );
+  }
+
+  const handleLogout = async () => {
+    await logout();
+    queryClient.clear();
+    queryClient.setQueryData<AuthSessionState>(authSessionKey, {
+      enabled: true,
+      authenticated: false,
+      user: null
+    });
+  };
+  const reviewRoute = typeof window !== "undefined" && isReviewRoute(window.location.pathname);
+  const content = reviewRoute ? (
+    <Suspense fallback={<div className="auth-bootstrap">Dota AI Decision Lab</div>}>
+      <ReviewPage />
+    </Suspense>
+  ) : (
+    <DashboardApp />
+  );
+
+  return (
+    <>
+      {content}
+      {auth.data.enabled && auth.data.user && (
+        <AuthAccountBadge user={auth.data.user} onLogout={handleLogout} />
+      )}
+    </>
   );
 }
 

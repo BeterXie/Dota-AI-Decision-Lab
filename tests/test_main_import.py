@@ -30,7 +30,7 @@ def test_loopback_dashboard_hosts_are_allowed(host: str) -> None:
 def test_api_token_does_not_unlock_non_loopback_binding() -> None:
     from app.config import Settings
 
-    with pytest.raises(ValueError, match="HOST must be loopback"):
+    with pytest.raises(ValueError, match="HOST must remain loopback"):
         Settings(
             _env_file=None,
             host="0.0.0.0",
@@ -43,7 +43,7 @@ def test_runtime_host_cannot_be_reassigned_to_non_loopback() -> None:
 
     settings = Settings(_env_file=None, host="127.0.0.1")
 
-    with pytest.raises(ValueError, match="HOST must be loopback"):
+    with pytest.raises(ValueError, match="HOST must remain loopback"):
         settings.host = "0.0.0.0"
 
 

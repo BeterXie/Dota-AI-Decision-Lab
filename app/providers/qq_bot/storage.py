@@ -9,8 +9,12 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+import structlog
+
 from app.providers.local_state import LocalStateStore
 from app.providers.qq_bot.models import QQBotAccount, QQContact
+
+logger = structlog.get_logger()
 
 
 class QQBotStore(LocalStateStore):
@@ -37,7 +41,8 @@ class QQBotStore(LocalStateStore):
         for raw in self.read_json_list(self._accounts_path):
             try:
                 result.append(QQBotAccount.model_validate(raw))
-            except Exception:
+            except Exception as exc:
+                logger.warning("qq_bot_account_state_invalid", error=str(exc))
                 continue
         return result
 
@@ -63,15 +68,20 @@ class QQBotStore(LocalStateStore):
             try:
                 if path.read_text(encoding="utf-8").find(f'"{app_id}"') >= 0:
                     path.unlink()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning(
+                    "qq_bot_cursor_cleanup_failed",
+                    path=str(path),
+                    error=str(exc),
+                )
 
     def contacts(self) -> list[QQContact]:
         result = []
         for raw in self.read_json_list(self._contacts_path):
             try:
                 result.append(QQContact.model_validate(raw))
-            except Exception:
+            except Exception as exc:
+                logger.warning("qq_bot_contact_state_invalid", error=str(exc))
                 continue
         return result
 
@@ -140,5 +150,5 @@ class QQBotStore(LocalStateStore):
         return raw if isinstance(raw, dict) else {}
 
     def _cursor_path(self, account_id: str) -> Path:
-        digest = hashlib.sha1(account_id.encode("utf-8")).hexdigest()[:16]
+        digest = hashlib.sha1(account_id.encode("utf-8"), usedforsecurity=False).hexdigest()[:16]
         return self._cursor_dir / f"{digest}.json"
