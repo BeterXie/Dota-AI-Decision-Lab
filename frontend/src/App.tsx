@@ -29,7 +29,7 @@ export function App() {
 
 function AuthenticatedApp() {
   const queryClient = useQueryClient();
-  const { locale } = useI18n();
+  const { t } = useI18n();
   const auth = useQuery({
     queryKey: authSessionKey,
     queryFn: fetchAuthSession,
@@ -44,10 +44,10 @@ function AuthenticatedApp() {
     return (
       <div className="auth-bootstrap">
         <div>
-          <strong>{locale === "zh-CN" ? "无法确认登录状态" : "Unable to verify sign-in state"}</strong>
+          <strong>{t("authSessionUnavailable")}</strong>
           <div style={{ marginTop: 10 }}>
             <button type="button" onClick={() => void auth.refetch()}>
-              {locale === "zh-CN" ? "重试" : "Retry"}
+              {t("authRetry")}
             </button>
           </div>
         </div>
