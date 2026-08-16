@@ -14,6 +14,7 @@ from app.auth import (
     InvalidEmailError,
     InvalidLoginCodeError,
 )
+from app.entitlements import AI_DECISIONS_ENTITLEMENT, EntitlementService
 
 
 class RequestLoginCodePayload(BaseModel):
@@ -26,36 +27,75 @@ class VerifyLoginCodePayload(BaseModel):
 
 
 class AuthGuardMiddleware:
+    """Attach identity to requests and enforce only non-public access classes.
+
+    Match browsing is public. Authentication is required for operational/account
+    endpoints, while premium AI endpoints additionally require the named
+    entitlement. This keeps authentication (who are you?) separate from
+    authorization (what have you paid for?).
+    """
+
     def __init__(
         self,
         app: ASGIApp,
         *,
         service: EmailAuthService | None,
+        entitlements: EntitlementService,
         enabled: bool,
     ) -> None:
         self._app = app
         self._service = service
+        self._entitlements = entitlements
         self._enabled = enabled
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if not self._enabled:
-            await self._app(scope, receive, send)
-            return
         scope_type = scope["type"]
         path = scope.get("path", "")
+
         if scope_type == "http":
-            if _is_public_http_path(path) or not _is_protected_http_path(path):
+            access, required_entitlement = _http_access_requirement(path)
+            if not self._enabled:
+                if access == "ENTITLED":
+                    await _json_error(
+                        send,
+                        status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                        detail="premium access requires email authentication to be enabled",
+                        required_entitlement=required_entitlement,
+                    )
+                    return
                 await self._app(scope, receive, send)
                 return
+
             user = await self._authenticated_scope_user(scope)
-            if user is None:
-                await JSONResponse(
+            active_entitlements: tuple[str, ...] = ()
+            if user is not None:
+                active_entitlements = await self._entitlements.active_entitlements(user.id)
+                state = scope.setdefault("state", {})
+                state["auth_user"] = user
+                state["auth_entitlements"] = active_entitlements
+
+            if access in {"AUTHENTICATED", "ENTITLED"} and user is None:
+                await _json_error(
+                    send,
                     status_code=status.HTTP_401_UNAUTHORIZED,
-                    content={"detail": "authentication required"},
-                )(scope, receive, send)
+                    detail="authentication required",
+                    required_entitlement=required_entitlement,
+                )
                 return
-            scope.setdefault("state", {})["auth_user"] = user
-        elif scope_type == "websocket":
+            if (
+                access == "ENTITLED"
+                and required_entitlement is not None
+                and required_entitlement not in active_entitlements
+            ):
+                await _json_error(
+                    send,
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    detail="entitlement required",
+                    required_entitlement=required_entitlement,
+                )
+                return
+
+        elif scope_type == "websocket" and self._enabled and path != "/ws/status":
             user = await self._authenticated_scope_user(scope)
             if user is None:
                 await send(
@@ -67,6 +107,7 @@ class AuthGuardMiddleware:
                 )
                 return
             scope.setdefault("state", {})["auth_user"] = user
+
         await self._app(scope, receive, send)
 
     async def _authenticated_scope_user(self, scope: Scope) -> AuthenticatedUser | None:
@@ -81,33 +122,61 @@ def register_auth(
     app: FastAPI,
     *,
     service: EmailAuthService | None,
+    entitlements: EntitlementService,
     enabled: bool,
     cookie_secure: bool,
+    development_grant_emails: tuple[str, ...] = (),
 ) -> None:
     if enabled and service is None:
         raise ValueError("auth is enabled but no email auth service was configured")
-    app.include_router(_auth_router(service=service, enabled=enabled, cookie_secure=cookie_secure))
-    app.add_middleware(AuthGuardMiddleware, service=service, enabled=enabled)
+    app.include_router(
+        _auth_router(
+            service=service,
+            entitlements=entitlements,
+            enabled=enabled,
+            cookie_secure=cookie_secure,
+            development_grant_emails=development_grant_emails,
+        )
+    )
+    app.add_middleware(
+        AuthGuardMiddleware,
+        service=service,
+        entitlements=entitlements,
+        enabled=enabled,
+    )
 
 
 def _auth_router(
     *,
     service: EmailAuthService | None,
+    entitlements: EntitlementService,
     enabled: bool,
     cookie_secure: bool,
+    development_grant_emails: tuple[str, ...],
 ) -> APIRouter:
     router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+    async def session_payload(user: AuthenticatedUser | None) -> dict:
+        active: tuple[str, ...] = ()
+        if user is not None:
+            active = await entitlements.ensure_development_grants(
+                user.id,
+                user.email,
+                development_grant_emails,
+            )
+        return {
+            "enabled": enabled,
+            "authenticated": user is not None if enabled else True,
+            "user": _user_payload(user) if user is not None else None,
+            "entitlements": list(active),
+        }
 
     @router.get("/session")
     async def auth_session(request: Request) -> dict:
         if not enabled:
-            return {"enabled": False, "authenticated": True, "user": None}
+            return await session_payload(None)
         user = await _authenticate_cookie(service, request.cookies.get(SESSION_COOKIE_NAME))
-        return {
-            "enabled": True,
-            "authenticated": user is not None,
-            "user": _user_payload(user) if user is not None else None,
-        }
+        return await session_payload(user)
 
     @router.post("/request-code", status_code=status.HTTP_202_ACCEPTED)
     async def request_code(payload: RequestLoginCodePayload) -> dict:
@@ -143,11 +212,7 @@ def _auth_router(
             httponly=True,
             samesite="strict",
         )
-        return {
-            "enabled": True,
-            "authenticated": True,
-            "user": _user_payload(result.user),
-        }
+        return await session_payload(result.user)
 
     @router.post("/logout")
     async def logout(request: Request, response: Response) -> dict:
@@ -179,12 +244,37 @@ def _require_service(service: EmailAuthService | None, enabled: bool) -> EmailAu
     return service
 
 
-def _is_public_http_path(path: str) -> bool:
-    return path in {"/health", "/ready"} or path.startswith("/api/auth/")
+def _http_access_requirement(path: str) -> tuple[str, str | None]:
+    if (
+        path.startswith("/api/snapshots/")
+        or path.startswith("/api/review/")
+        or (path.startswith("/api/maps/") and path.endswith("/ai-decisions"))
+    ):
+        return "ENTITLED", AI_DECISIONS_ENTITLEMENT
+    if path == "/metrics" or path == "/api/jobs/summary" or path.startswith("/api/account/"):
+        return "AUTHENTICATED", None
+    return "PUBLIC", None
 
 
-def _is_protected_http_path(path: str) -> bool:
-    return path.startswith("/api/") or path == "/metrics"
+async def _json_error(
+    send: Send,
+    *,
+    status_code: int,
+    detail: str,
+    required_entitlement: str | None,
+) -> None:
+    payload: dict[str, str] = {"detail": detail}
+    if required_entitlement is not None:
+        payload["required_entitlement"] = required_entitlement
+    await JSONResponse(status_code=status_code, content=payload)(
+        {"type": "http", "asgi": {"version": "3.0"}},
+        _empty_receive,
+        send,
+    )
+
+
+async def _empty_receive() -> dict:
+    return {"type": "http.request", "body": b"", "more_body": False}
 
 
 def _user_payload(user: AuthenticatedUser) -> dict:
