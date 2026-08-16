@@ -30,7 +30,7 @@ def create_app(
     auth_service: EmailAuthService | None = None,
     auth_enabled: bool | None = None,
     auth_cookie_secure: bool | None = None,
-    development_grant_emails: tuple[str, ...] | None = None,
+    development_grant_emails: tuple[str, ...] = (),
 ) -> FastAPI:
     settings: Settings | None = None
     owns_auth_service = False
@@ -44,12 +44,6 @@ def create_app(
         settings = settings or get_settings()
         auth_service = _configured_auth_service(settings, session_factory)
         owns_auth_service = True
-    if development_grant_emails is None:
-        if settings is None and auth_enabled:
-            settings = get_settings()
-        development_grant_emails = (
-            settings.development_entitlement_emails if settings is not None else ()
-        )
 
     entitlement_service = EntitlementService(session_factory)
 
