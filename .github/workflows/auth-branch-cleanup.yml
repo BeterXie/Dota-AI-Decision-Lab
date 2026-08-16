@@ -22,96 +22,7 @@ jobs:
           version: '0.12.0'
           python-version: '3.14'
       - name: Apply deterministic cleanup
-        shell: python
-        run: |
-          from pathlib import Path
-
-          replay = Path('tests/test_production_lifecycle_replay.py')
-          text = replay.read_text(encoding='utf-8')
-          text = text.replace(
-              'assert revision == "0028_historical_start_time_provenance"',
-              'assert revision == "0029_email_auth"',
-          )
-          replay.write_text(text, encoding='utf-8')
-
-          auth_test = Path('tests/test_email_auth.py')
-          text = auth_test.read_text(encoding='utf-8')
-          text = text.replace(
-              'engine, _, sender, service = await _auth_fixture()\n',
-              'engine, factory, sender, service = await _auth_fixture()\n',
-          )
-          text = text.replace(
-              '            service._session_factory,  # type: ignore[attr-defined]\n',
-              '            factory,\n',
-          )
-          auth_test.write_text(text, encoding='utf-8')
-
-          i18n = Path('frontend/src/i18n.tsx')
-          text = i18n.read_text(encoding='utf-8')
-          en_marker = '    reviewWinnerTitle: "Winner",\n    selectMatchPrompt:'
-          en_insert = '''    reviewWinnerTitle: "Winner",
-    authSessionUnavailable: "Unable to verify sign-in state",
-    authRetry: "Retry",
-    authLoginEyebrow: "Dota AI Decision Lab",
-    authLoginTitle: "Sign in with email",
-    authLoginDescription: "No password. We’ll send a one-time 6-digit code to your email.",
-    authEmailLabel: "Email address",
-    authEmailPlaceholder: "you@example.com",
-    authSendCode: "Send login code",
-    authSending: "Sending…",
-    authCodeTitle: "Check your email",
-    authCodeDescription: "Enter the 6-digit code sent to",
-    authCodeLabel: "Login code",
-    authCodePlaceholder: "000000",
-    authVerify: "Sign in",
-    authVerifying: "Verifying…",
-    authChangeEmail: "Use another email",
-    authResend: "Resend code",
-    authResendIn: "Resend in {seconds}s",
-    authCodePrivacy: "The code expires in 10 minutes and can only be used once.",
-    authInvalidEmail: "Enter a valid email address.",
-    authDeliveryFailed: "We couldn’t send the login email. Check the mail configuration and try again.",
-    authInvalidCode: "That code is invalid or expired. Request a new code and try again.",
-    authGenericError: "Sign-in failed. Please try again.",
-    authSecureSession: "Secure session · HttpOnly cookie · no password stored",
-    authCurrentAccount: "Current account",
-    authSignOut: "Sign out",
-    selectMatchPrompt:'''
-          zh_marker = '    reviewWinnerTitle: "获胜方",\n    selectMatchPrompt:'
-          zh_insert = '''    reviewWinnerTitle: "获胜方",
-    authSessionUnavailable: "无法确认登录状态",
-    authRetry: "重试",
-    authLoginEyebrow: "Dota AI Decision Lab",
-    authLoginTitle: "使用邮箱登录",
-    authLoginDescription: "无需密码。我们会向你的邮箱发送一个 6 位一次性验证码。",
-    authEmailLabel: "邮箱地址",
-    authEmailPlaceholder: "you@example.com",
-    authSendCode: "发送登录验证码",
-    authSending: "正在发送…",
-    authCodeTitle: "检查你的邮箱",
-    authCodeDescription: "请输入发送到以下邮箱的 6 位验证码",
-    authCodeLabel: "登录验证码",
-    authCodePlaceholder: "000000",
-    authVerify: "登录",
-    authVerifying: "正在验证…",
-    authChangeEmail: "更换邮箱",
-    authResend: "重新发送",
-    authResendIn: "{seconds} 秒后可重发",
-    authCodePrivacy: "验证码 10 分钟后失效，并且只能使用一次。",
-    authInvalidEmail: "请输入有效的邮箱地址。",
-    authDeliveryFailed: "登录邮件发送失败，请检查邮件配置后重试。",
-    authInvalidCode: "验证码错误或已失效，请重新获取后再试。",
-    authGenericError: "登录失败，请稍后重试。",
-    authSecureSession: "安全会话 · HttpOnly Cookie · 不保存密码",
-    authCurrentAccount: "当前账户",
-    authSignOut: "退出",
-    selectMatchPrompt:'''
-          if 'authLoginTitle:' not in text:
-              if en_marker not in text or zh_marker not in text:
-                  raise SystemExit('i18n insertion marker missing')
-              text = text.replace(en_marker, en_insert, 1)
-              text = text.replace(zh_marker, zh_insert, 1)
-          i18n.write_text(text, encoding='utf-8')
+        run: python tools/auth_branch_cleanup.py
       - name: Format backend
         run: |
           uv sync --frozen --extra dev
@@ -119,11 +30,9 @@ jobs:
           uv run ruff check --fix app migrations tests tools
       - name: Commit cleanup
         run: |
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add tests/test_production_lifecycle_replay.py tests/test_email_auth.py frontend/src/i18n.tsx app migrations tests tools
-          if git diff --cached --quiet; then
-            exit 0
-          fi
-          git commit -m 'chore: align auth contracts and formatting'
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app migrations tests tools frontend/src/i18n.tsx
+          if git diff --cached --quiet; then exit 0; fi
+          git commit -m "chore: align auth contracts and formatting"
           git push origin HEAD:feat/email-auth-notification-center
