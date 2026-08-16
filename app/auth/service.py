@@ -104,7 +104,11 @@ class EmailAuthService:
                     .limit(1)
                     .with_for_update()
                 )
-                if latest is not None and _challenge_is_reusable(latest, now):
+                # Rate-limit every successfully delivered challenge, even after it
+                # has been consumed by too many guesses. Otherwise an attacker can
+                # immediately request another code and reset the attempt budget.
+                # A delivery failure is the only case that may retry immediately.
+                if latest is not None and latest.delivery_status != "FAILED":
                     elapsed = (now - ensure_utc(latest.created_at)).total_seconds()
                     remaining = max(0, int(self._resend_cooldown_seconds - elapsed + 0.999))
                     if remaining > 0:
@@ -292,7 +296,14 @@ def normalize_email(raw_email: str) -> str:
     if value.count("@") != 1:
         raise InvalidEmailError("invalid email address")
     local, domain = value.rsplit("@", 1)
-    if not local or len(local) > 64 or not _EMAIL_LOCAL_RE.fullmatch(local):
+    if (
+        not local
+        or len(local) > 64
+        or local.startswith(".")
+        or local.endswith(".")
+        or ".." in local
+        or not _EMAIL_LOCAL_RE.fullmatch(local)
+    ):
         raise InvalidEmailError("invalid email address")
     try:
         ascii_domain = domain.rstrip(".").encode("idna").decode("ascii").lower()
@@ -304,14 +315,6 @@ def normalize_email(raw_email: str) -> str:
     if any(not _DOMAIN_LABEL_RE.fullmatch(label) for label in labels):
         raise InvalidEmailError("invalid email address")
     return f"{local.lower()}@{ascii_domain}"
-
-
-def _challenge_is_reusable(challenge: EmailLoginChallengeRecord, now: datetime) -> bool:
-    return (
-        challenge.consumed_at is None
-        and challenge.delivery_status == "SENT"
-        and ensure_utc(challenge.expires_at) > now
-    )
 
 
 def _token_digest(token: str) -> str:
