@@ -126,11 +126,11 @@ async def test_login_code_attempt_limit_is_persisted_and_session_can_be_revoked(
 
 @pytest.mark.asyncio
 async def test_auth_api_protects_business_routes_and_sets_http_only_cookie(tmp_path) -> None:
-    engine, _, sender, service = await _auth_fixture()
+    engine, factory, sender, service = await _auth_fixture()
     try:
         health = HealthRegistry()
         app = create_app(
-            service._session_factory,  # type: ignore[attr-defined]
+            factory,
             health,
             frontend_dist=tmp_path / "missing",
             auth_service=service,
