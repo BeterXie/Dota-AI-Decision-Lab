@@ -135,7 +135,7 @@ test("renders public empty state without requiring login and persists locale", a
   const first = renderApp();
   expect((await screen.findAllByText("No discovered matches")).length).toBeGreaterThan(0);
   expect(screen.getByText("Dota AI Decision Lab")).toBeInTheDocument();
-  expect(screen.getByRole("button", { name: "Sign in" })).toBeInTheDocument();
+  expect(await screen.findByRole("button", { name: "Sign in" })).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "中文" }));
   expect(window.localStorage.getItem("dota-ai-decision-lab-locale")).toBe("zh-CN");
   first.unmount();
