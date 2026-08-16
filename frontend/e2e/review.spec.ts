@@ -176,7 +176,17 @@ async function mockReviewApi(page: Page) {
     await route.fulfill({
       status: 200,
       contentType: "application/json",
-      body: JSON.stringify({ enabled: false, authenticated: false, user: null })
+      body: JSON.stringify({
+        enabled: true,
+        authenticated: true,
+        user: {
+          id: "99999999-9999-9999-9999-999999999999",
+          email: "pro@example.com",
+          email_verified_at: "2026-08-15T10:00:00Z",
+          created_at: "2026-08-15T10:00:00Z"
+        },
+        entitlements: ["ai_decisions"]
+      })
     });
   });
   await page.route("**/api/review/matches**", async (route) => {
@@ -188,7 +198,7 @@ async function mockReviewApi(page: Page) {
   });
 }
 
-test("renders auditable post-match review ledger", async ({ page }) => {
+test("renders auditable post-match review ledger for entitled users", async ({ page }) => {
   await mockReviewApi(page);
   await page.goto("/review");
 
