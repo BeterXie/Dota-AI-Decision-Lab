@@ -1,7 +1,7 @@
+import json
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request, Response, status
-from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
 from starlette.requests import HTTPConnection
 from starlette.types import ASGIApp, Receive, Scope, Send
@@ -266,15 +266,18 @@ async def _json_error(
     payload: dict[str, str] = {"detail": detail}
     if required_entitlement is not None:
         payload["required_entitlement"] = required_entitlement
-    await JSONResponse(status_code=status_code, content=payload)(
-        {"type": "http", "asgi": {"version": "3.0"}},
-        _empty_receive,
-        send,
+    body = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    await send(
+        {
+            "type": "http.response.start",
+            "status": status_code,
+            "headers": [
+                (b"content-type", b"application/json"),
+                (b"content-length", str(len(body)).encode("ascii")),
+            ],
+        }
     )
-
-
-async def _empty_receive() -> dict:
-    return {"type": "http.request", "body": b"", "more_body": False}
+    await send({"type": "http.response.body", "body": body})
 
 
 def _user_payload(user: AuthenticatedUser) -> dict:
