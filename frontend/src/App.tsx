@@ -34,6 +34,8 @@ function AuthenticatedApp() {
     queryKey: authSessionKey,
     queryFn: fetchAuthSession,
     staleTime: 30_000,
+    refetchInterval: 60_000,
+    refetchOnWindowFocus: true,
     retry: 1
   });
 
