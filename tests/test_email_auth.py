@@ -221,3 +221,27 @@ async def test_auth_guard_rejects_unauthenticated_websocket() -> None:
     finally:
         await service.close()
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_auth_disabled_preserves_existing_business_api_access(tmp_path) -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    try:
+        app = create_app(
+            factory,
+            HealthRegistry(),
+            frontend_dist=tmp_path / "missing",
+            auth_enabled=False,
+            auth_cookie_secure=False,
+        )
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            session = await client.get("/api/auth/session")
+            assert session.status_code == 200
+            assert session.json() == {"enabled": False, "authenticated": True, "user": None}
+            assert (await client.get("/api/matches")).status_code == 200
+            assert (await client.get("/metrics")).status_code == 200
+    finally:
+        await engine.dispose()
