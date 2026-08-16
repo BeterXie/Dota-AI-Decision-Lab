@@ -156,6 +156,9 @@ class EmailAuthService:
         email = normalize_email(raw_email)
         code = raw_code.strip()
         now = datetime.now(UTC)
+        failure: str | None = None
+        verification: LoginVerificationResult | None = None
+
         async with self._challenge_lock:
             async with self._session_factory() as session, session.begin():
                 challenge = await session.scalar(
@@ -170,58 +173,66 @@ class EmailAuthService:
                     .with_for_update()
                 )
                 if challenge is None:
-                    raise InvalidLoginCodeError("invalid or expired login code")
-                if ensure_utc(challenge.expires_at) <= now:
+                    failure = "invalid or expired login code"
+                elif ensure_utc(challenge.expires_at) <= now:
                     challenge.consumed_at = now
-                    raise InvalidLoginCodeError("invalid or expired login code")
-                if challenge.attempt_count >= challenge.max_attempts:
+                    failure = "invalid or expired login code"
+                elif challenge.attempt_count >= challenge.max_attempts:
                     challenge.consumed_at = now
-                    raise InvalidLoginCodeError("invalid or expired login code")
-
-                challenge.attempt_count += 1
-                expected = challenge.code_digest
-                supplied = self._code_digest(challenge.id, code)
-                if not hmac.compare_digest(expected, supplied):
-                    if challenge.attempt_count >= challenge.max_attempts:
-                        challenge.consumed_at = now
-                    raise InvalidLoginCodeError("invalid or expired login code")
-
-                challenge.consumed_at = now
-                user = await session.scalar(
-                    select(UserAccountRecord)
-                    .where(UserAccountRecord.email == email)
-                    .limit(1)
-                    .with_for_update()
-                )
-                if user is None:
-                    user = UserAccountRecord(
-                        email=email,
-                        email_verified_at=now,
-                        last_login_at=now,
-                        created_at=now,
-                    )
-                    session.add(user)
-                    await session.flush()
+                    failure = "invalid or expired login code"
                 else:
-                    if user.disabled_at is not None:
-                        raise InvalidLoginCodeError("account is disabled")
-                    user.email_verified_at = now
-                    user.last_login_at = now
+                    challenge.attempt_count += 1
+                    supplied = self._code_digest(challenge.id, code)
+                    if not hmac.compare_digest(challenge.code_digest, supplied):
+                        if challenge.attempt_count >= challenge.max_attempts:
+                            challenge.consumed_at = now
+                        failure = "invalid or expired login code"
+                    else:
+                        challenge.consumed_at = now
+                        user = await session.scalar(
+                            select(UserAccountRecord)
+                            .where(UserAccountRecord.email == email)
+                            .limit(1)
+                            .with_for_update()
+                        )
+                        if user is not None and user.disabled_at is not None:
+                            failure = "account is disabled"
+                        else:
+                            if user is None:
+                                user = UserAccountRecord(
+                                    email=email,
+                                    email_verified_at=now,
+                                    last_login_at=now,
+                                    created_at=now,
+                                )
+                                session.add(user)
+                                await session.flush()
+                            else:
+                                user.email_verified_at = now
+                                user.last_login_at = now
 
-                token = secrets.token_urlsafe(48)
-                expires_at = now + timedelta(days=self._session_ttl_days)
-                session.add(
-                    AuthSessionRecord(
-                        user_id=user.id,
-                        token_digest=_token_digest(token),
-                        expires_at=expires_at,
-                        last_seen_at=now,
-                        created_at=now,
-                    )
-                )
-                authenticated = _authenticated_user(user)
+                            token = secrets.token_urlsafe(48)
+                            expires_at = now + timedelta(days=self._session_ttl_days)
+                            session.add(
+                                AuthSessionRecord(
+                                    user_id=user.id,
+                                    token_digest=_token_digest(token),
+                                    expires_at=expires_at,
+                                    last_seen_at=now,
+                                    created_at=now,
+                                )
+                            )
+                            verification = LoginVerificationResult(
+                                token=token,
+                                expires_at=expires_at,
+                                user=_authenticated_user(user),
+                            )
 
-        return LoginVerificationResult(token=token, expires_at=expires_at, user=authenticated)
+        if failure is not None:
+            raise InvalidLoginCodeError(failure)
+        if verification is None:
+            raise RuntimeError("login verification completed without a result")
+        return verification
 
     async def authenticate(self, token: str | None) -> AuthenticatedUser | None:
         if not token:
