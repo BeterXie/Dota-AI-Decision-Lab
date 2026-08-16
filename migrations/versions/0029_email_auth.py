@@ -25,9 +25,8 @@ def upgrade() -> None:
         sa.Column("disabled_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("email"),
+        sa.UniqueConstraint("email", name="uq_user_accounts_email"),
     )
-    op.create_index("ix_user_accounts_email", "user_accounts", ["email"], unique=True)
 
     op.create_table(
         "email_login_challenges",
@@ -68,10 +67,7 @@ def upgrade() -> None:
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["user_id"], ["user_accounts.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
-        sa.UniqueConstraint("token_digest"),
-    )
-    op.create_index(
-        "ix_auth_sessions_token_digest", "auth_sessions", ["token_digest"], unique=True
+        sa.UniqueConstraint("token_digest", name="uq_auth_sessions_token_digest"),
     )
     op.create_index(
         "ix_auth_session_user_expiry",
@@ -90,10 +86,8 @@ def upgrade() -> None:
 def downgrade() -> None:
     op.drop_index("ix_auth_session_expiry_revoked", table_name="auth_sessions")
     op.drop_index("ix_auth_session_user_expiry", table_name="auth_sessions")
-    op.drop_index("ix_auth_sessions_token_digest", table_name="auth_sessions")
     op.drop_table("auth_sessions")
     op.drop_index("ix_email_login_challenge_expiry", table_name="email_login_challenges")
     op.drop_index("ix_email_login_challenge_email_created", table_name="email_login_challenges")
     op.drop_table("email_login_challenges")
-    op.drop_index("ix_user_accounts_email", table_name="user_accounts")
     op.drop_table("user_accounts")
