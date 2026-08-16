@@ -1,8 +1,10 @@
 from datetime import UTC, datetime
 
-from fastapi import APIRouter, FastAPI, HTTPException, Request, Response, WebSocket, status
+from fastapi import APIRouter, FastAPI, HTTPException, Request, Response, status
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, Field
+from starlette.requests import HTTPConnection
+from starlette.types import ASGIApp, Receive, Scope, Send
 
 from app.auth import (
     SESSION_COOKIE_NAME,
@@ -23,6 +25,58 @@ class VerifyLoginCodePayload(BaseModel):
     code: str = Field(min_length=1, max_length=20)
 
 
+class AuthGuardMiddleware:
+    def __init__(
+        self,
+        app: ASGIApp,
+        *,
+        service: EmailAuthService | None,
+        enabled: bool,
+    ) -> None:
+        self._app = app
+        self._service = service
+        self._enabled = enabled
+
+    async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
+        if not self._enabled:
+            await self._app(scope, receive, send)
+            return
+        scope_type = scope["type"]
+        path = scope.get("path", "")
+        if scope_type == "http":
+            if _is_public_http_path(path) or not _is_protected_http_path(path):
+                await self._app(scope, receive, send)
+                return
+            user = await self._authenticated_scope_user(scope)
+            if user is None:
+                await JSONResponse(
+                    status_code=status.HTTP_401_UNAUTHORIZED,
+                    content={"detail": "authentication required"},
+                )(scope, receive, send)
+                return
+            scope.setdefault("state", {})["auth_user"] = user
+        elif scope_type == "websocket":
+            user = await self._authenticated_scope_user(scope)
+            if user is None:
+                await send(
+                    {
+                        "type": "websocket.close",
+                        "code": 4401,
+                        "reason": "authentication required",
+                    }
+                )
+                return
+            scope.setdefault("state", {})["auth_user"] = user
+        await self._app(scope, receive, send)
+
+    async def _authenticated_scope_user(self, scope: Scope) -> AuthenticatedUser | None:
+        connection = HTTPConnection(scope)
+        return await _authenticate_cookie(
+            self._service,
+            connection.cookies.get(SESSION_COOKIE_NAME),
+        )
+
+
 def register_auth(
     app: FastAPI,
     *,
@@ -32,22 +86,8 @@ def register_auth(
 ) -> None:
     if enabled and service is None:
         raise ValueError("auth is enabled but no email auth service was configured")
-
     app.include_router(_auth_router(service=service, enabled=enabled, cookie_secure=cookie_secure))
-
-    @app.middleware("http")
-    async def require_authenticated_api(request: Request, call_next):
-        if not enabled or _is_public_http_path(request.url.path):
-            return await call_next(request)
-        if request.url.path.startswith("/api/") or request.url.path == "/metrics":
-            user = await _authenticate_cookie(service, request.cookies.get(SESSION_COOKIE_NAME))
-            if user is None:
-                return JSONResponse(
-                    status_code=status.HTTP_401_UNAUTHORIZED,
-                    content={"detail": "authentication required"},
-                )
-            request.state.auth_user = user
-        return await call_next(request)
+    app.add_middleware(AuthGuardMiddleware, service=service, enabled=enabled)
 
 
 def _auth_router(
@@ -125,21 +165,6 @@ def _auth_router(
     return router
 
 
-async def authenticate_websocket(
-    websocket: WebSocket,
-    *,
-    service: EmailAuthService | None,
-    enabled: bool,
-) -> AuthenticatedUser | None:
-    if not enabled:
-        return None
-    user = await _authenticate_cookie(service, websocket.cookies.get(SESSION_COOKIE_NAME))
-    if user is None:
-        await websocket.close(code=4401, reason="authentication required")
-        return None
-    return user
-
-
 async def _authenticate_cookie(
     service: EmailAuthService | None, token: str | None
 ) -> AuthenticatedUser | None:
@@ -156,6 +181,10 @@ def _require_service(service: EmailAuthService | None, enabled: bool) -> EmailAu
 
 def _is_public_http_path(path: str) -> bool:
     return path in {"/health", "/ready"} or path.startswith("/api/auth/")
+
+
+def _is_protected_http_path(path: str) -> bool:
+    return path.startswith("/api/") or path == "/metrics"
 
 
 def _user_payload(user: AuthenticatedUser) -> dict:
