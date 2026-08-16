@@ -172,6 +172,13 @@ async function mockReviewApi(page: Page) {
   await page.addInitScript(() => {
     window.localStorage.setItem("dota-ai-decision-lab-locale", "zh-CN");
   });
+  await page.route("**/api/auth/session", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({ enabled: false, authenticated: false, user: null })
+    });
+  });
   await page.route("**/api/review/matches**", async (route) => {
     await route.fulfill({
       status: 200,
