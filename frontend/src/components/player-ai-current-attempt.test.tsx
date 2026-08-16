@@ -61,7 +61,14 @@ test("keeps canonical success visible while exposing a newer current timeout", a
 
   render(
     <I18nProvider>
-      <PlayerAiDecisionPanel decisions={[canonical]} currentSnapshotId="snapshot-1" />
+      <PlayerAiDecisionPanel
+        decisions={[canonical]}
+        currentSnapshotId="snapshot-1"
+        access={{ authEnabled: true, authenticated: true, entitled: true, loading: false }}
+        analysisAvailable
+        completedModels={1}
+        onLogin={vi.fn()}
+      />
     </I18nProvider>
   );
 
