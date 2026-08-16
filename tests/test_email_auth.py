@@ -1,3 +1,4 @@
+from datetime import timedelta
 from uuid import UUID
 
 import pytest
@@ -53,10 +54,15 @@ async def _auth_fixture(*, max_attempts: int = 5):
 def test_email_normalization_is_stable_and_rejects_malformed_addresses() -> None:
     assert normalize_email("  USER@Example.COM ") == "user@example.com"
     assert normalize_email("user@例子.测试") == "user@xn--fsqu00a.xn--0zwm56d"
-    with pytest.raises(ValueError):
-        normalize_email("not-an-email")
-    with pytest.raises(ValueError):
-        normalize_email("user @example.com")
+    for invalid in (
+        "not-an-email",
+        "user @example.com",
+        ".user@example.com",
+        "user.@example.com",
+        "user..name@example.com",
+    ):
+        with pytest.raises(ValueError):
+            normalize_email(invalid)
 
 
 @pytest.mark.asyncio
@@ -101,12 +107,27 @@ async def test_login_code_attempt_limit_is_persisted_and_session_can_be_revoked(
             assert exhausted is not None
             assert exhausted.attempt_count == 2
             assert exhausted.consumed_at is not None
+            exhausted_id = exhausted.id
 
         with pytest.raises(InvalidLoginCodeError):
             await service.verify_login_code(email, code)
 
+        # Exhausting the attempt budget must not reset the send-rate budget.
+        blocked_replacement = await service.request_login_code(email)
+        assert blocked_replacement.sent is False
+        assert blocked_replacement.retry_after_seconds > 0
+        assert len(sender.messages) == 1
+
+        # Move the persisted challenge outside the cooldown window to prove that
+        # a fresh code is allowed after the server-side rate limit expires.
+        async with factory() as session, session.begin():
+            persisted = await session.get(EmailLoginChallengeRecord, exhausted_id)
+            assert persisted is not None
+            persisted.created_at = persisted.created_at - timedelta(seconds=61)
+
         replacement = await service.request_login_code(email)
         assert replacement.sent is True
+        assert len(sender.messages) == 2
         _, replacement_code, _, _ = sender.messages[-1]
         verified = await service.verify_login_code(email, replacement_code)
         assert verified.user.email == email
