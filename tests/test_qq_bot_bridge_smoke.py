@@ -129,3 +129,5 @@ def test_node_bridge_health_events_and_idempotent_send(tmp_path: Path) -> None:
         except subprocess.TimeoutExpired:
             process.kill()
             process.wait(timeout=5)
+        if process.stdout is not None:
+            process.stdout.close()

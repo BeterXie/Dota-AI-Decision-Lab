@@ -99,6 +99,17 @@ class Settings(BaseSettings):
     resend_base_url: str = "https://api.resend.com"
     resend_timeout_seconds: float = Field(default=30.0, gt=0)
 
+    # Passwordless email authentication. The login sender reuses the Resend
+    # transport configuration above but is independent from decision emails.
+    auth_enabled: bool = False
+    auth_secret_key: SecretStr | None = None
+    auth_login_code_ttl_seconds: int = Field(default=600, ge=60, le=3_600)
+    auth_login_resend_cooldown_seconds: int = Field(default=60, ge=10, le=600)
+    auth_login_max_attempts: int = Field(default=5, ge=1, le=10)
+    auth_session_ttl_days: int = Field(default=30, ge=1, le=365)
+    auth_cookie_secure: bool = False
+    auth_email_subject_prefix: str = "[Dota AI Decision Lab]"
+
     # Official WeChat ClawBot channel (direct iLink HTTP API, no OpenClaw).
     wechat_clawbot_enabled: bool = False
     wechat_clawbot_base_url: str = "https://ilinkai.weixin.qq.com"
@@ -182,8 +193,9 @@ class Settings(BaseSettings):
     metrics_enabled: bool = True
     otel_exporter_otlp_endpoint: str | None = None
     host: str = "127.0.0.1"
-    # Reserved for a future authenticated remote-access mode. It does not
-    # unlock non-loopback binding while the dashboard has no auth layer.
+    # Authentication is now implemented, but remote serving remains intentionally
+    # disabled until TLS, origin policy, proxy handling and deployment hardening
+    # are designed as one explicit mode.
     api_token: SecretStr | None = None
     port: int = Field(default=8000, ge=1, le=65_535)
     log_level: str = "INFO"
@@ -193,7 +205,7 @@ class Settings(BaseSettings):
     def require_loopback_host(cls, value: str) -> str:
         if value not in _LOOPBACK_HOSTS:
             raise ValueError(
-                "HOST must be loopback until HTTP and WebSocket authentication are implemented"
+                "HOST must remain loopback; authenticated remote serving is not enabled yet"
             )
         return value
 
@@ -245,6 +257,21 @@ class Settings(BaseSettings):
             missing.append("RESEND_FROM")
         if not self.decision_email_recipients:
             missing.append("EMAIL_RECIPIENTS")
+        return tuple(missing)
+
+    @property
+    def auth_configuration_errors(self) -> tuple[str, ...]:
+        if not self.auth_enabled:
+            return ()
+        missing = []
+        if self.resend_api_key is None:
+            missing.append("RESEND_API_KEY")
+        if not self.resend_from:
+            missing.append("RESEND_FROM")
+        if self.auth_secret_key is None:
+            missing.append("AUTH_SECRET_KEY")
+        elif len(self.auth_secret_key.get_secret_value().encode("utf-8")) < 32:
+            missing.append("AUTH_SECRET_KEY>=32_BYTES")
         return tuple(missing)
 
 
