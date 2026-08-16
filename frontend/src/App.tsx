@@ -10,9 +10,10 @@ import {
   type MapDetail,
   type MapSummary
 } from "./api";
-import { fetchAuthSession, type AuthSessionState } from "./authApi";
+import { fetchAuthSession, logout, type AuthSessionState } from "./authApi";
 import { I18nProvider, useI18n } from "./i18n";
 import { AppShell } from "./components/AppShell";
+import { AuthAccountBadge } from "./components/AuthAccountBadge";
 import { LoginPage } from "./components/LoginPage";
 
 const ReviewPage = lazy(() => import("./components/ReviewPage").then((module) => ({ default: module.ReviewPage })));
@@ -63,13 +64,31 @@ function AuthenticatedApp() {
     );
   }
 
+  const handleLogout = async () => {
+    await logout();
+    queryClient.clear();
+    queryClient.setQueryData<AuthSessionState>(authSessionKey, {
+      enabled: true,
+      authenticated: false,
+      user: null
+    });
+  };
   const reviewRoute = typeof window !== "undefined" && isReviewRoute(window.location.pathname);
-  return reviewRoute ? (
+  const content = reviewRoute ? (
     <Suspense fallback={<div className="auth-bootstrap">Dota AI Decision Lab</div>}>
       <ReviewPage />
     </Suspense>
   ) : (
     <DashboardApp />
+  );
+
+  return (
+    <>
+      {content}
+      {auth.data.enabled && auth.data.user && (
+        <AuthAccountBadge user={auth.data.user} onLogout={handleLogout} />
+      )}
+    </>
   );
 }
 
