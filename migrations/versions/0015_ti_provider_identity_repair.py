@@ -133,7 +133,9 @@ def _merge_lgd_identity(connection, source_team_id, target_team_id) -> None:
     for table, columns in team_references.items():
         for column in columns:
             connection.execute(
-                sa.text(f"UPDATE {table} SET {column} = :target WHERE {column} = :source"),
+                sa.text(  # noqa: S608 - table/column come only from closed migration constants
+                    f"UPDATE {table} SET {column} = :target WHERE {column} = :source"  # noqa: S608 - closed migration identifiers
+                ),
                 {"source": source_team_id, "target": target_team_id},
             )
 

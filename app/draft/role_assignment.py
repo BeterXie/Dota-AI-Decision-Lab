@@ -261,8 +261,10 @@ def _resolve_side_from_history(
     sample_sizes: dict[int, int] = {}
     cutoffs: list[datetime] = []
     for pick in picks:
-        assert pick.account_id is not None
-        rows = evidence.get(pick.account_id, [])
+        account_id = pick.account_id
+        if account_id is None:
+            return None
+        rows = evidence.get(account_id, [])
         if len(rows) < MIN_HISTORY_MAPS_PER_PLAYER:
             return None
         weighted: dict[int, float] = {position: 0.0 for position in range(1, 6)}
@@ -273,18 +275,20 @@ def _resolve_side_from_history(
         total = sum(weighted.values())
         if total <= 0:
             return None
-        position_shares[pick.account_id] = {
+        position_shares[account_id] = {
             position: value / total for position, value in weighted.items()
         }
-        sample_sizes[pick.account_id] = len(rows)
+        sample_sizes[account_id] = len(rows)
 
     ranked: list[tuple[float, tuple[int, ...]]] = []
     for assignment in permutations(range(1, 6)):
         score = 0.0
         valid = True
         for pick, position in zip(picks, assignment, strict=True):
-            assert pick.account_id is not None
-            share = position_shares[pick.account_id][position]
+            account_id = pick.account_id
+            if account_id is None:
+                return None
+            share = position_shares[account_id][position]
             if share < MIN_ASSIGNED_POSITION_SHARE:
                 valid = False
                 break
@@ -302,9 +306,12 @@ def _resolve_side_from_history(
 
     slots: list[DraftSlot] = []
     for pick, position in zip(picks, best_assignment, strict=True):
-        assert pick.account_id is not None and pick.hero_id is not None
-        share = position_shares[pick.account_id][position]
-        sample = sample_sizes[pick.account_id]
+        account_id = pick.account_id
+        hero_id = pick.hero_id
+        if account_id is None or hero_id is None:
+            return None
+        share = position_shares[account_id][position]
+        sample = sample_sizes[account_id]
         confidence = min(
             0.95,
             0.55 + (0.25 * share) + (0.10 * min(sample / 20.0, 1.0)) + (0.05 * min(margin, 1.0)),
@@ -313,8 +320,8 @@ def _resolve_side_from_history(
             DraftSlot(
                 side=pick.side,
                 position=position,
-                account_id=pick.account_id,
-                hero_id=pick.hero_id,
+                account_id=account_id,
+                hero_id=hero_id,
                 source="HISTORICAL_ROLE_ASSIGNMENT",
                 confidence=confidence,
             )

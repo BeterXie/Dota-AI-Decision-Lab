@@ -14,7 +14,7 @@ _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(
         env_file=".env",
-        extra="ignore",
+        extra="forbid",
         validate_assignment=True,
     )
 

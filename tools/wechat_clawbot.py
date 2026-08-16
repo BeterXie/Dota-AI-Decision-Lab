@@ -10,6 +10,7 @@ Usage:
 
 import argparse
 import asyncio
+import shutil
 import subprocess
 from datetime import UTC, datetime
 
@@ -154,8 +155,11 @@ def _display_qr(qrcode_url: str) -> None:
     print("\n用手机微信扫描下面的二维码，或打开链接后用手机微信扫码:")
     print(qrcode_url)
     try:
-        completed = subprocess.run(
-            ["npx", "-y", "qrcode-terminal", qrcode_url],
+        npx = shutil.which("npx")
+        if npx is None:
+            return False
+        completed = subprocess.run(  # noqa: S603 - resolved executable, no shell
+            [npx, "-y", "qrcode-terminal", qrcode_url],
             check=False,
             timeout=120,
             capture_output=True,

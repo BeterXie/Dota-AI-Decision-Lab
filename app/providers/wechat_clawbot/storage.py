@@ -3,8 +3,12 @@ import json
 from datetime import UTC, datetime
 from pathlib import Path
 
+import structlog
+
 from app.providers.local_state import LocalStateStore
 from app.providers.wechat_clawbot.models import WeChatAccount
+
+logger = structlog.get_logger()
 
 
 class WeChatClawBotStore(LocalStateStore):
@@ -14,6 +18,8 @@ class WeChatClawBotStore(LocalStateStore):
     server-assigned base URL are persisted next to the runtime, never logged,
     and never committed (the state directory is gitignored).
     """
+
+    _log_channel = "wechat_clawbot"
 
     def __init__(self, root: str | Path) -> None:
         super().__init__(root)
@@ -33,7 +39,8 @@ class WeChatClawBotStore(LocalStateStore):
         for raw in self.read_json_list(self._accounts_path):
             try:
                 result.append(WeChatAccount.model_validate(raw))
-            except Exception:
+            except Exception as exc:
+                logger.warning("wechat_clawbot_invalid_account_state", error=str(exc))
                 continue
         return result
 
@@ -63,8 +70,8 @@ class WeChatClawBotStore(LocalStateStore):
             try:
                 if path.read_text(encoding="utf-8").find(f'"{account_id}"') >= 0:
                     path.unlink()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("wechat_clawbot_cursor_cleanup_failed", error=str(exc))
 
     def cursor(self, account_id: str) -> str:
         path = self._cursor_path(account_id)
@@ -100,5 +107,5 @@ class WeChatClawBotStore(LocalStateStore):
         return raw if isinstance(raw, dict) else {}
 
     def _cursor_path(self, account_id: str) -> Path:
-        digest = hashlib.sha1(account_id.encode("utf-8")).hexdigest()[:16]
+        digest = hashlib.sha256(account_id.encode("utf-8")).hexdigest()[:16]
         return self._cursor_dir / f"{digest}.json"

@@ -4,9 +4,9 @@ from pathlib import Path
 from uuid import uuid4
 
 import pytest
+from fastapi import WebSocketDisconnect
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
-from starlette.testclient import TestClient
 
 from app.db import Base
 from app.market.fair_probability import remove_vig
@@ -745,17 +745,31 @@ async def test_match_feed_excludes_maps_created_only_from_historical_providers()
     await engine.dispose()
 
 
-def test_status_websocket_serializes_runtime_timestamps(tmp_path: Path) -> None:
+@pytest.mark.asyncio
+async def test_status_websocket_serializes_runtime_timestamps(tmp_path: Path) -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     health = HealthRegistry()
     app = create_app(factory, health, frontend_dist=tmp_path / "missing")
+    route = next(item for item in app.routes if getattr(item, "path", None) == "/ws/status")
 
-    with TestClient(app) as client:
-        with client.websocket_connect("/ws/status") as websocket:
-            payload = websocket.receive_json()
+    class CaptureSocket:
+        payload = None
 
-    assert isinstance(payload["observed_at"], str)
+        async def accept(self) -> None:
+            return None
+
+        async def send_json(self, payload) -> None:
+            self.payload = payload
+            raise WebSocketDisconnect()
+
+    websocket = CaptureSocket()
+    await route.endpoint(websocket)
+    assert websocket.payload is not None
+    assert isinstance(websocket.payload["observed_at"], str)
+    await engine.dispose()
 
 
 @pytest.mark.asyncio
@@ -1065,3 +1079,20 @@ def test_canonical_decision_rounds_keeps_latest_successful_attempt_per_snapshot_
         (newest_success.id, "fixture-model"),
         (other_model.id, "other-model"),
     }
+
+
+@pytest.mark.asyncio
+async def test_ready_stays_available_for_degraded_dependencies() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    health = HealthRegistry()
+    await health.dependency("DATABASE", "READY")
+    await health.dependency("GPT", "DEGRADED", message="temporary provider issue")
+    app = create_app(factory, health)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/ready")
+    assert response.status_code == 200
+    assert response.json()["overall"] == "DEGRADED"
+    await engine.dispose()

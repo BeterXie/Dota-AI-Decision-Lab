@@ -252,6 +252,12 @@ class WeChatClawBotService:
     ) -> None:
         if not message.from_user_id:
             return
+        if account.user_id is not None and message.from_user_id != account.user_id:
+            logger.warning(
+                "wechat_clawbot_unauthorized_sender",
+                account_id=account.account_id,
+            )
+            return
         reply = await command_reply(
             session,
             self._store,

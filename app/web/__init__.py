@@ -9,6 +9,7 @@ from app.runtime.health import HealthRegistry
 from app.web.api import create_app as create_api_app
 from app.web.player_hero_recent import register_player_hero_recent_routes
 from app.web.server import WebServerWorker
+from app.web.spa import spa_file_response
 
 
 def create_app(
@@ -41,10 +42,7 @@ def create_app(
 
         @app.get("/{full_path:path}")
         async def frontend(full_path: str) -> FileResponse:
-            candidate = frontend_dist / full_path
-            if full_path and candidate.is_file():
-                return FileResponse(candidate)
-            return FileResponse(frontend_dist / "index.html")
+            return spa_file_response(frontend_dist, full_path)
 
     return app
 

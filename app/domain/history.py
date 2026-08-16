@@ -12,6 +12,7 @@ class HistoricalMap(BaseModel):
     event_name: str | None = None
     patch_id: str | None = None
     started_at: datetime
+    started_at_estimated: bool = False
     ended_at: datetime | None = None
     radiant_team_id: str | None = None
     dire_team_id: str | None = None

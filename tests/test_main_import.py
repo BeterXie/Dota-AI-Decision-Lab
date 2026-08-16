@@ -1,4 +1,5 @@
 import pytest
+from pydantic import ValidationError
 
 
 def test_main_module_imports() -> None:
@@ -206,3 +207,12 @@ def test_runtime_bind_assert_never_allows_api_token_to_unlock_non_loopback() -> 
 
     with pytest.raises(RuntimeError, match="HOST must be loopback"):
         _assert_bind_safety(settings)
+
+
+def test_unknown_dotenv_setting_is_rejected(tmp_path) -> None:
+    from app.config import Settings
+
+    env_file = tmp_path / ".env"
+    env_file.write_text("AI_TIMEOUT_SECNODS=10\n", encoding="utf-8")
+    with pytest.raises(ValidationError, match="ai_timeout_secnods"):
+        Settings(_env_file=env_file)

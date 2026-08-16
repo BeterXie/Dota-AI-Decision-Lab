@@ -26,8 +26,12 @@ class JobRepository:
         priority: int = 100,
         not_before: datetime | None = None,
         max_attempts: int = 8,
+        reopen_terminal: bool = False,
+        reopen_attempts: int = 3,
     ) -> UUID:
         due = not_before or utc_now()
+        if reopen_attempts < 1:
+            raise ValueError("reopen_attempts must be positive")
         dialect = session.get_bind().dialect.name
         if dialect == "postgresql":
             statement = (
@@ -48,14 +52,27 @@ class JobRepository:
             if created_id is not None:
                 return created_id
 
-        existing_id = await session.scalar(
-            select(DurableJobRecord.id).where(
+        existing = await session.scalar(
+            select(DurableJobRecord)
+            .where(
                 DurableJobRecord.job_type == job_type.value,
                 DurableJobRecord.dedupe_key == dedupe_key,
             )
+            .with_for_update()
         )
-        if existing_id is not None:
-            return existing_id
+        if existing is not None:
+            if reopen_terminal and existing.status == JobStatus.FAILED_TERMINAL.value:
+                existing.status = JobStatus.PENDING.value
+                existing.not_before = due
+                existing.completed_at = None
+                existing.locked_by = None
+                existing.locked_at = None
+                existing.last_error = None
+                existing.max_attempts = max(
+                    existing.max_attempts, existing.attempt_count + reopen_attempts
+                )
+                await session.flush()
+            return existing.id
 
         record = DurableJobRecord(
             job_type=job_type.value,

@@ -31,7 +31,7 @@ from app.providers.chat_commands import (
     render_decision_notification,
 )
 from app.providers.wechat_clawbot.client import WeChatClawBotClient
-from app.providers.wechat_clawbot.models import WeChatAccount
+from app.providers.wechat_clawbot.models import WeChatAccount, WeChatInboundMessage
 from app.providers.wechat_clawbot.service import WeChatClawBotService
 from app.providers.wechat_clawbot.storage import WeChatClawBotStore
 from app.snapshots.repository import SnapshotRepository
@@ -672,3 +672,66 @@ async def test_command_routes_odds_before_matches_and_help_lists_it(tmp_path: Pa
     assert matches_reply == "当前没有正在追踪的比赛。"
     assert "当前比赛赔率 — 查看当前直播比赛双方赔率" in help_text()
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_bound_wechat_account_ignores_unrelated_sender(tmp_path: Path) -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    sent: list[str] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        sent.append(str(request.url))
+        return httpx.Response(200, json={"ret": 0})
+
+    store = WeChatClawBotStore(tmp_path)
+    account = _account(tmp_path, user_id="owner-user")
+    store.save_account(account)
+    client = WeChatClawBotClient(
+        client=httpx.AsyncClient(
+            base_url="https://ilinkai.weixin.qq.com",
+            transport=httpx.MockTransport(handler),
+        )
+    )
+    service = WeChatClawBotService(
+        client=client,
+        store=store,
+        session_factory=factory,
+        jobs=JobRepository(),
+    )
+    async with factory() as session:
+        await service._handle_message(
+            session,
+            account,
+            WeChatInboundMessage(from_user_id="attacker-user", text="暂停通知"),
+        )
+    assert store.decision_notifications_enabled() is True
+    assert sent == []
+    await client.close()
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_wechat_qr_rejects_untrusted_server_redirect() -> None:
+    def handler(_: httpx.Request) -> httpx.Response:
+        return httpx.Response(
+            200,
+            json={
+                "status": "confirmed",
+                "bot_token": "token",
+                "ilink_bot_id": "bot",
+                "baseurl": "https://evil.example",
+            },
+        )
+
+    client = WeChatClawBotClient(
+        client=httpx.AsyncClient(
+            base_url="https://ilinkai.weixin.qq.com",
+            transport=httpx.MockTransport(handler),
+        )
+    )
+    with pytest.raises(Exception, match="untrusted WeChat service host"):
+        await client.poll_qr_status("qr")
+    await client.close()

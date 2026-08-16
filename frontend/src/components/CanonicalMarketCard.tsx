@@ -1,10 +1,10 @@
 import React from "react";
 import type { MapDetail, MapSummary } from "../api";
-import IntelligenceChart from "../Chart";
 import { useI18n } from "../i18n";
 import { marketChartZoomWindow } from "../utils/marketChart";
 import { formatOdds, getMatchDisplayPhase, marketStageDisplayLabel, primaryMarketPair } from "../utils/presentation";
 
+const IntelligenceChart = React.lazy(() => import("../Chart"));
 const teamAColor = "#7C9CFF";
 const teamBColor = "#9C82FF";
 
@@ -62,7 +62,13 @@ export function CanonicalMarketCard({ match }: { match: MapSummary | MapDetail }
           <span>{t("freshness")} <b>{age == null ? "—" : `${age.toFixed(1)}s`}</b></span>
           <span>{t("pairSkew")} <b>{match.market_quality?.pair_skew_seconds == null ? "—" : `${match.market_quality.pair_skew_seconds.toFixed(1)}s`}</b></span>
         </div>
-        <div className="player-market-chart">{dataA.length > 1 || dataB.length > 1 ? <IntelligenceChart option={option} /> : <span className="chart-empty">{t("waitingForOddsTrend")}</span>}</div>
+        <div className="player-market-chart">
+          {dataA.length > 1 || dataB.length > 1 ? (
+            <React.Suspense fallback={<span className="chart-empty">{t("waitingForOddsTrend")}</span>}>
+              <IntelligenceChart option={option} />
+            </React.Suspense>
+          ) : <span className="chart-empty">{t("waitingForOddsTrend")}</span>}
+        </div>
       </> : <div className="empty-rail-msg">{t("marketUnavailable")}</div>}
     </section>
   );

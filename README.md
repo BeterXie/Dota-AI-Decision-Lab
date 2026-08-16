@@ -174,3 +174,11 @@ if ($LASTEXITCODE -ne 0) { throw "Shadow runtime audit failed with exit code $LA
 The implementation contract is defined by `AGENTS.md`, `docs/ARCHITECTURE.md`, and the normative addendum `docs/MAP_SIDE_IDENTITY.md`. Provider data is raw-first and append-oriented; unknown values remain unknown; historical facts obey `first_usable_at` and `knowledge_cutoff`; snapshots are immutable; every AI receives the same canonical `snapshot_hash`; and unsafe live synchronization degrades to a valid lower decision mode. RayBet pairs must pass strict identity/freshness/skew checks, DLTV LIVE_BASIC freshness is derived from the oldest required field's latest explicit raw observation rather than socket receipt alone, and closing/result evidence remains explicit and auditable.
 
 Map-side identity is an explicit correctness gate: canonical Team A / Team B ordering is not Radiant / Dire ordering, and DLTV `first_team` is never treated as Radiant by position. POST_DRAFT or LIVE decision inputs may bind R.O.S.H., roster, Player×Hero, or live side-relative features to Team A / Team B only after the immutable snapshot contains verified Radiant / Dire canonical team identity. See `docs/MAP_SIDE_IDENTITY.md` for the evidence, temporal, degradation, UI, and regression requirements.
+
+## Local security notes
+
+- The application is loopback-only until authenticated HTTP/WebSocket access exists. Do not expose it through a reverse proxy or non-loopback bind.
+- WeChat ClawBot credentials are stored locally in `.runtime/wechat-clawbot/accounts.json`. They are plaintext application credentials protected with owner-only POSIX permissions / a restricted Windows DACL on a best-effort basis; they are **not encrypted at rest**. Treat compromise of the local OS account as compromise of the bot token and rotate/re-login after a machine or account compromise.
+- `/ready` is an availability signal: `ACTION_REQUIRED` returns 503, while `DEGRADED` remains 200 so the local dashboard and diagnostics stay reachable during recoverable provider failures. Dependency detail is present in the response body.
+- `.env` keys are validated strictly. Unknown keys fail startup rather than being silently ignored.
+

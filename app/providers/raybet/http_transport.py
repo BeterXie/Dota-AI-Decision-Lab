@@ -42,12 +42,12 @@ class CurlRayBetHttpClient:
             except OSError, TimeoutError:
                 if attempt + 1 >= self._max_attempts:
                     raise
-                await asyncio.sleep(0.25 * (attempt + 1) + uniform(0.0, 0.15))
+                await asyncio.sleep(0.25 * (attempt + 1) + uniform(0.0, 0.15))  # noqa: S311 - retry jitter is not security-sensitive randomness
                 continue
             if response.status_code not in (403, 429, 500, 502, 503, 504, 204):
                 break
             if attempt + 1 < self._max_attempts:
-                await asyncio.sleep(0.25 * (attempt + 1) + uniform(0.0, 0.15))
+                await asyncio.sleep(0.25 * (attempt + 1) + uniform(0.0, 0.15))  # noqa: S311 - retry jitter is not security-sensitive randomness
         if response is None:
             raise RuntimeError("RayBet curl request produced no response")
         received = datetime.now(UTC)

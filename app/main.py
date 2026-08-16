@@ -325,7 +325,7 @@ async def run() -> None:
     async with session_factory() as session, session.begin():
         await reconciliation.run(session, now=datetime.now(UTC))
 
-    hub = EventHub()
+    hub = EventHub(on_drop=metrics.event_hub_dropped.inc)
     domain_dispatcher = DomainEventDispatcher(
         jobs,
         ai_experiments=tuple(ai_experiment_key(item.name, item.model) for item in ai_providers),
@@ -614,6 +614,7 @@ async def run() -> None:
         live_state_max_age_seconds=settings.live_state_max_age_seconds,
         live_market_max_age_seconds=settings.live_market_max_age_seconds,
         market_max_pair_skew_seconds=settings.market_max_pair_skew_seconds,
+        ai_min_game_time_seconds=settings.ai_min_game_time_seconds,
     )
     workers.append(
         WebServerWorker(
@@ -842,8 +843,8 @@ def _ai_providers(settings: Settings):
 def _email_notifications(settings: Settings, *, session_factory, jobs):
     if not settings.email_notifications_enabled or settings.email_configuration_errors:
         return None
-    assert settings.resend_api_key is not None
-    assert settings.resend_from is not None
+    if settings.resend_api_key is None or settings.resend_from is None:
+        raise RuntimeError("validated email configuration is incomplete")
     sender = ResendEmailSender(
         api_key=settings.resend_api_key.get_secret_value(),
         base_url=settings.resend_base_url,

@@ -14,6 +14,8 @@ from app.providers.qq_bot.models import QQBotAccount, QQContact
 
 
 class QQBotStore(LocalStateStore):
+    _log_channel = "qq_bot"
+
     def __init__(self, root: str | Path) -> None:
         super().__init__(root)
         self._accounts_path = self._root / "accounts.json"
