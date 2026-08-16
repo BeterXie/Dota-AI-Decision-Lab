@@ -9,6 +9,7 @@ export interface AuthSessionState {
   enabled: boolean;
   authenticated: boolean;
   user: AuthUser | null;
+  entitlements: string[];
 }
 
 export interface LoginCodeRequestResult {
