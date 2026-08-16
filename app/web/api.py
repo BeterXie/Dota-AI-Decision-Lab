@@ -44,6 +44,7 @@ from app.models import (
 from app.runtime.health import HealthRegistry
 from app.time import elapsed_seconds, ensure_utc
 from app.web.review import create_review_router
+from app.web.spa import spa_file_response
 
 
 def create_app(
@@ -320,10 +321,7 @@ def create_app(
 
         @app.get("/{full_path:path}")
         async def frontend(full_path: str) -> FileResponse:
-            candidate = frontend_dist / full_path
-            if full_path and candidate.is_file():
-                return FileResponse(candidate)
-            return FileResponse(frontend_dist / "index.html")
+            return spa_file_response(frontend_dist, full_path)
 
     return app
 
@@ -1022,6 +1020,7 @@ async def _map_payload(
                 select(DecisionSnapshotRecord)
                 .where(DecisionSnapshotRecord.canonical_map_id == canonical_map.id)
                 .order_by(DecisionSnapshotRecord.decision_at.desc())
+                .limit(200)
             )
         ).all()
     )

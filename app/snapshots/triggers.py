@@ -44,7 +44,7 @@ async def record_crossed_checkpoints(
                     event_type=DomainEventType.DECISION_CHECKPOINT_DUE,
                     aggregate_type="canonical_map",
                     aggregate_id=str(canonical_map_id),
-                    dedupe_key=f"checkpoint-real:{canonical_map_id}:{minute}",
+                    dedupe_key=f"checkpoint:{canonical_map_id}:{minute}",
                     payload={
                         "canonical_map_id": str(canonical_map_id),
                         "decision_at": observed_at.isoformat(),

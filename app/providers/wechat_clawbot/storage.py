@@ -2,11 +2,16 @@ import getpass
 import hashlib
 import json
 import os
+import shutil
 import subprocess
 from datetime import UTC, datetime
 from pathlib import Path
 
+import structlog
+
 from app.providers.wechat_clawbot.models import WeChatAccount
+
+logger = structlog.get_logger()
 
 
 class WeChatClawBotStore:
@@ -36,7 +41,8 @@ class WeChatClawBotStore:
         for raw in self._read_json_list(self._accounts_path):
             try:
                 result.append(WeChatAccount.model_validate(raw))
-            except Exception:
+            except Exception as exc:
+                logger.warning("wechat_clawbot_invalid_account_state", error=str(exc))
                 continue
         return result
 
@@ -66,8 +72,8 @@ class WeChatClawBotStore:
             try:
                 if path.read_text(encoding="utf-8").find(f'"{account_id}"') >= 0:
                     path.unlink()
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.warning("wechat_clawbot_cursor_cleanup_failed", error=str(exc))
 
     def cursor(self, account_id: str) -> str:
         path = self._cursor_path(account_id)
@@ -106,7 +112,7 @@ class WeChatClawBotStore:
         return raw if isinstance(raw, dict) else {}
 
     def _cursor_path(self, account_id: str) -> Path:
-        digest = hashlib.sha1(account_id.encode("utf-8")).hexdigest()[:16]
+        digest = hashlib.sha256(account_id.encode("utf-8")).hexdigest()[:16]
         return self._cursor_dir / f"{digest}.json"
 
     def _read_json_list(self, path: Path) -> list[dict]:
@@ -147,10 +153,13 @@ class WeChatClawBotStore:
                 WeChatClawBotStore._restrict_windows_path(path, directory=True)
             else:
                 os.chmod(path, 0o700)
-        except Exception:
-            # State storage must not become unavailable because a platform
-            # cannot express POSIX-style permissions.
-            pass
+        except Exception as exc:
+            # Keep the local runtime usable, but make permission hardening failure visible.
+            logger.warning(
+                "wechat_clawbot_directory_permission_hardening_failed",
+                path=str(path),
+                error=str(exc),
+            )
 
     @staticmethod
     def _restrict_file_permissions(path: Path) -> None:
@@ -167,8 +176,10 @@ class WeChatClawBotStore:
                 WeChatClawBotStore._restrict_windows_path(path, directory=False)
             else:
                 os.chmod(path, 0o600)
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.warning(
+                "wechat_clawbot_file_permission_hardening_failed", path=str(path), error=str(exc)
+            )
 
     @staticmethod
     def _restrict_windows_path(path: Path, *, directory: bool) -> None:
@@ -177,8 +188,11 @@ class WeChatClawBotStore:
         user = os.environ.get("USERNAME") or getpass.getuser()
         permission = "(OI)(CI)F" if directory else "(F)"
         creation_flags = getattr(subprocess, "CREATE_NO_WINDOW", 0)
-        subprocess.run(
-            ["icacls", str(path), "/inheritance:r", "/grant:r", f"{user}:{permission}"],
+        executable = shutil.which("icacls")
+        if executable is None:
+            raise RuntimeError("icacls is unavailable")
+        subprocess.run(  # noqa: S603 - no shell; executable is resolved and args are structured
+            [executable, str(path), "/inheritance:r", "/grant:r", f"{user}:{permission}"],
             check=False,
             capture_output=True,
             creationflags=creation_flags,

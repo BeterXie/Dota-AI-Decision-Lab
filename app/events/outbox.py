@@ -32,7 +32,8 @@ class EventRepository:
             event_id = await session.scalar(statement)
             if event_id is not None:
                 record = await session.get(DomainEventRecord, event_id)
-                assert record is not None
+                if record is None:
+                    raise RuntimeError("inserted domain event could not be reloaded")
                 for topic in topics:
                     session.add(
                         OutboxEventRecord(

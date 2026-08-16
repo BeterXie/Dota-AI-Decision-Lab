@@ -2,6 +2,7 @@ import base64
 import hashlib
 import secrets
 from typing import Any
+from urllib.parse import urlsplit
 from uuid import uuid4
 
 import httpx
@@ -47,6 +48,9 @@ class WeChatClawBotClient:
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
+        self._trust_host = urlsplit(self._base_url).hostname
+        if self._trust_host is None:
+            raise ValueError("WeChat base_url must include a hostname")
         self._bot_agent = _sanitize_bot_agent(bot_agent)
         self._timeout_seconds = timeout_seconds
         self._long_poll_timeout_seconds = long_poll_timeout_seconds
@@ -91,7 +95,7 @@ class WeChatClawBotClient:
         )
         if verify_code:
             path += f"&verify_code={httpx.QueryParams({'verify_code': verify_code})['verify_code']}"
-        request_base_url = (base_url or self._base_url).rstrip("/")
+        request_base_url = self._validate_service_base_url(base_url or self._base_url)
         client = self._client
         if self._owns_client and request_base_url != self._base_url:
             client = httpx.AsyncClient(
@@ -112,13 +116,20 @@ class WeChatClawBotClient:
         raw = response.json()
         if not isinstance(raw, dict):
             raise WeChatClawBotError("QR status response must be a JSON object")
+        server_base_url = _optional_str(raw.get("baseurl"))
+        if server_base_url is not None:
+            server_base_url = self._validate_service_base_url(server_base_url)
+        redirect_host = _optional_str(raw.get("redirect_host"))
+        if redirect_host is not None:
+            redirect_url = self._validate_service_base_url(f"https://{redirect_host}")
+            redirect_host = urlsplit(redirect_url).hostname
         return WeChatQrStatus(
             status=str(raw.get("status") or "wait"),
             bot_token=_optional_str(raw.get("bot_token")),
             account_id=_optional_str(raw.get("ilink_bot_id")),
-            base_url=_optional_str(raw.get("baseurl")),
+            base_url=server_base_url,
             user_id=_optional_str(raw.get("ilink_user_id")),
-            redirect_host=_optional_str(raw.get("redirect_host")),
+            redirect_host=redirect_host,
         )
 
     async def notify_start(self, account: WeChatAccount) -> None:
@@ -228,7 +239,7 @@ class WeChatClawBotClient:
         base_url: str | None = None,
         request_timeout_seconds: float,
     ) -> dict[str, Any]:
-        request_base_url = (base_url or self._base_url).rstrip("/")
+        request_base_url = self._validate_service_base_url(base_url or self._base_url)
         client = self._client
         if self._owns_client and request_base_url != self._base_url:
             client = httpx.AsyncClient(
@@ -251,6 +262,33 @@ class WeChatClawBotClient:
         if not isinstance(raw, dict):
             raise WeChatClawBotError("WeChat API response must be a JSON object")
         return raw
+
+    def _validate_service_base_url(self, value: str) -> str:
+        parsed = urlsplit(value.rstrip("/"))
+        configured = urlsplit(self._base_url)
+        if (
+            parsed.scheme != configured.scheme
+            or parsed.hostname is None
+            or parsed.username is not None
+            or parsed.password is not None
+            or parsed.query
+            or parsed.fragment
+        ):
+            raise WeChatClawBotError("untrusted WeChat service URL")
+        configured_host = self._trust_host.casefold()
+        candidate_host = parsed.hostname.casefold()
+        labels = configured_host.split(".")
+        trust_suffix = ".".join(labels[-3:]) if len(labels) >= 3 else configured_host
+        if candidate_host != configured_host and not candidate_host.endswith(f".{trust_suffix}"):
+            raise WeChatClawBotError("untrusted WeChat service host")
+        if parsed.port != configured.port:
+            default_port = 443 if parsed.scheme == "https" else 80
+            if parsed.port not in {None, default_port} or configured.port not in {
+                None,
+                default_port,
+            }:
+                raise WeChatClawBotError("untrusted WeChat service port")
+        return value.rstrip("/")
 
     def _common_headers(self) -> dict[str, str]:
         return {

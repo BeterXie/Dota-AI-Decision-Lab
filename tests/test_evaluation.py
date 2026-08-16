@@ -290,3 +290,59 @@ async def test_conflicting_settlement_has_no_winner() -> None:
         assert record.winner_team_id is None
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_missing_future_odds_can_upgrade_to_captured() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    decision_at = datetime(2026, 8, 16, tzinfo=UTC)
+    due_at = decision_at + timedelta(seconds=30)
+    service = FutureOddsService(JobRepository())
+    async with factory() as session, session.begin():
+        snapshot = await SnapshotRepository().persist(
+            session,
+            canonical_map_id=None,
+            decision_at=decision_at,
+            mode="PREMATCH",
+            identity={},
+            market={"observations": [{"odds_id": 10}, {"odds_id": 20}]},
+            draft=None,
+            history={},
+            live=None,
+            quality={"eligible": True},
+        )
+        missing = await service.capture(
+            session,
+            snapshot_id=snapshot.snapshot_id,
+            horizon_seconds=30,
+            due_at=due_at,
+            observed_at=due_at + timedelta(seconds=1),
+        )
+        assert missing.status == "MISSING"
+        missing_id = missing.id
+        for odds_id, price in ((10, "1.90"), (20, "2.10")):
+            session.add(
+                OddsObservationRecord(
+                    provider_match_id=1,
+                    odds_id=odds_id,
+                    price=Decimal(price),
+                    implied_probability=1 / float(price),
+                    received_at=due_at + timedelta(seconds=2),
+                    raw_event_id=uuid4(),
+                )
+            )
+        captured = await service.capture(
+            session,
+            snapshot_id=snapshot.snapshot_id,
+            horizon_seconds=30,
+            due_at=due_at,
+            observed_at=due_at + timedelta(seconds=5),
+        )
+        assert captured.id == missing_id
+        assert captured.status == "CAPTURED"
+        assert captured.odds_a == Decimal("1.90")
+        assert captured.odds_b == Decimal("2.10")
+    await engine.dispose()

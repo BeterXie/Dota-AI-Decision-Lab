@@ -1,12 +1,15 @@
 import asyncio
 from collections.abc import Awaitable, Callable
 
+import structlog
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.domain.jobs import DurableJob, JobType, LeaseOwnershipLost
 from app.jobs.repository import JobRepository
 
 JobHandler = Callable[[DurableJob], Awaitable[None]]
+
+logger = structlog.get_logger()
 
 
 class JobRunner:
@@ -50,7 +53,20 @@ class JobRunner:
                 except TimeoutError:
                     pass
                 continue
-            await self._execute(job, worker_id)
+            try:
+                await self._execute(job, worker_id)
+            except Exception as exc:
+                logger.exception(
+                    "durable_job_worker_error",
+                    worker_id=worker_id,
+                    job_id=str(job.id),
+                    job_type=job.job_type.value,
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+                try:
+                    await asyncio.wait_for(self._stop.wait(), timeout=self._poll_seconds)
+                except TimeoutError:
+                    pass
 
     async def _claim_one(self, worker_id: str) -> DurableJob | None:
         async with self._session_factory() as session, session.begin():
@@ -76,18 +92,21 @@ class JobRunner:
         handler_task = asyncio.create_task(handler(job))
         renewal_task = asyncio.create_task(self._renew_lease(job, renewal_stop, owner_id))
         lease_lost = False
+        renewal_error: Exception | None = None
         try:
             done, _pending = await asyncio.wait(
                 (handler_task, renewal_task),
                 return_when=asyncio.FIRST_COMPLETED,
             )
             if renewal_task in done:
-                # _renew_lease only ends by raising LeaseOwnershipLost: the
-                # job was reclaimed by reconciliation and belongs to another
-                # worker now. Stop the handler immediately instead of letting
-                # two workers execute the same job side by side.
-                lease_lost = True
-                handler_task.cancel()
+                try:
+                    renewal_task.result()
+                except LeaseOwnershipLost:
+                    lease_lost = True
+                except Exception as exc:
+                    renewal_error = exc
+                if lease_lost or renewal_error is not None:
+                    handler_task.cancel()
         except asyncio.CancelledError:
             handler_task.cancel()
             if not lease_lost:
@@ -95,10 +114,31 @@ class JobRunner:
             raise
         finally:
             renewal_stop.set()
+            if not renewal_task.done():
+                try:
+                    await renewal_task
+                except LeaseOwnershipLost:
+                    lease_lost = True
+                except Exception as exc:
+                    renewal_error = renewal_error or exc
+
+        if renewal_error is not None:
             try:
-                await renewal_task
-            except LeaseOwnershipLost:
-                lease_lost = True
+                await handler_task
+            except asyncio.CancelledError:
+                pass
+            except Exception as exc:
+                logger.warning(
+                    "durable_job_handler_error_after_lease_failure",
+                    job_id=str(job.id),
+                    error=f"{type(exc).__name__}: {exc}",
+                )
+            await self._mark_failed(
+                job,
+                f"lease renewal failed: {type(renewal_error).__name__}: {renewal_error}",
+                owner_id,
+            )
+            return
         try:
             await handler_task
         except asyncio.CancelledError:
@@ -111,8 +151,6 @@ class JobRunner:
             await self._mark_failed(job, f"{type(exc).__name__}: {exc}", owner_id)
             return
         if lease_lost:
-            # The job belongs to another worker now; this worker must not
-            # mark it succeeded or failed.
             return
         async with self._session_factory() as session, session.begin():
             await self._repository.succeed(

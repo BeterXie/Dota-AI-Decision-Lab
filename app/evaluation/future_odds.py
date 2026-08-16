@@ -75,7 +75,7 @@ class FutureOddsService:
                 DecisionFutureOdds.due_at == due_at,
             )
         )
-        if existing is not None:
+        if existing is not None and existing.status == "CAPTURED":
             return existing
         snapshot = await session.get(DecisionSnapshotRecord, snapshot_id)
         if snapshot is None:
@@ -100,22 +100,30 @@ class FutureOddsService:
                 captured.append(observation)
         captured.sort(key=lambda item: odds_ids.index(item.odds_id))
         complete = len(captured) == 2
-        record = DecisionFutureOdds(
-            decision_snapshot_id=snapshot_id,
-            capture_type=FutureOddsCaptureType.TIME_HORIZON,
-            horizon_seconds=horizon_seconds,
-            triggered_at=due_at,
-            due_at=due_at,
-            observed_at=(max(item.received_at for item in captured) if complete else observed_at),
-            odds_a=captured[0].price if complete else None,
-            odds_b=captured[1].price if complete else None,
-            market_type=_market_value(snapshot, "market_type"),
-            match_stage=_market_value(snapshot, "match_stage"),
-            market_status=_market_status(snapshot),
-            capture_policy_version="time-horizon-v1",
-            status="CAPTURED" if complete else "MISSING",
-        )
-        session.add(record)
+        values = {
+            "triggered_at": due_at,
+            "observed_at": max(item.received_at for item in captured) if complete else observed_at,
+            "odds_a": captured[0].price if complete else None,
+            "odds_b": captured[1].price if complete else None,
+            "market_type": _market_value(snapshot, "market_type"),
+            "match_stage": _market_value(snapshot, "match_stage"),
+            "market_status": _market_status(snapshot),
+            "capture_policy_version": "time-horizon-v1",
+            "status": "CAPTURED" if complete else "MISSING",
+        }
+        if existing is None:
+            record = DecisionFutureOdds(
+                decision_snapshot_id=snapshot_id,
+                capture_type=FutureOddsCaptureType.TIME_HORIZON,
+                horizon_seconds=horizon_seconds,
+                due_at=due_at,
+                **values,
+            )
+            session.add(record)
+        else:
+            record = existing
+            for field, value in values.items():
+                setattr(record, field, value)
         await session.flush()
         return record
 
@@ -132,7 +140,7 @@ class FutureOddsService:
                 DecisionFutureOdds.capture_type == FutureOddsCaptureType.CLOSING,
             )
         )
-        if existing is not None:
+        if existing is not None and existing.status == "CAPTURED":
             return existing
         snapshot = await session.get(DecisionSnapshotRecord, snapshot_id)
         if snapshot is None:
@@ -175,20 +183,16 @@ class FutureOddsService:
             if complete and captured[0].normalized_status == captured[1].normalized_status
             else "UNKNOWN"
         )
-        record = DecisionFutureOdds(
-            decision_snapshot_id=snapshot_id,
-            capture_type=FutureOddsCaptureType.CLOSING,
-            horizon_seconds=None,
-            triggered_at=triggered_at,
-            due_at=triggered_at,
-            observed_at=(max(item.received_at for item in captured) if complete else triggered_at),
-            odds_a=captured[0].price if complete else None,
-            odds_b=captured[1].price if complete else None,
-            market_type=market_type if isinstance(market_type, str) else None,
-            match_stage=match_stage if isinstance(match_stage, str) else None,
-            market_status=status,
-            capture_policy_version=CLOSING_POLICY_VERSION,
-            pair_quality=(
+        values = {
+            "triggered_at": triggered_at,
+            "observed_at": max(item.received_at for item in captured) if complete else triggered_at,
+            "odds_a": captured[0].price if complete else None,
+            "odds_b": captured[1].price if complete else None,
+            "market_type": market_type if isinstance(market_type, str) else None,
+            "match_stage": match_stage if isinstance(match_stage, str) else None,
+            "market_status": status,
+            "capture_policy_version": CLOSING_POLICY_VERSION,
+            "pair_quality": (
                 quality.model_dump(mode="json")
                 if quality is not None
                 else {
@@ -197,10 +201,22 @@ class FutureOddsService:
                     "warnings": [],
                 }
             ),
-            pair_skew_seconds=quality.pair_skew_seconds if quality is not None else None,
-            status="CAPTURED" if complete else "MISSING",
-        )
-        session.add(record)
+            "pair_skew_seconds": quality.pair_skew_seconds if quality is not None else None,
+            "status": "CAPTURED" if complete else "MISSING",
+        }
+        if existing is None:
+            record = DecisionFutureOdds(
+                decision_snapshot_id=snapshot_id,
+                capture_type=FutureOddsCaptureType.CLOSING,
+                horizon_seconds=None,
+                due_at=triggered_at,
+                **values,
+            )
+            session.add(record)
+        else:
+            record = existing
+            for field, value in values.items():
+                setattr(record, field, value)
         await session.flush()
         return record
 

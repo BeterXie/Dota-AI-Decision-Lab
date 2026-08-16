@@ -58,7 +58,7 @@ class RayBetHttpClient:
                 break
             if attempt + 1 < self._max_attempts:
                 delay = _retry_after_seconds(response.headers.get("retry-after"))
-                await asyncio.sleep(delay + uniform(0.0, 0.15))
+                await asyncio.sleep(delay + uniform(0.0, 0.15))  # noqa: S311 - retry jitter is not security-sensitive randomness
         if response is None:
             raise RuntimeError("RayBet request produced no response")
         received = datetime.now(UTC)
