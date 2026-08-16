@@ -16,9 +16,24 @@ if (!connectorIndex) {
   console.error("QQ_BOT_CONNECTOR_INDEX is required");
   process.exit(2);
 }
-const { qrConnect } = await import(pathToFileURL(connectorIndex).href);
+const { startQrConnect } = await import(pathToFileURL(connectorIndex).href);
 
-const credentials = await qrConnect({ source: "" });
+const credentials = await new Promise((resolve, reject) => {
+  startQrConnect(
+    {
+      onSuccess: resolve,
+      onFailure: reject,
+      onQrDisplayed: (url) => {
+        console.log(`📱 绑定链接: ${url}`);
+        console.log("   也可直接扫描终端中的二维码。");
+      },
+      onQrExpired: () => {
+        console.log("二维码已过期，正在刷新…");
+      },
+    },
+    { displayQrCodeToConsole: true, source: "" },
+  );
+});
 if (!Array.isArray(credentials) || credentials.length === 0) {
   console.error("QR login completed without credentials");
   process.exit(1);
