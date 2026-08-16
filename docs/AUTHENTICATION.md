@@ -1,12 +1,24 @@
 # Email Authentication Contract
 
-Dota AI Decision Lab uses passwordless email authentication as the identity foundation for user-scoped notification bindings. This document is normative for the current authentication implementation.
+Dota AI Decision Lab uses passwordless email authentication as the identity foundation for user-scoped premium access and notification bindings. Authentication answers **who the user is**; entitlements answer **what that user may access**.
 
-## Scope
+## Access model
 
-Authentication protects browser access to business APIs and WebSockets. It does **not** enable remote deployment by itself. The runtime remains loopback-only; TLS, reverse-proxy trust, origin policy, cookie security behind HTTPS, and remote deployment hardening must be designed as a separate explicit mode before non-loopback serving is allowed.
+Ordinary match browsing is public. A visitor does not need an account to view match identity, teams, draft/lineup information, market data, live state, or ordinary historical match context.
 
-`/health`, `/ready`, and `/api/auth/*` remain reachable before login. When authentication is enabled, other `/api/*` routes, `/metrics`, and WebSocket connections require a valid session.
+Authentication is required for account-scoped or operational surfaces. Premium AI intelligence requires both a valid authenticated session and the `ai_decisions` entitlement. Real-time delivery channels use the separate `realtime_notifications` entitlement so notification access can evolve independently from page access.
+
+The current HTTP policy is:
+
+- `PUBLIC`: `/health`, `/ready`, `/api/auth/*`, `/api/runtime`, `/api/matches`, ordinary `/api/maps/{id}` and other ordinary match-data APIs.
+- `AUTHENTICATED`: `/metrics`, `/api/jobs/summary`, and future `/api/account/*` routes.
+- `ENTITLED(ai_decisions)`: `/api/maps/{id}/ai-decisions`, `/api/snapshots/*`, and `/api/review/*`.
+
+`/ws/status` remains public because it carries ordinary live-refresh events used by the public match experience. Any future private WebSocket path must require authentication and, where appropriate, an explicit entitlement.
+
+Public match responses must never contain the premium decision payload. They may expose non-sensitive analysis readiness metadata such as whether a decision snapshot exists, when analysis last updated, and how many models completed. They must not expose BUY/PASS direction, confidence, fair probability, stake, primary reasons, counterarguments, frozen AI input payloads, or decision-linked future-odds captures.
+
+Authentication does **not** enable remote deployment by itself. The runtime remains loopback-only; TLS, reverse-proxy trust, origin policy, cookie security behind HTTPS, and remote deployment hardening must be designed as a separate explicit mode before non-loopback serving is allowed.
 
 ## Passwordless login flow
 
@@ -54,17 +66,23 @@ Relevant settings:
 
 An enabled but incomplete authentication configuration is a startup error rather than a partially working mode.
 
-## Notification identity boundary
+## Entitlements and notification identity
 
-Authentication introduces the stable `user_accounts.id` that future notification bindings use. Infrastructure credentials remain installation-scoped: the Resend API key, QQ Bot AppID/AppSecret, and WeChat ClawBot bot credentials belong to the runtime installation and must never be copied into a user record.
+`user_accounts.id` is the stable identity used by `user_entitlements` and future notification bindings. Infrastructure credentials remain installation-scoped: the Resend API key, QQ Bot AppID/AppSecret, and WeChat ClawBot bot credentials belong to the runtime installation and must never be copied into a user record.
 
-User-scoped bindings instead point from a user to a destination identity, for example:
+Current premium entitlement names are:
 
-- Email destination: verified email address.
-- QQ destination: C2C OpenID (and, if intentionally supported later, an explicitly authorized group target).
-- WeChat destination: verified direct-chat user identity associated with the ClawBot account.
+- `ai_decisions`: access to live/historical AI decision intelligence.
+- `realtime_notifications`: eligibility for paid real-time notification delivery once Notification Center bindings are introduced.
 
-A future Notification Center should read and mutate those user bindings using the authenticated `user_accounts.id`. It must not infer ownership merely because a bot has previously observed a chat contact.
+Development grants are explicit. After a user has verified an email and created an account, use the local CLI instead of weakening route checks:
+
+```powershell
+python -m tools.entitlements grant --email owner@example.com
+python -m tools.entitlements revoke --email owner@example.com
+```
+
+A future Notification Center should point from the authenticated `user_accounts.id` to verified destination identities such as email, QQ C2C OpenID, WeChat direct-chat identity, Telegram, Discord, push, or webhook destinations. A bot observing a chat contact is not proof that the logged-in user owns that destination.
 
 ## Data retention and secrets
 
@@ -74,7 +92,7 @@ The database does not contain plaintext login codes or plaintext session bearer 
 
 ## Verification requirements
 
-Changes to authentication must retain tests for:
+Changes to authentication or premium authorization must retain tests for:
 
 - email normalization and malformed-address rejection;
 - resend cooldown and challenge replacement;
@@ -82,7 +100,11 @@ Changes to authentication must retain tests for:
 - successful first-user creation and repeat-login identity reuse;
 - session authentication, expiry/revocation behavior, and logout;
 - `HttpOnly` + `SameSite=Strict` cookie attributes;
-- unauthenticated HTTP business-route rejection;
-- unauthenticated WebSocket rejection;
-- authentication-disabled backward compatibility;
+- anonymous ordinary match access;
+- `401` for unauthenticated premium access;
+- `403` for authenticated users missing a required entitlement;
+- successful premium access only with an active entitlement;
+- expired/future/revoked entitlement handling;
+- public match payload redaction of AI decisions;
+- authentication-disabled backward compatibility for public APIs while premium APIs remain closed;
 - Alembic upgrade/check from a clean PostgreSQL database.
