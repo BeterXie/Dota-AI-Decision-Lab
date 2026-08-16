@@ -39,7 +39,8 @@ class PublicMatchDataBoundaryMiddleware(BaseHTTPMiddleware):
 
         if isinstance(payload, list):
             sanitized = [
-                _sanitize_match_payload(item) if isinstance(item, dict) else item for item in payload
+                _sanitize_match_payload(item) if isinstance(item, dict) else item
+                for item in payload
             ]
         elif isinstance(payload, dict):
             sanitized = _sanitize_match_payload(payload)
@@ -78,7 +79,15 @@ def _sanitize_match_payload(payload: dict) -> dict:
     if isinstance(snapshot, dict):
         snapshot_summary = {
             key: snapshot.get(key)
-            for key in ("id", "decision_at", "created_at", "mode")
+            for key in (
+                "id",
+                "decision_at",
+                "created_at",
+                "mode",
+                "market_quality",
+                "history_coverage",
+                "quality",
+            )
             if key in snapshot
         }
 
