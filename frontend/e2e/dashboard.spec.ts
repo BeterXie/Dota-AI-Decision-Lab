@@ -62,11 +62,12 @@ const match = {
 
 const detail = { ...match, market_timeline: [], live_timeline: [], snapshot_payload: { history: {}, quality: {} }, future_odds: [], result: null, result_evidence: [] };
 const jobs = { by_status: { COMPLETED: 18 }, by_type: [], oldest_pending_at: null, recent_failures: [] };
+const authSession = { enabled: false, authenticated: false, user: null };
 
 async function mockApi(page: Page) {
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
-    const payload = path === "/api/runtime" ? runtime : path === "/api/matches" ? [match] : path === `/api/maps/${mapId}` ? detail : path === "/api/jobs/summary" ? jobs : null;
+    const payload = path === "/api/auth/session" ? authSession : path === "/api/runtime" ? runtime : path === "/api/matches" ? [match] : path === `/api/maps/${mapId}` ? detail : path === "/api/jobs/summary" ? jobs : null;
     await route.fulfill({ status: payload === null ? 404 : 200, contentType: "application/json", body: JSON.stringify(payload) });
   });
 }
