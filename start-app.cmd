@@ -26,6 +26,7 @@ if not defined APP_PORT set "APP_PORT=8000"
 rem ---- 2) stop this project's running instance -------------------------------
 powershell -NoProfile -Command "$pidFile = '.runtime\app.pid'; if (Test-Path $pidFile) { $old = (Get-Content $pidFile -ErrorAction SilentlyContinue | Select-Object -First 1); if ($old -match '^\d+$') { $proc = Get-Process -Id ([int]$old) -ErrorAction SilentlyContinue; if ($proc) { Stop-Process -Id $proc.Id -Force -ErrorAction SilentlyContinue } }; Remove-Item $pidFile -Force -ErrorAction SilentlyContinue }"
 powershell -NoProfile -Command "$dir = $env:APP_DIR.TrimEnd('\'); Get-CimInstance Win32_Process -Filter \"Name='python.exe'\" | Where-Object { $_.CommandLine -like '*app.main*' -and $_.CommandLine -like ('*' + $dir + '*') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
+powershell -NoProfile -Command "$dir = $env:APP_DIR.TrimEnd('\'); Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | Where-Object { $_.CommandLine -like '*qq_bot_bridge.mjs*' -and $_.CommandLine -like ('*' + $dir + '*') } | ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"
 powershell -NoProfile -Command "Start-Sleep -Seconds 3"
 
 rem ---- 3) rotate previous logs (after the old instance released them) ----------
