@@ -54,6 +54,8 @@ export const AppShell: React.FC<AppShellProps> = ({ runtime, jobs, matches, sele
   const pendingIdentity = activeMatch?.identity_status === "PENDING_MAP_IDENTITY";
   const waitingForDetail = Boolean(selectedMatch?.canonical_map_id && detailLoading && !detail);
   const publicAi = (activeMatch as (MapSummary & { ai_access?: PublicAiSummary }) | undefined)?.ai_access;
+  const checkpointDecisions = (activeMatch as MapDetail | undefined)?.checkpoint_decisions ?? [];
+  const aiDecisions = checkpointDecisions.length > 0 ? checkpointDecisions : activeMatch?.decisions ?? [];
 
   React.useEffect(() => {
     if (selectedMapId != null && typeof mainRef.current?.scrollTo === "function") {
@@ -81,7 +83,7 @@ export const AppShell: React.FC<AppShellProps> = ({ runtime, jobs, matches, sele
                 <>
                   <DecisionStatusBanner match={activeMatch} />
                   <PlayerAiDecisionPanel
-                    decisions={(activeMatch as MapDetail).checkpoint_decisions ?? activeMatch.decisions ?? []}
+                    decisions={aiDecisions}
                     currentSnapshotId={activeMatch.latest_snapshot?.id}
                     access={aiAccess}
                     analysisAvailable={publicAi?.analysis_available ?? Boolean(activeMatch.latest_snapshot)}
