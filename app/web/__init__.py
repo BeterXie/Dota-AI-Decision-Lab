@@ -5,8 +5,10 @@ from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.auth import EmailAuthService
 from app.runtime.health import HealthRegistry
 from app.web.api import create_app as create_api_app
+from app.web.auth import register_auth
 from app.web.player_hero_recent import register_player_hero_recent_routes
 from app.web.server import WebServerWorker
 from app.web.spa import spa_file_response
@@ -21,6 +23,9 @@ def create_app(
     live_market_max_age_seconds: float = 30.0,
     market_max_pair_skew_seconds: float = 5.0,
     ai_min_game_time_seconds: int = 600,
+    auth_service: EmailAuthService | None = None,
+    auth_enabled: bool = False,
+    auth_cookie_secure: bool = False,
 ) -> FastAPI:
     # Build API routes first without the SPA catch-all, so detail-scoped
     # extension routes remain reachable before the frontend fallback route.
@@ -34,6 +39,12 @@ def create_app(
         ai_min_game_time_seconds=ai_min_game_time_seconds,
     )
     register_player_hero_recent_routes(app, session_factory)
+    register_auth(
+        app,
+        service=auth_service,
+        enabled=auth_enabled,
+        cookie_secure=auth_cookie_secure,
+    )
 
     if frontend_dist is not None and frontend_dist.is_dir():
         assets = frontend_dist / "assets"
