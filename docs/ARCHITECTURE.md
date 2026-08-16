@@ -658,6 +658,27 @@ QR 登录确认后的 `bot_token`、服务端 `baseurl` 与长轮询游标只持
 未绑定账号时 readiness 上报 ACTION_REQUIRED，并提示运行 tools/wechat_clawbot.py login。
 ```
 
+### 5.1B QQ Bot Direct Channel
+
+可选启用 QQ Bot 直连通道（`QQ_BOT_ENABLED=true`），复用 harness profile 安装的官方
+`@tencent-connect/qqbot-nodejs` SDK。Python runtime 监督一个本地 Node bridge
+（`tools/qq_bot_bridge.mjs`），bridge 连接 QQ 开放平台 WebSocket Gateway，并通过 loopback
+HTTP 提供 `/health`、`/events`、`/send`；Python service 长轮询入站事件、查询项目数据库并
+渲染回复。QR 绑定使用 harness 的 `@tencent-connect/qqbot-connector`
+（`python -m tools.qq_bot login`），AppID/AppSecret 只持久化在本地 state 目录
+（默认 `.runtime/qq-bot`，gitignored），不得写入日志、数据库或邮件。
+
+约束：
+
+```text
+决策推送与邮件共用同一个“下注换边才通知”触发点，经 SEND_QQ_DECISION durable job 投递；
+私聊用户在首次消息后自动订阅决策推送；群聊通过“订阅通知”订阅、“退订通知”退订；
+QQ_BOT_DECISION_TARGETS 中的 c2c:<openid> / group:<group_openid> 始终作为显式推送目标；
+群聊默认只在 @机器人 时响应（QQ_BOT_GROUP_REQUIRE_MENTION=true）；
+入站命令只允许读取/开关操作：比赛、赔率、为什么买、暂停通知、恢复通知、订阅通知、退订通知；
+未绑定账号或 bridge 未连接 QQ Gateway 时 readiness 上报 ACTION_REQUIRED / DEGRADED。
+```
+
 ---
 
 # 6. Canonical Identity
@@ -4272,6 +4293,11 @@ DurableJobWorker
 DomainEventDispatcher
 AiCoordinatorWorker
 EmailNotificationWorker
+WeChatClawBotWorker
+WeChatDecisionWorker
+QQBotBridgeWorker
+QQBotInboundWorker
+QQDecisionWorker
 FutureOddsWorker
 SettlementWorker
 EvaluationWorker

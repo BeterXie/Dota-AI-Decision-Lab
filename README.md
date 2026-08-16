@@ -11,6 +11,7 @@ V1 is shadow decision only. It does not place bets or manage a bankroll.
 - PostgreSQL 18
 - `uv`
 - Node.js 22.23 or newer for frontend development
+- Node.js 18 or newer at runtime when the optional QQ Bot channel is enabled
 - Docker Desktop when using the included PostgreSQL service
 
 ## Local setup
@@ -89,6 +90,31 @@ Credentials are stored under `WECHAT_CLAWBOT_STATE_DIR` (default `.runtime/wecha
 gitignored). The inbound worker accepts `当前比赛`, `当前比赛赔率`, `为什么买 <队伍>`, `暂停通知` /
 `恢复通知` in the direct chat. Official support is one-to-one direct chat only; WeChat
 group posting is not part of the official ClawBot channel yet.
+
+The same AI decision push and command surface is available through the QQ Bot installed by
+the harness profile. The runtime starts a supervised Node bridge that loads
+`@tencent-connect/qqbot-nodejs` from `~/.dsh/profiles/qqbot/node_modules` (or from
+`QQ_BOT_SDK_ROOT` / a local `qqbot_bridge` install) and connects the official QQ open
+platform WebSocket gateway. Enable it with `QQ_BOT_ENABLED=true`, then bind your robot
+once with the harness QR connector:
+
+```powershell
+.\.venv\Scripts\python.exe -m tools.qq_bot login   # scan the QR code with phone QQ
+.\.venv\Scripts\python.exe -m tools.qq_bot status
+.\.venv\Scripts\python.exe -m tools.qq_bot send "test" --target c2c:<openid>
+.\.venv\Scripts\python.exe -m tools.qq_bot send "test" --target group:<group_openid>
+```
+
+Binding credentials live under `QQ_BOT_STATE_DIR` (default `.runtime/qq-bot`, gitignored).
+Private-chat users are auto-subscribed to decision pushes on their first message. Groups are
+subscribed by sending `订阅通知` (and can `退订通知`); explicit always-on targets can be
+configured with `QQ_BOT_DECISION_TARGETS=c2c:<openid>,group:<group_openid>`. Inbound
+commands are `比赛` / `当前比赛`, `赔率` / `当前比赛赔率`, `为什么买 <队伍>`, `暂停通知` /
+`恢复通知`, and `帮助`. Groups only trigger the bot when it is `@` mentioned by default
+(`QQ_BOT_GROUP_REQUIRE_MENTION=true`); optional `QQ_BOT_ALLOWED_C2C` / `QQ_BOT_ALLOWED_GROUPS`
+allowlists restrict who may query the bot. If this machine does not have the harness
+profile, install the two Tencent packages locally with
+`npm install --prefix qqbot_bridge`.
 
 Provider hosts, model IDs, live synchronization thresholds, decision checkpoints, worker timing, and runtime binding are centralized in `app/config.py` and can be overridden by environment variables.
 

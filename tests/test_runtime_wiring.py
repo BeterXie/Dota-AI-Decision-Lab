@@ -85,3 +85,26 @@ def test_email_notification_worker_is_registered() -> None:
     email_worker = next(worker for worker in workers if worker.name == "EmailNotificationWorker")
     assert email_worker.name == "EmailNotificationWorker"
     assert JobType.SEND_DECISION_EMAIL.value == "SEND_DECISION_EMAIL"
+
+
+def test_qq_decision_notification_worker_is_registered() -> None:
+    disabled = _job_workers(
+        settings=Settings(_env_file=None),
+        session_factory=None,
+        jobs=None,
+        handlers={},
+        health=HealthRegistry(),
+    )
+    assert all(worker.name != "QQDecisionWorker" for worker in disabled)
+
+    workers = _job_workers(
+        settings=Settings(_env_file=None, qq_bot_enabled=True),
+        session_factory=None,
+        jobs=None,
+        handlers={},
+        health=HealthRegistry(),
+    )
+
+    qq_worker = next(worker for worker in workers if worker.name == "QQDecisionWorker")
+    assert qq_worker.name == "QQDecisionWorker"
+    assert JobType.SEND_QQ_DECISION.value == "SEND_QQ_DECISION"

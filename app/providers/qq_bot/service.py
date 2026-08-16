@@ -1,4 +1,7 @@
+"""QQ Bot service: inbound commands and durable decision notifications."""
+
 import asyncio
+from collections.abc import Sequence
 from datetime import UTC, datetime
 from typing import Any
 
@@ -11,35 +14,35 @@ from app.domain.snapshot import DecisionSnapshot
 from app.jobs.repository import JobRepository
 from app.models import AiDecisionRecord, DecisionSnapshotRecord, MapResultRecord
 from app.providers.chat_commands import command_reply, render_decision_notification
-from app.providers.wechat_clawbot.client import WeChatClawBotClient
-from app.providers.wechat_clawbot.models import (
-    MESSAGE_TYPE_USER,
-    WeChatAccount,
-    WeChatInboundMessage,
+from app.providers.qq_bot.bridge_client import QQBridgeClient
+from app.providers.qq_bot.models import (
+    QQ_SCOPE_C2C,
+    QQ_SCOPE_GROUP,
+    QQContact,
+    QQInboundMessage,
 )
-from app.providers.wechat_clawbot.storage import WeChatClawBotStore
+from app.providers.qq_bot.storage import QQBotStore
 from app.runtime.health import HealthRegistry
 from app.time import ensure_utc
 
 logger = structlog.get_logger()
 
 
-class WeChatClawBotService:
-    """Official WeChat ClawBot channel wired directly into the harness.
-
-    No OpenClaw runtime is involved: the service talks to Tencent's iLink bot
-    HTTP API, persists the QR-confirmed credentials locally, long-polls inbound
-    direct chats, and pushes decision notifications.
-    """
+class QQBotService:
+    """Dota AI commands and decision push over the harness QQ Bot bridge."""
 
     def __init__(
         self,
         *,
-        client: WeChatClawBotClient,
-        store: WeChatClawBotStore,
+        client: QQBridgeClient,
+        store: QQBotStore,
         session_factory: async_sessionmaker[AsyncSession],
         jobs: JobRepository,
         health: HealthRegistry | None = None,
+        configured_targets: Sequence[QQContact] = (),
+        allowed_c2c_ids: Sequence[str] = (),
+        allowed_group_ids: Sequence[str] = (),
+        group_require_mention: bool = True,
         live_state_max_age_seconds: float = 120.0,
         live_market_max_age_seconds: float = 90.0,
         market_max_pair_skew_seconds: float = 5.0,
@@ -50,6 +53,10 @@ class WeChatClawBotService:
         self._session_factory = session_factory
         self._jobs = jobs
         self._health = health
+        self._configured_targets = tuple(configured_targets)
+        self._allowed_c2c_ids = frozenset(allowed_c2c_ids)
+        self._allowed_group_ids = frozenset(allowed_group_ids)
+        self._group_require_mention = group_require_mention
         self._live_state_max_age_seconds = live_state_max_age_seconds
         self._live_market_max_age_seconds = live_market_max_age_seconds
         self._market_max_pair_skew_seconds = market_max_pair_skew_seconds
@@ -59,11 +66,11 @@ class WeChatClawBotService:
         self._closed = False
 
     @property
-    def client(self) -> WeChatClawBotClient:
+    def client(self) -> QQBridgeClient:
         return self._client
 
     @property
-    def store(self) -> WeChatClawBotStore:
+    def store(self) -> QQBotStore:
         return self._store
 
     async def prepare_decision_notification(
@@ -73,12 +80,12 @@ class WeChatClawBotService:
         snapshot: DecisionSnapshot,
         decisions: list[AiDecisionRecord],
     ) -> None:
-        if not self._store.accounts():
+        if not self._decision_targets():
             return
         reason = await self._decision_notification_block_reason(session, snapshot)
         if reason is not None:
             logger.info(
-                "wechat_clawbot_decision_suppressed",
+                "qq_bot_decision_suppressed",
                 phase="prepare",
                 snapshot_id=str(snapshot.snapshot_id),
                 reason=reason,
@@ -87,8 +94,8 @@ class WeChatClawBotService:
         decision_ids = ",".join(sorted(str(item.id) for item in decisions))
         await self._jobs.enqueue(
             session,
-            job_type=JobType.SEND_WECHAT_DECISION,
-            dedupe_key=f"wechat-decision:{snapshot.snapshot_id}:{decision_ids}",
+            job_type=JobType.SEND_QQ_DECISION,
+            dedupe_key=f"qq-decision:{snapshot.snapshot_id}:{decision_ids}",
             payload={
                 "snapshot_id": str(snapshot.snapshot_id),
                 "decision_ids": [str(item.id) for item in decisions],
@@ -105,8 +112,8 @@ class WeChatClawBotService:
     ) -> int:
         if not self._store.decision_notifications_enabled():
             return 0
-        accounts = list(self._store.accounts())
-        if not accounts:
+        targets = self._decision_targets()
+        if not targets:
             return 0
         reason = self._decision_age_block_reason(snapshot)
         if reason is None and self._session_factory is not None:
@@ -116,39 +123,33 @@ class WeChatClawBotService:
                 )
         if reason is not None:
             logger.info(
-                "wechat_clawbot_decision_suppressed",
+                "qq_bot_decision_suppressed",
                 phase="send",
                 snapshot_id=str(snapshot.snapshot_id),
                 reason=reason,
             )
             return 0
-        text = render_decision_notification(snapshot, decisions, channel_label="微信")
+        text = render_decision_notification(snapshot, decisions, channel_label="QQ")
         decision_batch_key = ",".join(sorted(str(item.id) for item in decisions))
         sent = 0
-        for account in accounts:
-            if not account.user_id:
-                continue
+        for target in targets:
             await self._client.send_text(
-                account,
-                to_user_id=account.user_id,
+                scope=target.scope,
+                target_id=target.target_id,
                 text=text,
-                context_token=account.context_token,
                 idempotency_key=(
-                    f"wechat-decision:{snapshot.snapshot_id}:"
-                    f"{decision_batch_key}:{account.account_id}"
+                    f"qq-decision:{snapshot.snapshot_id}:"
+                    f"{decision_batch_key}:{target.scope}:{target.target_id}"
                 ),
             )
             sent += 1
         return sent
 
-    async def send_to_account(self, account: WeChatAccount, text: str) -> str:
-        if not account.user_id:
-            raise ValueError("WeChat account has no bound user id yet")
+    async def send_to_target(self, target: QQContact, text: str) -> str:
         return await self._client.send_text(
-            account,
-            to_user_id=account.user_id,
+            scope=target.scope,
+            target_id=target.target_id,
             text=text,
-            context_token=account.context_token,
         )
 
     async def run_inbound(self) -> None:
@@ -158,7 +159,8 @@ class WeChatClawBotService:
             accounts = list(self._store.accounts())
             if not accounts:
                 await self._update_health(
-                    "ACTION_REQUIRED", message="no bound WeChat ClawBot account"
+                    "ACTION_REQUIRED",
+                    message="run: python -m tools.qq_bot login",
                 )
                 await self._sleep(15)
                 continue
@@ -166,27 +168,18 @@ class WeChatClawBotService:
                 if self._stop.is_set():
                     break
                 try:
-                    cursor = self._store.cursor(account.account_id)
-                    batch = await self._client.get_updates(account, cursor)
-                    logger.debug(
-                        "wechat_clawbot_poll",
-                        account_id=account.account_id,
-                        cursor_len=len(cursor),
-                        messages=len(batch.messages),
-                        error_code=batch.error_code,
-                    )
-                    if batch.error_code in {None, 0}:
-                        if batch.cursor:
-                            self._store.save_cursor(account.account_id, batch.cursor)
-                        async with self._session_factory() as session, session.begin():
-                            for message in batch.messages:
-                                if message.message_type != MESSAGE_TYPE_USER:
-                                    continue
-                                await self._handle_message(session, account, message)
+                    cursor = self._store.cursor(account.app_id)
+                    batch = await self._client.events(cursor)
+                    if batch.cursor > cursor:
+                        self._store.save_cursor(account.app_id, batch.cursor)
+                    async with self._session_factory() as session, session.begin():
+                        for message in batch.events:
+                            await self._handle_message(session, message)
                     await self._update_health(
                         "READY",
-                        messages=len(batch.messages),
-                        account_id=account.account_id,
+                        messages=len(batch.events),
+                        account_id=account.app_id,
+                        target_count=len(self._decision_targets()),
                     )
                     backoff = 1.0
                 except asyncio.CancelledError:
@@ -216,6 +209,17 @@ class WeChatClawBotService:
             except asyncio.CancelledError:
                 pass
         await self._client.close()
+
+    def _decision_targets(self) -> list[QQContact]:
+        merged: dict[tuple[str, str], QQContact] = {}
+        for target in self._configured_targets:
+            merged[target.key] = target
+        for contact in self._store.subscribed_contacts():
+            existing = merged.get(contact.key)
+            merged[contact.key] = (
+                contact if existing is None else existing.model_copy(update={"subscribed": True})
+            )
+        return list(merged.values())
 
     def _decision_age_block_reason(self, snapshot: DecisionSnapshot) -> str | None:
         age = (datetime.now(UTC) - ensure_utc(snapshot.decision_at)).total_seconds()
@@ -247,41 +251,71 @@ class WeChatClawBotService:
     async def _handle_message(
         self,
         session: AsyncSession,
-        account: WeChatAccount,
-        message: WeChatInboundMessage,
+        message: QQInboundMessage,
     ) -> None:
-        if not message.from_user_id:
+        if not message.text.strip() or not message.sender_id:
             return
-        reply = await command_reply(
-            session,
-            self._store,
-            message.text,
-            channel_label="微信",
-            live_state_max_age_seconds=self._live_state_max_age_seconds,
-            live_market_max_age_seconds=self._live_market_max_age_seconds,
-            market_max_pair_skew_seconds=self._market_max_pair_skew_seconds,
-        )
+        if not self._message_allowed(message):
+            return
+        contact = self._record_contact(message)
+        normalized = message.text.strip().casefold()
+        if normalized in {"订阅通知", "订阅决策", "订阅"}:
+            self._store.set_contact_subscribed(message.scope, message.target_id, enabled=True)
+            reply = "✅ 已订阅 AI 决策 QQ 通知。发送「退订通知」可取消。"
+        elif normalized in {"退订通知", "退订", "取消订阅"}:
+            self._store.set_contact_subscribed(message.scope, message.target_id, enabled=False)
+            reply = "✅ 已退订 AI 决策 QQ 通知。发送「订阅通知」可重新开启。"
+        else:
+            reply = await command_reply(
+                session,
+                self._store,
+                message.text,
+                channel_label="QQ",
+                live_state_max_age_seconds=self._live_state_max_age_seconds,
+                live_market_max_age_seconds=self._live_market_max_age_seconds,
+                market_max_pair_skew_seconds=self._market_max_pair_skew_seconds,
+            )
         await self._client.send_text(
-            account,
-            to_user_id=message.from_user_id,
+            scope=message.scope,
+            target_id=message.target_id,
             text=reply,
-            context_token=message.context_token,
-            run_id=message.run_id,
+            msg_id=message.message_id,
         )
-        updates: dict[str, object] = {}
-        if not account.user_id:
-            updates["user_id"] = message.from_user_id
-        if message.context_token and message.context_token != account.context_token:
-            updates["context_token"] = message.context_token
-        if updates:
-            self._store.save_account(account.model_copy(update=updates))
+        if message.sender_name and contact.label is None:
+            self._store.save_contact(contact.model_copy(update={"label": message.sender_name}))
+
+    def _message_allowed(self, message: QQInboundMessage) -> bool:
+        if message.scope == QQ_SCOPE_C2C:
+            return not self._allowed_c2c_ids or message.sender_id in self._allowed_c2c_ids
+        if message.scope != QQ_SCOPE_GROUP:
+            return False
+        if self._allowed_group_ids and message.target_id not in self._allowed_group_ids:
+            return False
+        if self._group_require_mention and not message.bot_mentioned:
+            return False
+        return True
+
+    def _record_contact(self, message: QQInboundMessage) -> QQContact:
+        now = datetime.now(UTC)
+        existing = self._store.contact(message.scope, message.target_id)
+        subscribed = existing.subscribed if existing is not None else message.scope == QQ_SCOPE_C2C
+        contact = existing or QQContact(
+            scope=message.scope,  # type: ignore[arg-type]
+            target_id=message.target_id,
+            subscribed=subscribed,
+            first_seen_at=now,
+            last_seen_at=now,
+        )
+        contact = contact.model_copy(update={"last_seen_at": now})
+        self._store.save_contact(contact)
+        return contact
 
     async def _update_health(
         self, status: str, *, message: str | None = None, **metadata: Any
     ) -> None:
         if self._health is None:
             return
-        await self._health.dependency("WECHAT", status, message=message, **metadata)
+        await self._health.dependency("QQ", status, message=message, **metadata)
 
     async def _sleep(self, seconds: float) -> None:
         try:

@@ -29,6 +29,24 @@ class RecordingNotificationService:
         )
 
 
+class RecordingQQService:
+    def __init__(self) -> None:
+        self.batches: list[list[tuple[str, str | None]]] = []
+
+    async def prepare_decision_notification(self, _session, *, snapshot, decisions) -> None:
+        self.batches.append(
+            [
+                (
+                    decision.provider,
+                    decision.normalized_response.get("action")
+                    if isinstance(decision.normalized_response, dict)
+                    else None,
+                )
+                for decision in decisions
+            ]
+        )
+
+
 class RecordingWeChatService:
     def __init__(self) -> None:
         self.batches: list[list[tuple[str, str | None]]] = []
@@ -55,6 +73,7 @@ async def test_buy_trigger_notifies_with_complete_current_multi_ai_batch() -> No
     factory = async_sessionmaker(engine, expire_on_commit=False)
     email = RecordingNotificationService()
     wechat = RecordingWeChatService()
+    qq_bot = RecordingQQService()
     snapshots = SnapshotRepository()
     now = datetime(2026, 8, 15, 12, 0, tzinfo=UTC)
 
@@ -121,6 +140,7 @@ async def test_buy_trigger_notifies_with_complete_current_multi_ai_batch() -> No
             SimpleNamespace(
                 email_notifications=email,
                 wechat_clawbot=wechat,
+                qq_bot=qq_bot,
             )
         )
         await handler._prepare_decision_notifications(
@@ -136,4 +156,5 @@ async def test_buy_trigger_notifies_with_complete_current_multi_ai_batch() -> No
     ]
     assert email.batches == [expected]
     assert wechat.batches == [expected]
+    assert qq_bot.batches == [expected]
     await engine.dispose()

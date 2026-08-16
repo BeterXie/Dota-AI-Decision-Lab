@@ -64,6 +64,13 @@ from app.providers.dltv.bootstrap import DltvBootstrapClient
 from app.providers.dltv.results import DltvResultProvider
 from app.providers.dltv.socket import DltvSocketClient
 from app.providers.opendota.client import OpenDotaClient
+from app.providers.qq_bot import (
+    QQBotBridgeRunner,
+    QQBotService,
+    QQBotStore,
+    QQBridgeClient,
+)
+from app.providers.qq_bot.models import QQBotAccount, parse_qq_target_entries
 from app.providers.raybet.http import RayBetHttpClient, RayBetHttpPool
 from app.providers.raybet.http_transport import CurlRayBetHttpClient, CurlRayBetHttpPool
 from app.providers.raybet.socket import RayBetSocketClient
@@ -223,15 +230,47 @@ async def run() -> None:
         if settings.wechat_clawbot_enabled
         else None
     )
+    qq_store = QQBotStore(settings.qq_bot_state_dir) if settings.qq_bot_enabled else None
+    if qq_store is not None:
+        _seed_qq_bot_account(settings, qq_store)
+    qq_bot = (
+        QQBotService(
+            client=QQBridgeClient(
+                base_url=f"http://{settings.qq_bot_bridge_host}:{settings.qq_bot_bridge_port}",
+                timeout_seconds=settings.qq_bot_bridge_timeout_seconds,
+            ),
+            store=qq_store,
+            session_factory=session_factory,
+            jobs=jobs,
+            health=health,
+            configured_targets=parse_qq_target_entries(settings.qq_bot_decision_target_entries),
+            allowed_c2c_ids=settings.qq_bot_allowed_c2c_ids,
+            allowed_group_ids=settings.qq_bot_allowed_group_ids,
+            group_require_mention=settings.qq_bot_group_require_mention,
+            live_state_max_age_seconds=settings.live_state_max_age_seconds,
+            live_market_max_age_seconds=settings.live_market_max_age_seconds,
+            market_max_pair_skew_seconds=settings.market_max_pair_skew_seconds,
+            max_decision_age_seconds=settings.qq_bot_decision_max_age_seconds,
+        )
+        if settings.qq_bot_enabled
+        else None
+    )
+    qq_bridge_runner = (
+        QQBotBridgeRunner(settings, store=qq_store, health=health)
+        if settings.qq_bot_enabled and qq_store is not None
+        else None
+    )
     future_odds = FutureOddsService(
         jobs,
         market_max_age_seconds=settings.live_market_max_age_seconds,
         market_max_pair_skew_seconds=settings.market_max_pair_skew_seconds,
-        ai_min_game_time_seconds=settings.ai_min_game_time_seconds,
     )
     rosh = RoshService(stratz_client, raw_events) if stratz_client is not None else None
     await _initialize_dependency_health(
-        health, settings=settings, ai_provider_names=tuple(item.name for item in ai_providers)
+        health,
+        settings=settings,
+        ai_provider_names=tuple(item.name for item in ai_providers),
+        qq_store=qq_store,
     )
     await _restore_historical_health(
         health,
@@ -270,6 +309,7 @@ async def run() -> None:
             evaluation=EvaluationService(),
             dltv_result=dltv_result,
             wechat_clawbot=wechat_clawbot,
+            qq_bot=qq_bot,
         )
     ).mapping()
     reconciliation = ReconciliationService(
@@ -547,6 +587,25 @@ async def run() -> None:
             )
         )
 
+    if settings.run_provider_workers and qq_bridge_runner is not None:
+        workers.append(
+            ServiceWorker(
+                name="QQBotBridgeWorker",
+                run=qq_bridge_runner.run,
+                stop=qq_bridge_runner.stop,
+                health_registry=health,
+            )
+        )
+    if settings.run_provider_workers and qq_bot is not None:
+        workers.append(
+            ServiceWorker(
+                name="QQBotInboundWorker",
+                run=qq_bot.run_inbound,
+                stop=qq_bot.stop,
+                health_registry=health,
+            )
+        )
+
     frontend_dist = ROOT / "frontend" / "dist"
     app = create_app(
         session_factory,
@@ -583,6 +642,8 @@ async def run() -> None:
             await email_notifications.close()
         if wechat_clawbot is not None:
             await wechat_clawbot.stop()
+        if qq_bot is not None:
+            await qq_bot.stop()
         await ai.close()
         await opendota.close()
         if stratz_history is not None:
@@ -616,6 +677,8 @@ def _job_workers(*, settings, session_factory, jobs, handlers, health) -> list[S
         groups["EmailNotificationWorker"] = ((JobType.SEND_DECISION_EMAIL,), 1)
     if settings.wechat_clawbot_enabled:
         groups["WeChatDecisionWorker"] = ((JobType.SEND_WECHAT_DECISION,), 1)
+    if settings.qq_bot_enabled:
+        groups["QQDecisionWorker"] = ((JobType.SEND_QQ_DECISION,), 1)
     result = []
     identity = f"{socket.gethostname()}:{os.getpid()}"
     for name, (job_types, concurrency) in groups.items():
@@ -683,6 +746,24 @@ def _assert_bind_safety(settings: Settings) -> None:
             "refusing to start: HOST must be loopback until HTTP and WebSocket "
             "authentication are implemented"
         )
+
+
+def _seed_qq_bot_account(settings: Settings, store: QQBotStore) -> None:
+    if store.accounts():
+        return
+    app_id = settings.qq_bot_app_id.get_secret_value() if settings.qq_bot_app_id else None
+    app_secret = (
+        settings.qq_bot_app_secret.get_secret_value() if settings.qq_bot_app_secret else None
+    )
+    if not app_id or not app_secret:
+        return
+    store.save_account(
+        QQBotAccount(
+            app_id=app_id,
+            app_secret=app_secret,
+            created_at=datetime.now(UTC),
+        )
+    )
 
 
 def _ai_providers(settings: Settings):
@@ -783,6 +864,7 @@ async def _initialize_dependency_health(
     *,
     settings: Settings,
     ai_provider_names: tuple[str, ...],
+    qq_store: QQBotStore | None = None,
 ) -> None:
     for dependency in ("RAYBET_HTTP", "DLTV_DRAFT"):
         await health.dependency(dependency, "UNKNOWN")
@@ -819,6 +901,16 @@ async def _initialize_dependency_health(
         )
     else:
         await health.dependency("WECHAT", "UNKNOWN")
+    if not settings.qq_bot_enabled:
+        await health.dependency("QQ", "DISABLED")
+    elif qq_store is not None and qq_store.account_count() == 0:
+        await health.dependency(
+            "QQ",
+            "ACTION_REQUIRED",
+            message="run: python -m tools.qq_bot login",
+        )
+    else:
+        await health.dependency("QQ", "UNKNOWN")
     await health.dependency("STRATZ", "UNKNOWN" if settings.stratz_token else "ACTION_REQUIRED")
     await health.dependency(
         "DRAFT_ENGINE", "UNKNOWN" if settings.stratz_token else "ACTION_REQUIRED"

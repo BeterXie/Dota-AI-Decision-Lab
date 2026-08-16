@@ -74,6 +74,7 @@ class JobHandlerDependencies:
     evaluation: EvaluationService
     dltv_result: object | None = None
     wechat_clawbot: object | None = None
+    qq_bot: object | None = None
 
 
 class ApplicationJobHandlers:
@@ -92,6 +93,7 @@ class ApplicationJobHandlers:
             JobType.RUN_AI_PROVIDER: self.run_ai,
             JobType.SEND_DECISION_EMAIL: self.send_decision_email,
             JobType.SEND_WECHAT_DECISION: self.send_wechat_decision,
+            JobType.SEND_QQ_DECISION: self.send_qq_decision,
             JobType.CAPTURE_FUTURE_ODDS: self.capture_future_odds,
             JobType.RESOLVE_POSTMATCH: self.resolve_postmatch,
             JobType.SETTLE_MAP: self.settle_map,
@@ -587,6 +589,12 @@ class ApplicationJobHandlers:
                 snapshot=snapshot,
                 decisions=current_records,
             )
+        if getattr(self._d, "qq_bot", None) is not None:
+            await self._d.qq_bot.prepare_decision_notification(
+                session,
+                snapshot=snapshot,
+                decisions=current_records,
+            )
 
     async def send_decision_email(self, job: DurableJob) -> None:
         if self._d.email_notifications is None:
@@ -639,6 +647,39 @@ class ApplicationJobHandlers:
             )
         await self._d.health.dependency(
             "WECHAT",
+            "READY",
+            decisions=sent,
+        )
+
+    async def send_qq_decision(self, job: DurableJob) -> None:
+        if self._d.qq_bot is None:
+            raise RuntimeError("QQ Bot notifications are not configured")
+        snapshot_id = _required_uuid(job.payload, "snapshot_id")
+        raw_decision_ids = job.payload.get("decision_ids")
+        if not isinstance(raw_decision_ids, list) or not raw_decision_ids:
+            raise ValueError("job payload decision_ids must be a non-empty list")
+        decision_ids = [_optional_uuid(item) for item in raw_decision_ids]
+        if any(item is None for item in decision_ids):
+            raise ValueError("job payload contains an invalid decision id")
+        async with self._d.session_factory() as session, session.begin():
+            snapshot = await self._d.snapshots.get(session, snapshot_id)
+            if snapshot is None:
+                raise ValueError("decision snapshot does not exist")
+            decisions = list(
+                (
+                    await session.scalars(
+                        select(AiDecisionRecord).where(AiDecisionRecord.id.in_(decision_ids))
+                    )
+                ).all()
+            )
+            if len(decisions) != len(decision_ids):
+                raise ValueError("QQ decision batch references missing AI decisions")
+            sent = await self._d.qq_bot.send_decision_notification(
+                snapshot=snapshot,
+                decisions=decisions,
+            )
+        await self._d.health.dependency(
+            "QQ",
             "READY",
             decisions=sent,
         )

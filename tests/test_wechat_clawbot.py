@@ -22,17 +22,17 @@ from app.models import (
     MapResultRecord,
     OddsObservationRecord,
 )
+from app.providers.chat_commands import (
+    command_reply,
+    decision_reply,
+    help_text,
+    matches_reply,
+    odds_reply,
+    render_decision_notification,
+)
 from app.providers.wechat_clawbot.client import WeChatClawBotClient
 from app.providers.wechat_clawbot.models import WeChatAccount
-from app.providers.wechat_clawbot.service import (
-    WeChatClawBotService,
-    _command_reply,
-    _decision_reply,
-    _help,
-    _matches_reply,
-    _odds_reply,
-    _render_decision_notification,
-)
+from app.providers.wechat_clawbot.service import WeChatClawBotService
 from app.providers.wechat_clawbot.storage import WeChatClawBotStore
 from app.snapshots.repository import SnapshotRepository
 
@@ -328,10 +328,10 @@ async def test_command_pause_resume_toggles_notifications(tmp_path: Path) -> Non
         await connection.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     async with factory() as session:
-        reply = await _command_reply(session, store, "暂停通知")
+        reply = await command_reply(session, store, "暂停通知", channel_label="微信")
         assert "已暂停" in reply
         assert store.decision_notifications_enabled() is False
-        reply = await _command_reply(session, store, "恢复通知")
+        reply = await command_reply(session, store, "恢复通知", channel_label="微信")
         assert "已恢复" in reply
         assert store.decision_notifications_enabled() is True
     await engine.dispose()
@@ -380,7 +380,7 @@ def test_decision_notification_render_uses_target_probability_for_buy_b() -> Non
         },
     )
 
-    text = _render_decision_notification(snapshot, [decision])
+    text = render_decision_notification(snapshot, [decision])
 
     assert "支持 HULIGANI" in text
     assert "AI胜率: 65.0%" in text
@@ -472,7 +472,7 @@ async def test_decision_reply_uses_target_probability_for_buy_b() -> None:
                 },
             )
         )
-        reply = await _decision_reply(session, "为什么买 HULIGANI")
+        reply = await decision_reply(session, "为什么买 HULIGANI")
 
     assert "支持 HULIGANI" in reply
     assert "AI胜率 65.0%" in reply
@@ -531,7 +531,7 @@ async def test_matches_reply_deduplicates_by_map_and_filters_result_and_stale() 
             )
         )
 
-        reply = await _matches_reply(session, live_state_max_age_seconds=120.0)
+        reply = await matches_reply(session, live_state_max_age_seconds=120.0)
 
     assert "第1局" in reply
     assert "第2局" not in reply
@@ -644,7 +644,7 @@ async def test_odds_reply_reports_both_sides_for_current_live_map() -> None:
         )
         session.add(incomplete_odds)
 
-        reply = await _odds_reply(session, observed_at=now)
+        reply = await odds_reply(session, observed_at=now)
 
     assert "当前比赛赔率:" in reply
     assert "第1局" in reply
@@ -665,10 +665,10 @@ async def test_command_routes_odds_before_matches_and_help_lists_it(tmp_path: Pa
     factory = async_sessionmaker(engine, expire_on_commit=False)
 
     async with factory() as session:
-        odds_reply = await _command_reply(session, store, "当前比赛赔率")
-        matches_reply = await _command_reply(session, store, "当前比赛")
+        odds_reply = await command_reply(session, store, "当前比赛赔率", channel_label="微信")
+        matches_reply = await command_reply(session, store, "当前比赛", channel_label="微信")
 
     assert odds_reply == "当前没有正在直播的比赛。"
     assert matches_reply == "当前没有正在追踪的比赛。"
-    assert "当前比赛赔率 — 查看当前直播比赛双方赔率" in _help()
+    assert "当前比赛赔率 — 查看当前直播比赛双方赔率" in help_text()
     await engine.dispose()

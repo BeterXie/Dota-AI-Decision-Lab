@@ -21,3 +21,5 @@ frontend/test-results/
 frontend/playwright-report/
 .runtime/
 .runtime.*.log
+
+qqbot_bridge/node_modules/

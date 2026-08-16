@@ -110,6 +110,33 @@ class Settings(BaseSettings):
     # discarded even if durable jobs are recovered much later.
     wechat_clawbot_decision_max_age_seconds: float = Field(default=600.0, gt=0)
 
+    # Official QQ Bot channel.  The gateway/bridge process uses the
+    # harness-installed ``@tencent-connect/qqbot-nodejs`` SDK; run
+    # ``python -m tools.qq_bot login`` once to bind a QQ robot by QR code.
+    qq_bot_enabled: bool = False
+    # Optional pre-bound credentials.  Normally use the QR login CLI;
+    # these env overrides are for non-interactive installs.
+    qq_bot_app_id: SecretStr | None = None
+    qq_bot_app_secret: SecretStr | None = None
+    qq_bot_state_dir: str = ".runtime/qq-bot"
+    # Blank means auto-detect the harness profile node_modules first, then the
+    # project-local ``qqbot_bridge/node_modules`` install.
+    qq_bot_sdk_root: str = ""
+    qq_bot_bridge_host: str = "127.0.0.1"
+    qq_bot_bridge_port: int = Field(default=18081, ge=1, le=65_535)
+    qq_bot_bridge_timeout_seconds: float = Field(default=15.0, gt=0)
+    qq_bot_bridge_startup_timeout_seconds: float = Field(default=20.0, gt=0)
+    # Decision alerts are live signals, not a backlog feed.
+    qq_bot_decision_max_age_seconds: float = Field(default=600.0, gt=0)
+    # Comma separated explicit push targets: c2c:<openid> or group:<group_openid>.
+    qq_bot_decision_targets: str = ""
+    # In groups only react when the bot is @mentioned.
+    qq_bot_group_require_mention: bool = True
+    # Optional allowlists. Empty = any private chatter may query; groups still
+    # follow qq_bot_group_require_mention unless listed as allowed below.
+    qq_bot_allowed_c2c: str = ""
+    qq_bot_allowed_groups: str = ""
+
     # Calibrated against production RayBet/DLTV signal cadence: DLTV state
     # changes arrive event-driven every ~40-60s with a median pairing lag of
     # ~10-23s, so the original 3s/8s thresholds could never be satisfied.
@@ -175,6 +202,18 @@ class Settings(BaseSettings):
         return tuple(int(value.strip()) for value in self.ai_checkpoint_minutes.split(","))
 
     @property
+    def qq_bot_decision_target_entries(self) -> tuple[str, ...]:
+        return _split_non_empty(self.qq_bot_decision_targets)
+
+    @property
+    def qq_bot_allowed_c2c_ids(self) -> tuple[str, ...]:
+        return _split_non_empty(self.qq_bot_allowed_c2c)
+
+    @property
+    def qq_bot_allowed_group_ids(self) -> tuple[str, ...]:
+        return _split_non_empty(self.qq_bot_allowed_groups)
+
+    @property
     def raybet_discovery_match_types(self) -> tuple[int, ...]:
         return tuple(int(value.strip()) for value in self.raybet_match_types.split(","))
 
@@ -212,3 +251,7 @@ class Settings(BaseSettings):
 @lru_cache
 def get_settings() -> Settings:
     return Settings()
+
+
+def _split_non_empty(raw: str) -> tuple[str, ...]:
+    return tuple(value.strip() for value in raw.split(",") if value.strip())
