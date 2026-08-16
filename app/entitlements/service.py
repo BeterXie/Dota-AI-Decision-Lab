@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import and_, or_, select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.entitlements.models import UserEntitlementRecord
@@ -21,7 +21,12 @@ class EntitlementService:
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
         self._session_factory = session_factory
 
-    async def active_entitlements(self, user_id: UUID, *, now: datetime | None = None) -> tuple[str, ...]:
+    async def active_entitlements(
+        self,
+        user_id: UUID,
+        *,
+        now: datetime | None = None,
+    ) -> tuple[str, ...]:
         current = now or datetime.now(UTC)
         async with self._session_factory() as session:
             values = list(
