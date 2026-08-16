@@ -52,7 +52,7 @@ function AuthenticatedApp() {
     retry: 1
   });
   const session = auth.data;
-  const hasAiAccess = Boolean(session?.entitlements.includes(AI_DECISIONS_ENTITLEMENT));
+  const hasAiAccess = Boolean(session?.entitlements?.includes(AI_DECISIONS_ENTITLEMENT));
 
   const handleAuthenticated = (next: AuthSessionState) => {
     queryClient.setQueryData(authSessionKey, next);
@@ -137,7 +137,7 @@ function DashboardApp({
   useRuntimeSocket();
   const queryClient = useQueryClient();
   const [selectedMapId, setSelectedMapId] = useState<string | null>(null);
-  const hasAiAccess = Boolean(session?.entitlements.includes(AI_DECISIONS_ENTITLEMENT));
+  const hasAiAccess = Boolean(session?.entitlements?.includes(AI_DECISIONS_ENTITLEMENT));
   const canFetchOperationalData = Boolean(session && (!session.enabled || session.authenticated));
 
   const runtime = useQuery({ queryKey: queryKeys.runtime, queryFn: fetchRuntime, refetchInterval: 5000 });
