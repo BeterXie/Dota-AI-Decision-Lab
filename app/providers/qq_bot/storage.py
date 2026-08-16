@@ -150,7 +150,5 @@ class QQBotStore(LocalStateStore):
         return raw if isinstance(raw, dict) else {}
 
     def _cursor_path(self, account_id: str) -> Path:
-        digest = hashlib.sha1(
-            account_id.encode("utf-8"), usedforsecurity=False
-        ).hexdigest()[:16]
+        digest = hashlib.sha1(account_id.encode("utf-8"), usedforsecurity=False).hexdigest()[:16]
         return self._cursor_dir / f"{digest}.json"
