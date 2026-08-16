@@ -10,16 +10,66 @@ import {
   type MapDetail,
   type MapSummary
 } from "./api";
-import { I18nProvider } from "./i18n";
+import { fetchAuthSession, type AuthSessionState } from "./authApi";
+import { I18nProvider, useI18n } from "./i18n";
 import { AppShell } from "./components/AppShell";
+import { LoginPage } from "./components/LoginPage";
+
 const ReviewPage = lazy(() => import("./components/ReviewPage").then((module) => ({ default: module.ReviewPage })));
+const authSessionKey = ["auth", "session"] as const;
 
 export function App() {
-  const reviewRoute = typeof window !== "undefined" && isReviewRoute(window.location.pathname);
   return (
     <I18nProvider>
-      {reviewRoute ? <Suspense fallback={null}><ReviewPage /></Suspense> : <DashboardApp />}
+      <AuthenticatedApp />
     </I18nProvider>
+  );
+}
+
+function AuthenticatedApp() {
+  const queryClient = useQueryClient();
+  const { locale } = useI18n();
+  const auth = useQuery({
+    queryKey: authSessionKey,
+    queryFn: fetchAuthSession,
+    staleTime: 30_000,
+    retry: 1
+  });
+
+  if (auth.isLoading) {
+    return <div className="auth-bootstrap">Dota AI Decision Lab</div>;
+  }
+  if (auth.isError || !auth.data) {
+    return (
+      <div className="auth-bootstrap">
+        <div>
+          <strong>{locale === "zh-CN" ? "无法确认登录状态" : "Unable to verify sign-in state"}</strong>
+          <div style={{ marginTop: 10 }}>
+            <button type="button" onClick={() => void auth.refetch()}>
+              {locale === "zh-CN" ? "重试" : "Retry"}
+            </button>
+          </div>
+        </div>
+      </div>
+    );
+  }
+  if (auth.data.enabled && !auth.data.authenticated) {
+    return (
+      <LoginPage
+        onAuthenticated={(session: AuthSessionState) => {
+          queryClient.setQueryData(authSessionKey, session);
+        }}
+      />
+    );
+  }
+
+  const reviewRoute = typeof window !== "undefined" && isReviewRoute(window.location.pathname);
+  return reviewRoute ? (
+    <Suspense fallback={<div className="auth-bootstrap">Dota AI Decision Lab</div>}>
+      <ReviewPage />
+    </Suspense>
+  ) : (
+    <DashboardApp />
   );
 }
 
