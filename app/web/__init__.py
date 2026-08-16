@@ -81,7 +81,11 @@ def _configured_auth_service(
     if settings.auth_configuration_errors:
         missing = ", ".join(settings.auth_configuration_errors)
         raise RuntimeError(f"email authentication configuration is incomplete: {missing}")
-    if settings.auth_secret_key is None or settings.resend_api_key is None or not settings.resend_from:
+    if (
+        settings.auth_secret_key is None
+        or settings.resend_api_key is None
+        or not settings.resend_from
+    ):
         raise RuntimeError("validated email authentication configuration is incomplete")
     sender = ResendLoginCodeSender(
         api_key=settings.resend_api_key.get_secret_value(),
