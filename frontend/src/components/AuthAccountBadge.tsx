@@ -1,6 +1,6 @@
 import React, { useState } from "react";
-import { useI18n } from "../i18n";
 import type { AuthUser } from "../authApi";
+import { useI18n } from "../i18n";
 
 interface AuthAccountBadgeProps {
   user: AuthUser;
@@ -8,9 +8,8 @@ interface AuthAccountBadgeProps {
 }
 
 export const AuthAccountBadge: React.FC<AuthAccountBadgeProps> = ({ user, onLogout }) => {
-  const { locale } = useI18n();
+  const { t } = useI18n();
   const [busy, setBusy] = useState(false);
-  const label = locale === "zh-CN" ? "退出" : "Sign out";
 
   const handleLogout = async () => {
     if (busy) return;
@@ -23,11 +22,11 @@ export const AuthAccountBadge: React.FC<AuthAccountBadgeProps> = ({ user, onLogo
   };
 
   return (
-    <div className="auth-account-badge" aria-label={locale === "zh-CN" ? "当前账户" : "Current account"}>
+    <div className="auth-account-badge" aria-label={t("authCurrentAccount")}>
       <span className="auth-account-dot" aria-hidden="true" />
       <span className="auth-account-email" title={user.email}>{user.email}</span>
       <button type="button" disabled={busy} onClick={() => void handleLogout()}>
-        {busy ? "…" : label}
+        {busy ? "…" : t("authSignOut")}
       </button>
     </div>
   );
