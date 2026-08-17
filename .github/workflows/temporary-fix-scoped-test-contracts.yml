@@ -50,11 +50,7 @@ jobs:
 
           path = Path('tests/test_access_hardening.py')
           text = path.read_text(encoding='utf-8')
-          text = text.replace(
-              '    REALTIME_NOTIFICATIONS_ENTITLEMENT,\n',
-              '',
-              1,
-          )
+          text = text.replace('    REALTIME_NOTIFICATIONS_ENTITLEMENT,\n', '', 1)
           map_old = '''    assert _http_access_requirement(\n        "/api/maps/00000000-0000-0000-0000-000000000000/ai-decisions"\n    ) == ("ENTITLED", AI_DECISIONS_ENTITLEMENT)\n'''
           map_new = '''    # Map AI is resource-aware: middleware authenticates identity, then the\n    # route checks GLOBAL / SERIES / MAP access against the canonical map.\n    assert _http_access_requirement(\n        "/api/maps/00000000-0000-0000-0000-000000000000/ai-decisions"\n    ) == ("AUTHENTICATED", None)\n'''
           notification_old = '''    assert _http_access_requirement("/api/notifications") == (\n        "ENTITLED",\n        REALTIME_NOTIFICATIONS_ENTITLEMENT,\n    )\n'''
@@ -86,6 +82,12 @@ jobs:
           if path_old not in text:
               raise SystemExit('email premium path target not found')
           text = text.replace(path_old, path_new, 1)
+
+          forbidden_old = '''            assert forbidden.json() == {\n                "detail": "entitlement required",\n                "required_entitlement": AI_DECISIONS_ENTITLEMENT,\n            }\n'''
+          forbidden_new = '''            assert forbidden.json() == {\n                "detail": "AI Decision access is not granted for this match"\n            }\n'''
+          if forbidden_old not in text:
+              raise SystemExit('route denial contract target not found')
+          text = text.replace(forbidden_old, forbidden_new, 1)
 
           grant_old = '''            entitled_missing_map = await client.get(premium_path)\n            assert entitled_missing_map.status_code == 404\n'''
           grant_new = '''            entitled_map = await client.get(premium_path)\n            assert entitled_map.status_code == 200\n            assert entitled_map.json()["canonical_map_id"] == str(premium_map_id)\n'''
