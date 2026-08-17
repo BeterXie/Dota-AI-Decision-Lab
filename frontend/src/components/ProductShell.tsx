@@ -108,10 +108,11 @@ export const ProductShell: React.FC<ProductShellProps> = ({
                 {hasPro && <em>Pro</em>}
               </div>
               <div className="account-menu-section">
-                <div className="account-menu-row is-static">
+                <a className="account-menu-row" href="/account" role="menuitem">
                   <span className="account-menu-icon" aria-hidden="true">◎</span>
                   <div><strong>{locale === "zh-CN" ? "个人信息" : "Account"}</strong><small>{hasPro ? (locale === "zh-CN" ? "Pro 会员" : "Pro member") : (locale === "zh-CN" ? "免费账户" : "Free account")}</small></div>
-                </div>
+                  <span className="menu-chevron">›</span>
+                </a>
                 <div className="account-menu-row language-row">
                   <span className="account-menu-icon" aria-hidden="true">文</span>
                   <strong>{locale === "zh-CN" ? "语言 / Language" : "Language / 语言"}</strong>
