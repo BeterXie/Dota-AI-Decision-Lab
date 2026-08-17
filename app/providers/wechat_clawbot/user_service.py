@@ -1,4 +1,5 @@
 from app.domain.jobs import JobType
+from app.entitlements import AI_DECISIONS_ENTITLEMENT, EntitlementService
 from app.notifications.center import (
     CHANNEL_WECHAT,
     NotificationBindingConflict,
@@ -7,6 +8,11 @@ from app.notifications.center import (
 )
 from app.notifications.pairing_limiter import PairingAttemptLimiter
 from app.notifications.secure_center import NotificationCenterService
+from app.providers.chat_access import (
+    is_ai_decision_query,
+    is_notification_pause_command,
+    is_notification_resume_command,
+)
 from app.providers.chat_commands import command_reply, render_decision_notification
 from app.providers.wechat_clawbot.models import MESSAGE_TYPE_USER, WeChatInboundMessage
 from app.providers.wechat_clawbot.service import WeChatClawBotService as LegacyWeChatClawBotService
@@ -18,6 +24,7 @@ class UserScopedWeChatClawBotService(LegacyWeChatClawBotService):
     def __init__(self, *args, session_factory, **kwargs) -> None:
         super().__init__(*args, session_factory=session_factory, **kwargs)
         self._notification_center = NotificationCenterService(session_factory)
+        self._entitlements = EntitlementService(session_factory)
         self._pairing_attempts = PairingAttemptLimiter()
 
     async def prepare_decision_notification(self, session, *, snapshot, decisions) -> None:
@@ -128,12 +135,17 @@ class UserScopedWeChatClawBotService(LegacyWeChatClawBotService):
                         },
                         label=message.from_user_id,
                     )
-                    reply = "✅ 微信已绑定到你的 Notification Center，AI 决策实时通知已开启。"
+                    reply = (
+                        "✅ 微信已绑定到你的 Notification Center，AI 决策通知偏好已开启。"
+                        "实际推送仍取决于实时通知权限。"
+                    )
                 except NotificationBindingConflict:
                     reply = "⚠️ 这个微信会话已经绑定到另一个账号。请先在原账号里解除绑定。"
                 except NotificationPairingError:
                     reply = "⚠️ 配对码无效或已过期。请回到 Notification Center 重新生成。"
-        elif normalized in {"订阅通知", "订阅决策", "订阅"}:
+        elif normalized in {"订阅通知", "订阅决策", "订阅"} or is_notification_resume_command(
+            message.text
+        ):
             updated = await self._notification_center.set_preference_for_destination(
                 channel=CHANNEL_WECHAT,
                 destination_key=destination_key,
@@ -144,13 +156,40 @@ class UserScopedWeChatClawBotService(LegacyWeChatClawBotService):
                 if updated
                 else "请先在网页 Notification Center 生成配对码，再发送「绑定 <配对码>」。"
             )
-        elif normalized in {"退订通知", "退订", "取消订阅"}:
+        elif normalized in {"退订通知", "退订", "取消订阅"} or is_notification_pause_command(
+            message.text
+        ):
             updated = await self._notification_center.set_preference_for_destination(
                 channel=CHANNEL_WECHAT,
                 destination_key=destination_key,
                 enabled=False,
             )
             reply = "✅ 已关闭 AI 决策微信通知。" if updated else "当前微信会话尚未绑定账号。"
+        elif is_ai_decision_query(message.text):
+            user_id = await self._notification_center.bound_active_user_id(
+                channel=CHANNEL_WECHAT,
+                destination_key=destination_key,
+            )
+            if user_id is None:
+                reply = (
+                    "🔒 AI 决策查询需要先绑定登录账号。请在网页 Notification Center "
+                    "生成配对码，再发送「绑定 <配对码>」。"
+                )
+            elif not await self._entitlements.has_entitlement(
+                user_id,
+                AI_DECISIONS_ENTITLEMENT,
+            ):
+                reply = "🔒 当前账号没有 AI 决策权限。请先开通相应权限后再查询。"
+            else:
+                reply = await command_reply(
+                    session,
+                    self._store,
+                    message.text,
+                    channel_label="微信",
+                    live_state_max_age_seconds=self._live_state_max_age_seconds,
+                    live_market_max_age_seconds=self._live_market_max_age_seconds,
+                    market_max_pair_skew_seconds=self._market_max_pair_skew_seconds,
+                )
         else:
             reply = await command_reply(
                 session,

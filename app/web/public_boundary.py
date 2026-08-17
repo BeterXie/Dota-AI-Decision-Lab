@@ -149,10 +149,14 @@ class PublicMatchDataBoundaryMiddleware(BaseHTTPMiddleware):
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
         response = await call_next(request)
+        sanitize_readiness = request.method == "GET" and request.url.path == "/ready"
         if (
             request.method != "GET"
-            or response.status_code != 200
             or "application/json" not in response.headers.get("content-type", "")
+            or (
+                response.status_code != 200
+                and not (sanitize_readiness and response.status_code == 503)
+            )
         ):
             return response
 
@@ -160,7 +164,7 @@ class PublicMatchDataBoundaryMiddleware(BaseHTTPMiddleware):
         sanitize_runtime = (
             request.url.path == "/api/runtime" and getattr(request.state, "auth_user", None) is None
         )
-        if not sanitize_match and not sanitize_runtime:
+        if not sanitize_match and not sanitize_runtime and not sanitize_readiness:
             return response
 
         body = b"".join([chunk async for chunk in response.body_iterator])
@@ -174,7 +178,11 @@ class PublicMatchDataBoundaryMiddleware(BaseHTTPMiddleware):
                 media_type=response.media_type,
             )
 
-        if sanitize_runtime:
+        if sanitize_readiness:
+            sanitized = (
+                _sanitize_readiness_payload(payload) if isinstance(payload, dict) else payload
+            )
+        elif sanitize_runtime:
             sanitized = _sanitize_runtime_payload(payload) if isinstance(payload, dict) else payload
         elif isinstance(payload, list):
             sanitized = [
@@ -352,3 +360,9 @@ def _sanitize_runtime_payload(payload: dict) -> dict:
     result["workers"] = {}
     result["dependencies"] = {}
     return result
+
+
+def _sanitize_readiness_payload(payload: dict) -> dict:
+    """Keep the public readiness probe useful without exposing diagnostics."""
+
+    return _project_dict(payload, frozenset({"overall", "observed_at"}))
