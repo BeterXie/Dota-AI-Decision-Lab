@@ -22,11 +22,12 @@ jobs:
           node-version-file: frontend/.node-version
           cache: npm
           cache-dependency-path: frontend/package-lock.json
-      - name: Fix selectors
+      - name: Fix selectors and CLV display
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
+
           path = Path("frontend/e2e/performance.spec.ts")
           text = path.read_text(encoding="utf-8")
           old = '''  await expect(page.getByText("+2,600", { exact: true })).toBeVisible();\n  await expect(page.getByText("−400", { exact: true })).toBeVisible();\n'''
@@ -39,19 +40,38 @@ jobs:
               '  await deepseekRow.click();\n',
               1,
           )
+          text = text.replace(
+              '  await expect(page.getByText(/decision-…7890/)).toBeVisible();\n',
+              '  await expect(page.getByText(/decision…7890/)).toBeVisible();\n',
+              1,
+          )
+          path.write_text(text, encoding="utf-8")
+
+          path = Path("frontend/src/components/AiPerformancePage.tsx")
+          text = path.read_text(encoding="utf-8")
+          old = '<MetricLine label="CLV" value={percentPoints(quality.average_clv)} tone={tone(quality.average_clv)} />'
+          new = '<MetricLine label="CLV" value={rate(quality.average_clv, locale)} tone={tone(quality.average_clv)} />'
+          if old not in text:
+              raise SystemExit("CLV metric line not found")
+          text = text.replace(old, new, 1)
+          old_helper = '''function percentPoints(value: number | null): string {\n  return value == null ? "—" : `${value > 0 ? "+" : ""}${(value * 100).toFixed(2)}pp`;\n}\n\n'''
+          if old_helper not in text:
+              raise SystemExit("percentPoints helper not found")
+          text = text.replace(old_helper, "", 1)
           path.write_text(text, encoding="utf-8")
           PY
-      - name: Verify focused performance E2E
+      - name: Verify focused performance UI
         working-directory: frontend
         run: |
           npm ci
+          npm run build
           npx playwright install --with-deps chromium
           npx playwright test e2e/performance.spec.ts
-      - name: Commit verified selector fix
+      - name: Commit verified UI fixes
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add frontend/e2e/performance.spec.ts
-          git commit -m "Harden AI performance E2E selectors"
+          git add frontend/e2e/performance.spec.ts frontend/src/components/AiPerformancePage.tsx
+          git commit -m "Harden AI performance dashboard semantics"
           git push origin HEAD:feat/ai-performance-dashboard
