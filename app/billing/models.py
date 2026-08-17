@@ -33,7 +33,9 @@ class BillingSubscriptionRecord(Base):
     access_state: Mapped[str] = mapped_column(String(16), nullable=False)
     provider_status: Mapped[str | None] = mapped_column(String(64))
     current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    last_event_occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    last_event_occurred_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), nullable=False
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), default=utc_now, onupdate=utc_now
