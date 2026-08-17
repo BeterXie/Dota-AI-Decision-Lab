@@ -1,0 +1,267 @@
+.product-premium-surface {
+  min-height: calc(100vh - 64px);
+}
+
+.product-premium-surface .performance-page,
+.product-premium-surface .review-page,
+.product-premium-surface .billing-page,
+.product-premium-surface .notification-page {
+  min-height: calc(100vh - 64px);
+  background: transparent;
+}
+
+/* Keep each mature business page's title and refresh affordance, but let the
+   Product Shell own navigation and language. */
+.premium-performance .performance-header,
+.premium-review .review-header {
+  position: static;
+  top: auto;
+  z-index: auto;
+  background: rgba(9, 18, 28, 0.52);
+  backdrop-filter: none;
+  border-bottom-color: var(--product-border);
+}
+
+.premium-performance .performance-back,
+.premium-performance .performance-header-actions > a,
+.premium-performance .performance-header-actions > button:nth-of-type(1),
+.premium-performance .performance-header-actions > button:nth-of-type(2),
+.premium-review .review-back,
+.premium-review .review-header-actions > button:nth-of-type(1),
+.premium-review .review-header-actions > button:nth-of-type(2),
+.premium-billing .billing-back,
+.premium-notifications .notification-back {
+  display: none;
+}
+
+.premium-performance .performance-brand,
+.premium-review .review-brand {
+  gap: 0;
+}
+
+.premium-performance .performance-header,
+.premium-review .review-header {
+  min-height: 62px;
+  height: auto;
+  padding-inline: max(24px, calc((100vw - 1520px) / 2));
+}
+
+.premium-performance .performance-header-actions,
+.premium-review .review-header-actions {
+  margin-left: auto;
+}
+
+.premium-billing .billing-page,
+.premium-notifications .notification-page {
+  color: var(--product-text);
+}
+
+.premium-billing .billing-hero,
+.premium-billing .billing-grid,
+.premium-billing .billing-panel,
+.premium-billing .billing-payment-boundary,
+.premium-billing .billing-manage,
+.premium-notifications .notification-hero,
+.premium-notifications .notification-grid,
+.premium-notifications .notification-history {
+  width: min(1180px, 100%);
+}
+
+.product-premium-loading {
+  min-height: calc(100vh - 64px);
+  display: grid;
+  place-items: center;
+  align-content: center;
+  gap: 14px;
+  color: var(--product-text-2);
+}
+
+.product-premium-loading > span {
+  width: 32px;
+  height: 32px;
+  border: 2px solid rgba(111, 211, 219, 0.16);
+  border-top-color: var(--product-teal);
+  border-radius: 50%;
+  animation: premiumSpin 0.8s linear infinite;
+}
+
+.product-premium-loading strong {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+@keyframes premiumSpin {
+  to { transform: rotate(360deg); }
+}
+
+.product-access-gate {
+  min-height: calc(100vh - 64px);
+  display: grid;
+  place-items: center;
+  padding-top: 54px;
+  padding-bottom: 70px;
+}
+
+.product-access-card {
+  width: min(720px, 100%);
+  padding: clamp(28px, 5vw, 48px);
+  border: 1px solid var(--product-border-strong);
+  border-radius: 18px;
+  background:
+    radial-gradient(circle at 90% 0%, rgba(139, 93, 208, 0.14), transparent 34%),
+    radial-gradient(circle at 8% 100%, rgba(39, 165, 182, 0.1), transparent 35%),
+    rgba(12, 23, 35, 0.92);
+  box-shadow: var(--product-shadow);
+  text-align: center;
+}
+
+.product-access-mark {
+  width: 54px;
+  height: 54px;
+  display: grid;
+  place-items: center;
+  margin: 0 auto 16px;
+  border: 1px solid rgba(166, 115, 232, 0.2);
+  border-radius: 50%;
+  background: rgba(147, 93, 218, 0.08);
+  color: #bb8aee;
+  font-size: 21px;
+}
+
+.product-access-card h1 {
+  max-width: 620px;
+  margin: 8px auto 0;
+  color: var(--product-text);
+  font-size: clamp(28px, 4vw, 42px);
+  line-height: 1.15;
+  letter-spacing: -0.04em;
+}
+
+.product-access-card > p {
+  max-width: 610px;
+  margin: 14px auto 0;
+  color: var(--product-text-2);
+  font-size: 12px;
+  line-height: 1.8;
+}
+
+.product-access-boundary {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 25px;
+  text-align: left;
+}
+
+.product-access-boundary > div {
+  min-height: 118px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-content: start;
+  gap: 9px;
+  padding: 16px;
+  border: 1px solid rgba(142, 166, 188, 0.12);
+  border-radius: 11px;
+  background: rgba(5, 14, 23, 0.38);
+}
+
+.product-access-boundary i {
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: rgba(49, 214, 139, 0.08);
+  color: #5cdaa9;
+  font-style: normal;
+  font-size: 10px;
+}
+
+.product-access-boundary .is-premium i {
+  background: rgba(155, 103, 238, 0.09);
+  color: #b889e9;
+}
+
+.product-access-boundary span {
+  min-width: 0;
+  display: grid;
+  gap: 5px;
+}
+
+.product-access-boundary strong {
+  color: #c9d5de;
+  font-size: 11px;
+}
+
+.product-access-boundary small {
+  color: #71869a;
+  font-size: 9px;
+  line-height: 1.65;
+}
+
+.product-access-actions {
+  display: flex;
+  justify-content: center;
+  flex-wrap: wrap;
+  gap: 9px;
+  margin-top: 22px;
+}
+
+.product-access-status {
+  width: fit-content;
+  max-width: 100%;
+  margin: 22px auto 14px;
+  padding: 8px 11px;
+  border: 1px solid rgba(236, 184, 87, 0.18);
+  border-radius: 8px;
+  background: rgba(236, 184, 87, 0.05);
+  color: #d1a85c;
+  font-size: 9px;
+  line-height: 1.5;
+}
+
+.product-access-status.is-error {
+  border-color: rgba(255, 101, 114, 0.18);
+  background: rgba(255, 101, 114, 0.05);
+  color: #e7848d;
+}
+
+.product-access-status + .product-btn {
+  margin-inline: auto;
+}
+
+@media (max-width: 760px) {
+  .premium-performance .performance-header,
+  .premium-review .review-header {
+    padding: 12px 18px;
+    align-items: center;
+  }
+
+  .premium-performance .performance-brand h1,
+  .premium-review .review-brand h1 {
+    font-size: 16px;
+  }
+
+  .premium-performance .performance-header-actions button,
+  .premium-review .review-header-actions button {
+    padding: 7px 8px;
+    font-size: 10px;
+  }
+
+  .product-access-gate {
+    padding-top: 30px;
+    padding-bottom: 40px;
+  }
+
+  .product-access-card {
+    padding: 26px 18px;
+  }
+
+  .product-access-boundary {
+    grid-template-columns: 1fr;
+  }
+
+  .product-access-boundary > div {
+    min-height: 0;
+  }
+}
