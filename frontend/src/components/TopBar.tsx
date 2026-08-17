@@ -32,6 +32,9 @@ export const TopBar: React.FC<TopBarProps> = ({ runtime, onOpenDiagnostics, onRe
       </div>
 
       <div className="top-bar-right">
+        <a className="review-nav-btn" href="/performance">
+          {locale === "zh-CN" ? "AI 盈利榜" : "AI Performance"}
+        </a>
         <a className="review-nav-btn" href="/review">
           {locale === "zh-CN" ? "比赛复盘" : "Match Review"}
         </a>
