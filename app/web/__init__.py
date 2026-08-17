@@ -11,6 +11,7 @@ from app.entitlements import EntitlementService
 from app.runtime.health import HealthRegistry
 from app.web.api import create_app as create_api_app
 from app.web.auth import register_auth
+from app.web.billing import create_billing_router
 from app.web.notifications import create_notification_router
 from app.web.player_hero_recent import register_player_hero_recent_routes
 from app.web.premium import create_premium_router
@@ -32,20 +33,24 @@ def create_app(
     auth_enabled: bool | None = None,
     auth_cookie_secure: bool | None = None,
     development_grant_emails: tuple[str, ...] = (),
+    settings: Settings | None = None,
 ) -> FastAPI:
-    settings: Settings | None = None
+    runtime_settings = settings
     owns_auth_service = False
     if auth_enabled is None:
-        settings = get_settings()
-        auth_enabled = settings.auth_enabled
+        runtime_settings = runtime_settings or get_settings()
+        auth_enabled = runtime_settings.auth_enabled
     if auth_cookie_secure is None:
-        settings = settings or get_settings()
-        auth_cookie_secure = settings.auth_cookie_secure
+        runtime_settings = runtime_settings or get_settings()
+        auth_cookie_secure = runtime_settings.auth_cookie_secure
     if auth_enabled and auth_service is None:
-        settings = settings or get_settings()
-        auth_service = _configured_auth_service(settings, session_factory)
+        runtime_settings = runtime_settings or get_settings()
+        auth_service = _configured_auth_service(runtime_settings, session_factory)
         owns_auth_service = True
 
+    # Main passes the already validated runtime settings explicitly. Tests and
+    # focused app fixtures fall back to the normal settings loader.
+    runtime_settings = runtime_settings or get_settings()
     entitlement_service = EntitlementService(session_factory)
 
     # Build API routes first without the SPA catch-all, so detail-scoped
@@ -69,6 +74,7 @@ def create_app(
         )
     )
     app.include_router(create_notification_router(session_factory))
+    app.include_router(create_billing_router(session_factory, runtime_settings))
     register_auth(
         app,
         service=auth_service,

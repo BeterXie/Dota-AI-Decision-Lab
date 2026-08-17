@@ -31,6 +31,14 @@ def test_http_access_policy_is_explicit_and_unknown_api_is_not_public() -> None:
         "ENTITLED",
         REALTIME_NOTIFICATIONS_ENTITLEMENT,
     )
+    assert _http_access_requirement("/api/billing/offers") == ("PUBLIC", None)
+    assert _http_access_requirement("/api/billing/webhooks/paddle") == ("PUBLIC", None)
+    assert _http_access_requirement("/api/billing/account") == ("AUTHENTICATED", None)
+    assert _http_access_requirement("/api/billing/checkout/pro_30d") == (
+        "AUTHENTICATED",
+        None,
+    )
+    assert _http_access_requirement("/api/billing/portal") == ("AUTHENTICATED", None)
     assert _http_access_requirement("/api/future-ai-export") == ("AUTHENTICATED", None)
 
 
