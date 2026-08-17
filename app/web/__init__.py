@@ -20,6 +20,7 @@ from app.web.player_hero_recent import register_player_hero_recent_routes
 from app.web.premium import create_premium_router
 from app.web.promotions import create_promotion_router
 from app.web.public_boundary import PublicMatchDataBoundaryMiddleware
+from app.web.quality import create_quality_router
 from app.web.server import WebServerWorker
 from app.web.spa import spa_file_response
 
@@ -89,6 +90,7 @@ def create_app(
     app.include_router(create_access_router(session_factory, entitlement_service))
     app.include_router(create_notification_router(session_factory))
     app.include_router(create_promotion_router(promotion_service))
+    app.include_router(create_quality_router(session_factory))
     app.include_router(
         create_billing_router(
             session_factory,
