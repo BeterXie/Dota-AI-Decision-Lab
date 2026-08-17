@@ -250,9 +250,8 @@ class PaddleSeriesPassService:
                     duplicate=True,
                     stale=not existing.applied,
                 )
-            if (
-                purchase.last_event_occurred_at is not None
-                and occurred_at < _as_utc(purchase.last_event_occurred_at)
+            if purchase.last_event_occurred_at is not None and occurred_at < _as_utc(
+                purchase.last_event_occurred_at
             ):
                 session.add(
                     _event_record(
@@ -536,10 +535,7 @@ async def _upsert_series_grants(
                 )
             )
             continue
-        if (
-            row.scope_type != ACCESS_SCOPE_SERIES
-            or row.scope_ref != purchase.canonical_series_id
-        ):
+        if row.scope_type != ACCESS_SCOPE_SERIES or row.scope_ref != purchase.canonical_series_id:
             raise PaddleWebhookError("series pass source collided with another access scope")
         row.status = "ACTIVE" if active else "REVOKED"
         if active:

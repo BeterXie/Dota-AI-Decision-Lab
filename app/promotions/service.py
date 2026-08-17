@@ -130,9 +130,7 @@ class PromotionService:
             for _ in range(5):
                 code = _new_referral_code()
                 collision = await session.scalar(
-                    select(ReferralCodeRecord.id)
-                    .where(ReferralCodeRecord.code == code)
-                    .limit(1)
+                    select(ReferralCodeRecord.id).where(ReferralCodeRecord.code == code).limit(1)
                 )
                 if collision is None:
                     session.add(
@@ -240,9 +238,7 @@ class PromotionService:
         data = payload.get("data")
         if not isinstance(event_type, str) or not isinstance(data, dict):
             return False
-        occurred_at = (
-            _parse_provider_time(payload.get("occurred_at")) or now or datetime.now(UTC)
-        )
+        occurred_at = _parse_provider_time(payload.get("occurred_at")) or now or datetime.now(UTC)
 
         if event_type == "transaction.completed":
             transaction_ref = data.get("id")
