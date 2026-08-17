@@ -1,0 +1,78 @@
+/* Real-data UX pass: keep the primary information hierarchy on live product data. */
+
+/* Event pages should read as a match schedule first. The access explanation is
+   supporting context, so on desktop it sits below the schedule instead of
+   consuming a permanent right rail. */
+@media (min-width: 1101px) {
+  .event-detail-layout {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .event-detail-aside {
+    grid-template-columns: minmax(0, 1fr) 320px;
+  }
+
+  .event-access-card {
+    display: grid;
+    grid-template-columns: minmax(230px, 0.9fr) minmax(220px, 1fr) minmax(220px, 1fr) auto;
+    grid-template-areas:
+      "title public pro action";
+    align-items: center;
+    gap: 18px;
+    padding: 16px 18px;
+  }
+
+  .event-access-card > .home-eyebrow {
+    display: none;
+  }
+
+  .event-access-card > h2 {
+    grid-area: title;
+    margin: 0;
+    font-size: 14px;
+  }
+
+  .event-access-card > .event-access-row:first-of-type {
+    grid-area: public;
+  }
+
+  .event-access-card > .event-access-row.is-pro {
+    grid-area: pro;
+  }
+
+  .event-access-card > .event-access-row {
+    padding: 0;
+    border-top: 0;
+  }
+
+  .event-access-card > a {
+    grid-area: action;
+    min-width: 126px;
+    margin: 0;
+    padding: 10px 0 10px 14px;
+    border-top: 0;
+    border-left: 1px solid rgba(147, 170, 192, 0.09);
+    white-space: nowrap;
+  }
+}
+
+.event-panel-title .home-eyebrow {
+  display: none;
+}
+
+/* The simulation methodology remains explicit, but version identifiers are
+   visually subordinate to the outcome and quality metrics. */
+.premium-performance .performance-version-line {
+  opacity: 0.62;
+  font-size: 9px;
+}
+
+@media (max-width: 760px) {
+  .event-detail-layout {
+    margin-top: 18px;
+  }
+
+  .event-panel-title {
+    margin-bottom: 10px;
+  }
+}
