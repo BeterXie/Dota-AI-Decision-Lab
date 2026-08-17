@@ -4,6 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.orm import aliased
 
 from app.evaluation.leaderboard import TournamentLeaderboardService
 from app.evaluation.portfolio_models import (
@@ -11,7 +12,7 @@ from app.evaluation.portfolio_models import (
     TournamentPortfolioPositionRecord,
 )
 from app.evaluation.quality import TournamentQualityService
-from app.models import CanonicalEvent, CanonicalMap
+from app.models import CanonicalEvent, CanonicalMap, CanonicalSeries, CanonicalTeam
 
 
 async def build_position_audit(
@@ -28,14 +29,29 @@ async def build_position_audit(
     )
     if account is None:
         return None
+
+    team_a = aliased(CanonicalTeam)
+    team_b = aliased(CanonicalTeam)
     rows = list(
         (
             await session.execute(
-                select(TournamentPortfolioPositionRecord, CanonicalMap)
+                select(
+                    TournamentPortfolioPositionRecord,
+                    CanonicalMap,
+                    CanonicalSeries,
+                    team_a,
+                    team_b,
+                )
                 .join(
                     CanonicalMap,
                     CanonicalMap.id == TournamentPortfolioPositionRecord.canonical_map_id,
                 )
+                .join(
+                    CanonicalSeries,
+                    CanonicalSeries.id == TournamentPortfolioPositionRecord.canonical_series_id,
+                )
+                .join(team_a, team_a.id == CanonicalSeries.team_a_id)
+                .join(team_b, team_b.id == CanonicalSeries.team_b_id)
                 .where(TournamentPortfolioPositionRecord.portfolio_account_id == account_id)
                 .order_by(
                     TournamentPortfolioPositionRecord.opened_at.desc(),
@@ -62,6 +78,15 @@ async def build_position_audit(
                 "canonical_map_id": str(position.canonical_map_id),
                 "map_number": canonical_map.map_number,
                 "action": position.action,
+                "team_a": {"id": str(series.team_a_id), "name": team_a_row.name},
+                "team_b": {"id": str(series.team_b_id), "name": team_b_row.name},
+                "selected_team": (
+                    {"id": str(series.team_a_id), "name": team_a_row.name}
+                    if position.action == "BUY_A"
+                    else {"id": str(series.team_b_id), "name": team_b_row.name}
+                    if position.action == "BUY_B"
+                    else None
+                ),
                 "cash_before": float(position.cash_before),
                 "stake": float(position.stake),
                 "odds": float(position.odds) if position.odds is not None else None,
@@ -76,7 +101,7 @@ async def build_position_audit(
                 "opened_at": position.opened_at,
                 "settled_at": position.settled_at,
             }
-            for position, canonical_map in rows
+            for position, canonical_map, series, team_a_row, team_b_row in rows
         ],
     }
 
