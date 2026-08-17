@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { App } from "./App";
 import { fetchMaps } from "./api";
 import { fetchAuthSession, logout, type AuthSessionState } from "./authApi";
+import { EventsPage } from "./components/EventsPage";
 import { HomePage } from "./components/HomePage";
 import { LoginDialog } from "./components/LoginDialog";
 import { ProductShell } from "./components/ProductShell";
@@ -12,11 +13,11 @@ const authSessionKey = ["auth", "session"] as const;
 
 export function ProductRoot() {
   const pathname = typeof window !== "undefined" ? window.location.pathname : "/";
-  if (pathname !== "/") return <App />;
-  return <I18nProvider><HomeExperience /></I18nProvider>;
+  if (!isProductRoute(pathname)) return <App />;
+  return <I18nProvider><ProductExperience pathname={pathname} /></I18nProvider>;
 }
 
-function HomeExperience() {
+function ProductExperience({ pathname }: { pathname: string }) {
   const queryClient = useQueryClient();
   const [loginOpen, setLoginOpen] = React.useState(false);
   const auth = useQuery({
@@ -27,7 +28,7 @@ function HomeExperience() {
     retry: 1
   });
   const matches = useQuery({
-    queryKey: ["product-home", "matches"],
+    queryKey: ["product", "matches"],
     queryFn: fetchMaps,
     refetchInterval: 15_000,
     retry: 1
@@ -38,6 +39,7 @@ function HomeExperience() {
     session?.entitlements.includes("ai_decisions") &&
       session?.entitlements.includes("realtime_notifications")
   );
+  const isHome = pathname === "/";
 
   const handleAuthenticated = (next: AuthSessionState) => {
     queryClient.setQueryData(authSessionKey, next);
@@ -58,18 +60,27 @@ function HomeExperience() {
 
   return (
     <ProductShell
-      active="home"
+      active={isHome ? "home" : "events"}
       session={session}
       onLogin={() => setLoginOpen(true)}
       onLogout={handleLogout}
     >
-      <HomePage
-        matches={matches.data ?? []}
-        loading={matches.isLoading}
-        signedIn={signedIn}
-        hasPro={hasPro}
-        onLogin={() => setLoginOpen(true)}
-      />
+      {isHome ? (
+        <HomePage
+          matches={matches.data ?? []}
+          loading={matches.isLoading}
+          signedIn={signedIn}
+          hasPro={hasPro}
+          onLogin={() => setLoginOpen(true)}
+        />
+      ) : (
+        <EventsPage
+          matches={matches.data ?? []}
+          loading={matches.isLoading}
+          pathname={pathname}
+          hasPro={hasPro}
+        />
+      )}
       {loginOpen && session?.enabled !== false && (
         <LoginDialog
           session={session}
@@ -79,4 +90,8 @@ function HomeExperience() {
       )}
     </ProductShell>
   );
+}
+
+function isProductRoute(pathname: string): boolean {
+  return pathname === "/" || pathname === "/events" || pathname.startsWith("/events/");
 }
