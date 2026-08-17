@@ -2,8 +2,8 @@ from app.auth.email import ResendLoginCodeSender
 from app.auth.service import (
     SESSION_COOKIE_NAME,
     AuthDeliveryError,
-    AuthRateLimitError,
     AuthenticatedUser,
+    AuthRateLimitError,
     EmailAuthService,
     InvalidEmailError,
     InvalidLoginCodeError,
@@ -15,8 +15,8 @@ from app.auth.service import (
 __all__ = [
     "SESSION_COOKIE_NAME",
     "AuthDeliveryError",
-    "AuthRateLimitError",
     "AuthenticatedUser",
+    "AuthRateLimitError",
     "EmailAuthService",
     "InvalidEmailError",
     "InvalidLoginCodeError",
