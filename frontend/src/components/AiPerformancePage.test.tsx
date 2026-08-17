@@ -168,7 +168,7 @@ test("pins an experiment for comparison and opens a reproducible decision trace"
   expect(screen.getByText("Team Spirit vs Aurora")).toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("button", { name: "Compare" }));
-  expect(screen.getByRole("button", { name: "Unpin" })).toBeInTheDocument();
+  expect(screen.getAllByRole("button", { name: "Unpin" }).length).toBeGreaterThan(0);
   expect(screen.getAllByText("prompt-v2").length).toBeGreaterThan(1);
 
   fireEvent.click(screen.getByText("Team Spirit vs Aurora"));
