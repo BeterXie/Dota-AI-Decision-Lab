@@ -54,7 +54,8 @@
 }
 
 .topbar-subscription-btn,
-.topbar-account-btn {
+.topbar-account-btn,
+.topbar-logout-btn {
   min-height: 34px;
   display: inline-flex;
   align-items: center;
@@ -84,6 +85,13 @@
 
 .topbar-subscription-mark {
   font-size: 12px;
+}
+
+.topbar-account-actions {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .topbar-account-btn {
@@ -117,6 +125,40 @@
   box-shadow: 0 0 0 3px rgba(114, 207, 198, 0.12);
 }
 
+.topbar-logout-btn {
+  border: 1px solid color-mix(in srgb, var(--dire) 36%, var(--border-subtle));
+  background: color-mix(in srgb, var(--dire) 7%, var(--surface-2));
+  color: var(--text-secondary);
+}
+
+.topbar-logout-btn:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--dire) 62%, transparent);
+  background: color-mix(in srgb, var(--dire) 13%, var(--surface-2));
+  color: var(--text-primary);
+}
+
+.topbar-logout-btn:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.topbar-logout-error {
+  position: absolute;
+  top: calc(100% + 7px);
+  right: 0;
+  z-index: 1300;
+  width: max-content;
+  max-width: 220px;
+  padding: 7px 10px;
+  border: 1px solid color-mix(in srgb, var(--dire) 45%, transparent);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--dire);
+  font-size: 11px;
+  line-height: 1.35;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+
 @media (max-width: 1200px) {
   .top-bar {
     padding-inline: 14px;
@@ -128,7 +170,8 @@
 
   .review-nav-btn,
   .topbar-subscription-btn,
-  .topbar-account-btn {
+  .topbar-account-btn,
+  .topbar-logout-btn {
     padding-inline: 9px;
   }
 }
@@ -149,7 +192,8 @@
   }
 
   .topbar-subscription-btn,
-  .topbar-account-btn {
+  .topbar-account-btn,
+  .topbar-logout-btn {
     font-size: 11px;
   }
 }
@@ -163,5 +207,9 @@
 
   .topbar-subscription-mark {
     display: none;
+  }
+
+  .topbar-logout-btn {
+    padding-inline: 8px;
   }
 }

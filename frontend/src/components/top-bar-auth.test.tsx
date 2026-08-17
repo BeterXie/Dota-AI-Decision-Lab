@@ -6,6 +6,7 @@ import { TopBar } from "./TopBar";
 afterEach(() => {
   cleanup();
   window.localStorage.clear();
+  vi.unstubAllGlobals();
 });
 
 function renderTopBar({
@@ -49,10 +50,29 @@ test("top bar makes disabled authentication visible instead of hiding the entry"
   expect(screen.getByRole("link", { name: /Get Pro/ })).toHaveAttribute("href", "/billing");
 });
 
-test("signed-in users get an account entry while billing remains discoverable", () => {
+test("signed-in users get explicit account and sign-out actions", () => {
   renderTopBar({ authenticated: true });
 
   expect(screen.getByRole("link", { name: "Account" })).toHaveAttribute("href", "/billing");
+  expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Log in" })).not.toBeInTheDocument();
   expect(screen.getByRole("link", { name: /Get Pro/ })).toHaveAttribute("href", "/billing");
+});
+
+test("sign-out failures are visible instead of silently leaving a stale account state", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      new Response(JSON.stringify({ detail: "logout fixture failed" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" }
+      })
+    )
+  );
+  renderTopBar({ authenticated: true });
+
+  fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+
+  expect(await screen.findByRole("alert")).toHaveTextContent("Sign out failed. Try again.");
+  expect(screen.getByRole("button", { name: "Sign out" })).toBeEnabled();
 });
