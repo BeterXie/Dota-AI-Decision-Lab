@@ -10,6 +10,7 @@ import {
   type EventSummary
 } from "../events";
 import { useI18n } from "../i18n";
+import { matchHref } from "../matches";
 
 type EventFilter = "ALL" | "LIVE" | "UPCOMING" | "COMPLETED";
 
@@ -175,8 +176,8 @@ const EventDetail: React.FC<{
               <span>{featured.round || (locale === "zh-CN" ? "赛程" : "Schedule")}</span>
               {featured.best_of ? <span>BO{featured.best_of}</span> : null}
             </div>
-            <a className="product-btn product-btn-secondary" href="/match-console">
-              {locale === "zh-CN" ? "进入比赛情报" : "Open match intelligence"}<span>→</span>
+            <a className="product-btn product-btn-secondary" href={matchHref(featured)}>
+              {locale === "zh-CN" ? "查看比赛" : "View match"}<span>→</span>
             </a>
           </div>
         </section>
@@ -257,7 +258,7 @@ const SeriesRow: React.FC<{ series: EventSeriesSummary; locale: string }> = ({ s
         <TeamName team={series.teamB} locale={locale} />
       </div>
       <div className="event-series-meta"><span>{series.bestOf ? `BO${series.bestOf}` : "—"}</span><span>{locale === "zh-CN" ? `${series.mapCount} 局记录` : `${series.mapCount} map records`}</span></div>
-      <a href="/match-console">{locale === "zh-CN" ? "比赛情报" : "Match intel"}<span>›</span></a>
+      <a href={matchHref(series.representative)}>{locale === "zh-CN" ? "查看比赛" : "View match"}<span>›</span></a>
     </article>
   );
 };
