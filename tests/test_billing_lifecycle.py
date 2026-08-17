@@ -19,12 +19,15 @@ from app.entitlements.models import UserEntitlementRecord
 
 
 @pytest.mark.asyncio
-async def test_billing_events_idempotently_grant_and_revoke_subscription_source() -> None:
+async def test_billing_events_idempotently_grant_revoke_and_ignore_stale_state() -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     now = datetime.now(UTC)
+    activated_at = now - timedelta(minutes=10)
+    stale_active_at = now - timedelta(minutes=9)
+    cancelled_at = now - timedelta(minutes=8)
     try:
         async with factory.begin() as session:
             user = UserAccountRecord(
@@ -49,6 +52,7 @@ async def test_billing_events_idempotently_grant_and_revoke_subscription_source(
         activated = await service.apply_subscription_event(
             provider="examplepay",
             event_ref="evt-1",
+            occurred_at=activated_at,
             user_id=user_id,
             subscription_ref="sub-123",
             customer_ref="cus-123",
@@ -58,11 +62,13 @@ async def test_billing_events_idempotently_grant_and_revoke_subscription_source(
             current_period_end=period_end,
         )
         assert activated.duplicate is False
+        assert activated.stale is False
         assert set(activated.active_entitlements) == set(PREMIUM_ENTITLEMENTS)
 
         duplicate = await service.apply_subscription_event(
             provider="examplepay",
             event_ref="evt-1",
+            occurred_at=activated_at,
             user_id=user_id,
             subscription_ref="sub-123",
             customer_ref="cus-123",
@@ -72,11 +78,13 @@ async def test_billing_events_idempotently_grant_and_revoke_subscription_source(
             current_period_end=period_end,
         )
         assert duplicate.duplicate is True
+        assert duplicate.stale is False
 
         with pytest.raises(BillingEventConflict):
             await service.apply_subscription_event(
                 provider="examplepay",
                 event_ref="evt-1",
+                occurred_at=activated_at,
                 user_id=user_id,
                 subscription_ref="sub-123",
                 plan_key=PRO_PLAN,
@@ -87,18 +95,44 @@ async def test_billing_events_idempotently_grant_and_revoke_subscription_source(
         cancelled = await service.apply_subscription_event(
             provider="examplepay",
             event_ref="evt-2",
+            occurred_at=cancelled_at,
             user_id=user_id,
             subscription_ref="sub-123",
             plan_key=PRO_PLAN,
             access_state=BILLING_ACCESS_INACTIVE,
             provider_status="canceled",
         )
+        assert cancelled.stale is False
         # Manual promo remains; realtime notification access supplied only by the
         # billing subscription is revoked.
         assert cancelled.active_entitlements == (AI_DECISIONS_ENTITLEMENT,)
 
+        # A delayed older activation is retained for audit but must not undo the
+        # newer cancellation.
+        stale = await service.apply_subscription_event(
+            provider="examplepay",
+            event_ref="evt-delayed",
+            occurred_at=stale_active_at,
+            user_id=user_id,
+            subscription_ref="sub-123",
+            plan_key=PRO_PLAN,
+            access_state=BILLING_ACCESS_ACTIVE,
+            provider_status="paid",
+            current_period_end=period_end,
+        )
+        assert stale.duplicate is False
+        assert stale.stale is True
+        assert stale.active_entitlements == (AI_DECISIONS_ENTITLEMENT,)
+
         async with factory() as session:
             event_count = await session.scalar(select(func.count(BillingEventRecord.id)))
+            events = list(
+                (
+                    await session.scalars(
+                        select(BillingEventRecord).order_by(BillingEventRecord.occurred_at)
+                    )
+                ).all()
+            )
             subscriptions = list((await session.scalars(select(BillingSubscriptionRecord))).all())
             billing_entitlements = list(
                 (
@@ -110,9 +144,11 @@ async def test_billing_events_idempotently_grant_and_revoke_subscription_source(
                     )
                 ).all()
             )
-        assert event_count == 2
+        assert event_count == 3
+        assert [item.applied for item in events] == [True, False, True]
         assert len(subscriptions) == 1
         assert subscriptions[0].access_state == BILLING_ACCESS_INACTIVE
+        assert subscriptions[0].last_event_occurred_at == cancelled_at
         assert {item.entitlement for item in billing_entitlements} == set(PREMIUM_ENTITLEMENTS)
         assert all(item.status == "REVOKED" for item in billing_entitlements)
     finally:
