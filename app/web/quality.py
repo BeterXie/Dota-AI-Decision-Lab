@@ -59,9 +59,7 @@ def create_quality_router(
                             CanonicalMap,
                             CanonicalMap.id == TournamentPortfolioPositionRecord.canonical_map_id,
                         )
-                        .where(
-                            TournamentPortfolioPositionRecord.portfolio_account_id == account_id
-                        )
+                        .where(TournamentPortfolioPositionRecord.portfolio_account_id == account_id)
                         .order_by(
                             TournamentPortfolioPositionRecord.opened_at.desc(),
                             TournamentPortfolioPositionRecord.id,
