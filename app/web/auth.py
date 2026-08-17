@@ -10,6 +10,7 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from app.auth import (
     SESSION_COOKIE_NAME,
     AuthDeliveryError,
+    AuthRateLimitError,
     AuthenticatedUser,
     EmailAuthService,
     InvalidEmailError,
@@ -202,12 +203,22 @@ def _auth_router(
         return await session_payload(user)
 
     @router.post("/request-code", status_code=status.HTTP_202_ACCEPTED)
-    async def request_code(payload: RequestLoginCodePayload) -> dict:
+    async def request_code(payload: RequestLoginCodePayload, request: Request) -> dict:
         auth = _require_service(service, enabled)
+        request_source = request.client.host if request.client is not None else None
         try:
-            result = await auth.request_login_code(payload.email)
+            result = await auth.request_login_code(
+                payload.email,
+                request_source=request_source,
+            )
         except InvalidEmailError as exc:
             raise HTTPException(status_code=422, detail="invalid email address") from exc
+        except AuthRateLimitError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+                detail="too many login code requests",
+                headers={"Retry-After": str(exc.retry_after_seconds)},
+            ) from exc
         except AuthDeliveryError as exc:
             raise HTTPException(status_code=503, detail="login email delivery failed") from exc
         return {
