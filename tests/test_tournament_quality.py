@@ -95,18 +95,22 @@ async def test_quality_report_combines_portfolio_calibration_and_market_baseline
             await session.flush()
             position = await portfolio.record_decision_position(session, decision)
             assert position is not None and position.status == "OPEN"
+            observed_at = NOW + timedelta(minutes=index * 30 + 25)
             result = await SettlementService().settle(
                 session,
                 canonical_map_id=canonical_map.id,
                 winner_team_id=team_a.id,
                 provider="fixture",
                 provider_match_id=f"quality-{index}",
-                result_observed_at=NOW + timedelta(minutes=index * 30 + 25),
-                basic_first_usable_at=NOW + timedelta(minutes=index * 30 + 25),
+                result_observed_at=observed_at,
+                basic_first_usable_at=observed_at,
                 raw_event_id=uuid4(),
                 normalizer_version="quality-v1",
                 identity_confidence=1.0,
             )
+            # Keep the ledger timeline deterministic: this replayed settlement
+            # happened at the recorded provider observation, not wall-clock test time.
+            result.settled_at = observed_at
             await portfolio.settle_map(
                 session,
                 canonical_map_id=canonical_map.id,
