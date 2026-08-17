@@ -450,6 +450,7 @@ class PaddleBillingGateway:
     ) -> BillingEventResult | None:
         subscription_ref = _required_string(data.get("id"), "subscription id")
         record = await self._billing_record(subscription_ref)
+        payment_blocked = record is not None and _is_payment_blocked(record.provider_status)
         checkout: BillingCheckoutRecord | None = None
         if record is None and event_type == "subscription.created":
             transaction_ref = _optional_string(data.get("transaction_id"))
@@ -497,6 +498,10 @@ class PaddleBillingGateway:
             raise PaddleWebhookError(
                 f"unsupported Paddle subscription status: {status or 'missing'}"
             )
+        provider_status = status or event_type
+        if payment_blocked and record is not None:
+            access_state = BILLING_ACCESS_INACTIVE
+            provider_status = record.provider_status
         period_end = _period_end(data)
         if access_state == BILLING_ACCESS_ACTIVE and period_end is None:
             period_end = occurred_at + timedelta(days=32)
@@ -509,7 +514,7 @@ class PaddleBillingGateway:
             customer_ref=customer_ref,
             plan_key=plan_key,
             access_state=access_state,
-            provider_status=status or event_type,
+            provider_status=provider_status,
             current_period_end=period_end,
         )
         if checkout is not None:
@@ -531,11 +536,10 @@ class PaddleBillingGateway:
         if adjustment_type != "full":
             return None
         action = (_optional_string(data.get("action")) or "").lower()
-        if action in {"refund", "chargeback", "chargeback_warning"}:
-            access_state = BILLING_ACCESS_INACTIVE
-        elif action in {"chargeback_reverse", "chargeback_warning_reverse"}:
-            access_state = BILLING_ACCESS_ACTIVE
-        else:
+        if action not in {"refund", "chargeback", "chargeback_warning"}:
+            # Reversals are deliberately not treated as proof that a recurring
+            # subscription is safe to reactivate. Keep the billing source blocked
+            # until a new purchase or an explicit operator reconciliation.
             return None
         subscription_ref = _optional_string(data.get("subscription_id")) or _optional_string(
             data.get("transaction_id")
@@ -553,8 +557,8 @@ class PaddleBillingGateway:
             subscription_ref=record.subscription_ref,
             customer_ref=_optional_string(data.get("customer_id")) or record.customer_ref,
             plan_key=record.plan_key,
-            access_state=access_state,
-            provider_status=f"{event_type}:{action}:{status}",
+            access_state=BILLING_ACCESS_INACTIVE,
+            provider_status=f"blocked:{action}:approved",
             current_period_end=record.current_period_end,
         )
 
@@ -792,6 +796,10 @@ def paddle_signature_for_test(raw_body: bytes, *, secret: str, timestamp: int | 
     signed_payload = str(value).encode("ascii") + b":" + raw_body
     digest = hmac.new(secret.encode("utf-8"), signed_payload, "sha256").hexdigest()
     return f"ts={value};h1={digest}"
+
+
+def _is_payment_blocked(provider_status: str | None) -> bool:
+    return bool(provider_status and provider_status.startswith("blocked:"))
 
 
 def _period_end(data: dict[str, Any]) -> datetime | None:
