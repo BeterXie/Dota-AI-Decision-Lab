@@ -1,6 +1,4 @@
-import { expect, test } from "playwright/test";
-
-const now = "2026-08-18T08:00:00Z";
+import { expect, test, type Page } from "playwright/test";
 
 const anonymousSession = {
   enabled: true,
@@ -53,27 +51,31 @@ const matches = [
   }
 ];
 
-test.beforeEach(async ({ page }) => {
-  await page.addInitScript(() => {
-    window.localStorage.setItem("dota-ai-decision-lab-locale", "zh-CN");
-  });
+async function mockHomeApi(page: Page, matchPayload = matches) {
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
-    const payload = path === "/api/auth/session" ? anonymousSession : path === "/api/matches" ? matches : null;
+    const payload = path === "/api/auth/session" ? anonymousSession : path === "/api/matches" ? matchPayload : null;
     await route.fulfill({
       status: payload === null ? 404 : 200,
       contentType: "application/json",
       body: JSON.stringify(payload)
     });
   });
+}
+
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    window.localStorage.setItem("dota-ai-decision-lab-locale", "zh-CN");
+  });
 });
 
 test("2.0 homepage explains the product and surfaces live, upcoming and completed matches", async ({ page }) => {
+  await mockHomeApi(page);
   await page.goto("/");
 
-  await expect(page.getByRole("heading", { name: "看懂比赛，验证 AI，追踪真实表现" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "看懂比赛，验证 AI，追踪赛后表现" })).toBeVisible();
   await expect(page.getByRole("link", { name: "首页" })).toHaveAttribute("aria-current", "page");
-  await expect(page.getByText("正在进行的赛事", { exact: true })).toBeVisible();
+  await expect(page.getByText("正在进行与即将开始", { exact: true })).toBeVisible();
   await expect(page.getByText("TI15 国际邀请赛", { exact: true })).toBeVisible();
   await expect(page.getByText("Team Spirit")).toBeVisible();
   await expect(page.getByText("Tundra Esports")).toBeVisible();
@@ -87,7 +89,21 @@ test("2.0 homepage explains the product and surfaces live, upcoming and complete
   expect(noOverflow).toBe(true);
 });
 
+test("does not present completed events as current when no live or upcoming event exists", async ({ page }) => {
+  await mockHomeApi(page, [matches[2]]);
+  await page.goto("/");
+
+  await expect(page.getByText("正在进行与即将开始", { exact: true })).toBeVisible();
+  await expect(
+    page.getByText("目前没有进行中或即将开始的赛事。历史赛事仍可在全部赛事中查看。", { exact: true })
+  ).toBeVisible();
+  await expect(page.locator("#current-events").getByText("DreamLeague S24", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("DreamLeague S24", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Tundra Esports")).toBeVisible();
+});
+
 test("avatar opens the unified login dialog and does not fake unconfigured social providers", async ({ page }) => {
+  await mockHomeApi(page);
   await page.goto("/");
   await page.getByRole("button", { name: "登录", exact: true }).click();
 
