@@ -12,7 +12,12 @@ from uuid import UUID, uuid4
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.auth.models import AuthSessionRecord, EmailLoginChallengeRecord, UserAccountRecord
+from app.auth.models import (
+    AuthSessionRecord,
+    EmailLoginChallengeRecord,
+    ExternalIdentityRecord,
+    UserAccountRecord,
+)
 from app.auth.rate_limit import LoginRequestLimiter
 from app.time import ensure_utc
 
@@ -21,6 +26,7 @@ _LOGIN_CODE_DIGITS = 6
 _EMAIL_LOCK_STRIPES = 64
 _EMAIL_LOCAL_RE = re.compile(r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+$")
 _DOMAIN_LABEL_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
+_EXTERNAL_PROVIDERS = frozenset({"google", "steam"})
 
 
 class LoginCodeSender(Protocol):
@@ -44,6 +50,10 @@ class InvalidLoginCodeError(ValueError):
     pass
 
 
+class ExternalAuthError(RuntimeError):
+    pass
+
+
 class AuthDeliveryError(RuntimeError):
     pass
 
@@ -57,8 +67,10 @@ class AuthRateLimitError(RuntimeError):
 @dataclass(frozen=True, slots=True)
 class AuthenticatedUser:
     id: UUID
-    email: str
-    email_verified_at: datetime
+    email: str | None
+    email_verified_at: datetime | None
+    display_name: str | None
+    avatar_url: str | None
     created_at: datetime
 
 
@@ -76,6 +88,13 @@ class LoginVerificationResult:
 
 
 class EmailAuthService:
+    """Owns product sessions for email OTP and trusted external identities.
+
+    The historical class name is kept for compatibility with existing wiring and
+    tests. Google/Steam prove identity outside this service; only the verified
+    provider subject is accepted here to create or attach an account session.
+    """
+
     def __init__(
         self,
         *,
@@ -106,9 +125,6 @@ class EmailAuthService:
             global_max_requests=global_rate_limit_max_requests,
             global_window_seconds=global_rate_limit_window_seconds,
         )
-        # Same-email challenge creation/verification must serialize, but unrelated
-        # users must not wait on a slow Resend request. A bounded stripe set keeps
-        # the lock table from growing with attacker-controlled email addresses.
         self._challenge_locks = tuple(asyncio.Lock() for _ in range(_EMAIL_LOCK_STRIPES))
 
     async def request_login_code(
@@ -131,10 +147,6 @@ class EmailAuthService:
                     .limit(1)
                     .with_for_update()
                 )
-                # Rate-limit every successfully delivered challenge, even after it
-                # has been consumed by too many guesses. Otherwise an attacker can
-                # immediately request another code and reset the attempt budget.
-                # A delivery failure is the only case that may retry immediately.
                 if latest is not None and latest.delivery_status != "FAILED":
                     elapsed = (now - ensure_utc(latest.created_at)).total_seconds()
                     remaining = max(0, int(self._resend_cooldown_seconds - elapsed + 0.999))
@@ -242,28 +254,107 @@ class EmailAuthService:
                                 user.email_verified_at = now
                                 user.last_login_at = now
 
-                            token = secrets.token_urlsafe(48)
-                            expires_at = now + timedelta(days=self._session_ttl_days)
-                            session.add(
-                                AuthSessionRecord(
-                                    user_id=user.id,
-                                    token_digest=_token_digest(token),
-                                    expires_at=expires_at,
-                                    last_seen_at=now,
-                                    created_at=now,
-                                )
-                            )
-                            verification = LoginVerificationResult(
-                                token=token,
-                                expires_at=expires_at,
-                                user=_authenticated_user(user),
-                            )
+                            verification = self._issue_session(session, user, now)
 
         if failure is not None:
             raise InvalidLoginCodeError(failure)
         if verification is None:
             raise RuntimeError("login verification completed without a result")
         return verification
+
+    async def login_external_identity(
+        self,
+        *,
+        provider: str,
+        subject: str,
+        email: str | None = None,
+        email_verified: bool = False,
+        display_name: str | None = None,
+        avatar_url: str | None = None,
+    ) -> LoginVerificationResult:
+        provider_key = provider.strip().lower()
+        subject_key = subject.strip()
+        if provider_key not in _EXTERNAL_PROVIDERS or not subject_key or len(subject_key) > 255:
+            raise ExternalAuthError("invalid external identity")
+
+        normalized_email: str | None = None
+        if email:
+            try:
+                normalized_email = normalize_email(email)
+            except InvalidEmailError:
+                normalized_email = None
+                email_verified = False
+
+        now = datetime.now(UTC)
+        async with self._session_factory() as session, session.begin():
+            identity = await session.scalar(
+                select(ExternalIdentityRecord)
+                .where(
+                    ExternalIdentityRecord.provider == provider_key,
+                    ExternalIdentityRecord.subject == subject_key,
+                )
+                .limit(1)
+                .with_for_update()
+            )
+
+            user: UserAccountRecord | None = None
+            if identity is not None:
+                user = await session.get(UserAccountRecord, identity.user_id, with_for_update=True)
+            elif normalized_email is not None and email_verified:
+                user = await session.scalar(
+                    select(UserAccountRecord)
+                    .where(UserAccountRecord.email == normalized_email)
+                    .limit(1)
+                    .with_for_update()
+                )
+
+            if user is not None and user.disabled_at is not None:
+                raise ExternalAuthError("account is disabled")
+
+            if user is None:
+                user = UserAccountRecord(
+                    email=normalized_email if email_verified else None,
+                    email_verified_at=now
+                    if normalized_email is not None and email_verified
+                    else None,
+                    display_name=_clean_profile_text(display_name, 160),
+                    avatar_url=_clean_profile_url(avatar_url),
+                    last_login_at=now,
+                    created_at=now,
+                )
+                session.add(user)
+                await session.flush()
+            else:
+                user.last_login_at = now
+                if normalized_email is not None and email_verified and user.email is None:
+                    user.email = normalized_email
+                    user.email_verified_at = now
+                cleaned_name = _clean_profile_text(display_name, 160)
+                cleaned_avatar = _clean_profile_url(avatar_url)
+                if cleaned_name:
+                    user.display_name = cleaned_name
+                if cleaned_avatar:
+                    user.avatar_url = cleaned_avatar
+
+            if identity is None:
+                identity = ExternalIdentityRecord(
+                    user_id=user.id,
+                    provider=provider_key,
+                    subject=subject_key,
+                    provider_email=normalized_email,
+                    display_name=_clean_profile_text(display_name, 160),
+                    avatar_url=_clean_profile_url(avatar_url),
+                    last_login_at=now,
+                    created_at=now,
+                )
+                session.add(identity)
+            else:
+                identity.provider_email = normalized_email
+                identity.display_name = _clean_profile_text(display_name, 160)
+                identity.avatar_url = _clean_profile_url(avatar_url)
+                identity.last_login_at = now
+
+            return self._issue_session(session, user, now)
 
     async def authenticate(self, token: str | None) -> AuthenticatedUser | None:
         if not token:
@@ -311,6 +402,29 @@ class EmailAuthService:
     async def close(self) -> None:
         await self._sender.close()
 
+    def _issue_session(
+        self,
+        session: AsyncSession,
+        user: UserAccountRecord,
+        now: datetime,
+    ) -> LoginVerificationResult:
+        token = secrets.token_urlsafe(48)
+        expires_at = now + timedelta(days=self._session_ttl_days)
+        session.add(
+            AuthSessionRecord(
+                user_id=user.id,
+                token_digest=_token_digest(token),
+                expires_at=expires_at,
+                last_seen_at=now,
+                created_at=now,
+            )
+        )
+        return LoginVerificationResult(
+            token=token,
+            expires_at=expires_at,
+            user=_authenticated_user(user),
+        )
+
     def _challenge_lock(self, email: str) -> asyncio.Lock:
         digest = hashlib.sha256(email.encode("utf-8")).digest()
         index = int.from_bytes(digest[:2], "big") % len(self._challenge_locks)
@@ -349,6 +463,22 @@ def normalize_email(raw_email: str) -> str:
     return f"{local.lower()}@{ascii_domain}"
 
 
+def _clean_profile_text(value: str | None, max_length: int) -> str | None:
+    if value is None:
+        return None
+    cleaned = " ".join(unicodedata.normalize("NFKC", value).split())
+    return cleaned[:max_length] or None
+
+
+def _clean_profile_url(value: str | None) -> str | None:
+    if value is None:
+        return None
+    cleaned = value.strip()
+    if len(cleaned) > 2_048 or not cleaned.startswith("https://"):
+        return None
+    return cleaned
+
+
 def _token_digest(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
@@ -357,6 +487,10 @@ def _authenticated_user(user: UserAccountRecord) -> AuthenticatedUser:
     return AuthenticatedUser(
         id=user.id,
         email=user.email,
-        email_verified_at=ensure_utc(user.email_verified_at),
+        email_verified_at=(
+            ensure_utc(user.email_verified_at) if user.email_verified_at is not None else None
+        ),
+        display_name=user.display_name,
+        avatar_url=user.avatar_url,
         created_at=ensure_utc(user.created_at),
     )

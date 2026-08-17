@@ -2,6 +2,7 @@
 .env
 .env.*
 !.env.example
+!.env.social.example
 __pycache__/
 *.py[cod]
 .venv/

@@ -11,6 +11,8 @@ export const AuthAccountBadge: React.FC<AuthAccountBadgeProps> = ({ user, onLogo
   const { locale, t } = useI18n();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const accountLabel =
+    user.display_name || user.email || (locale === "zh-CN" ? "Steam 用户" : "Steam user");
 
   const handleLogout = async () => {
     if (busy) return;
@@ -31,8 +33,8 @@ export const AuthAccountBadge: React.FC<AuthAccountBadgeProps> = ({ user, onLogo
   return (
     <div className="auth-account-badge" aria-label={t("authCurrentAccount")}>
       <span className="auth-account-dot" aria-hidden="true" />
-      <span className="auth-account-email" title={user.email}>{user.email}</span>
-      <a href="/billing">{locale === "zh-CN" ? "Pro" : "Pro"}</a>
+      <span className="auth-account-email" title={user.email ?? accountLabel}>{accountLabel}</span>
+      <a href="/billing">Pro</a>
       <a href="/notifications">{locale === "zh-CN" ? "通知" : "Notifications"}</a>
       <button type="button" disabled={busy} onClick={() => void handleLogout()}>
         {busy ? "…" : t("authSignOut")}
