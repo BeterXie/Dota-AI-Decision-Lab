@@ -65,10 +65,10 @@ test("keeps Notification Center locked for signed-in users without realtime enti
   await page.goto("/notifications?e2e=free-notifications");
 
   await expect(
-    page.getByRole("heading", { name: "Realtime alerts follow your match access" })
+    page.getByRole("heading", { name: "Notifications require active paid access" })
   ).toBeVisible();
   await expect(
-    page.getByText("This account does not have an active realtime notification grant.")
+    page.getByText("This account does not have active notification access.")
   ).toBeVisible();
   expect(notificationRequests()).toBe(0);
 });
@@ -77,6 +77,7 @@ test("lets an entitled user manage channels and generate a verified QQ pairing c
   await mockNotificationApi(page, { entitled: true });
   await page.goto("/notifications?e2e=pro-notifications");
 
+  await expect(page.getByRole("heading", { name: "Get alerts only for the matches you care about" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Notification Center" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Email" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "QQ Bot" })).toBeVisible();
