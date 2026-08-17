@@ -11,11 +11,9 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import UserAccountRecord
+from app.notifications.center import PAIRABLE_CHANNELS, NotificationPairingError, normalize_channel
 from app.notifications.center import (
-    PAIRABLE_CHANNELS,
     NotificationCenterService as BaseNotificationCenterService,
-    NotificationPairingError,
-    normalize_channel,
 )
 from app.notifications.models import (
     NotificationBindingRecord,
