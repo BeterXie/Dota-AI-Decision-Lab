@@ -1,20 +1,24 @@
-/* Final 2.0 shell pass: remove duplicate legacy chrome without touching the
+/* Final 2.0 shell pass: demote legacy page chrome without touching the
    underlying analytics/business components. */
-
-.premium-performance .performance-brand,
-.premium-review .review-brand {
-  display: none;
-}
 
 .premium-performance .performance-header,
 .premium-review .review-header {
   min-height: 46px;
-  justify-content: flex-end;
 }
 
+.premium-performance .performance-brand > div > .performance-kicker,
+.premium-review .review-brand .review-kicker,
 .premium-performance .performance-section-heading .performance-kicker,
 .premium-review .review-main .review-kicker {
   display: none;
+}
+
+.premium-performance .performance-brand h1,
+.premium-review .review-brand h1 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 680;
+  color: var(--product-text-2);
 }
 
 .premium-performance .performance-section-heading h3,
