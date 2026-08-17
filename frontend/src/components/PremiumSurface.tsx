@@ -94,7 +94,7 @@ export function PremiumSurface({
     return (
       <PremiumShellFrame surface={surface}>
         <Suspense fallback={<PremiumLoading label={locale === "zh-CN" ? "正在加载 AI 表现…" : "Loading AI performance…"} />}>
-          <AiPerformancePage embedded />
+          <AiPerformancePage />
         </Suspense>
       </PremiumShellFrame>
     );
@@ -103,7 +103,7 @@ export function PremiumSurface({
   return (
     <PremiumShellFrame surface={surface}>
       <Suspense fallback={<PremiumLoading label={locale === "zh-CN" ? "正在加载复盘…" : "Loading review…"} />}>
-        <ReviewPage embedded />
+        <ReviewPage />
       </Suspense>
     </PremiumShellFrame>
   );
