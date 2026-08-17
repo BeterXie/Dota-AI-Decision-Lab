@@ -1,11 +1,13 @@
 """Local state storage for the QQ Bot channel.
 
-AppID/AppSecret live in the gitignored runtime state directory with
-owner-only permissions, matching the WeChat ClawBot credential store.
+AppID/AppSecret and the local bridge control token live in the gitignored
+runtime state directory with owner-only permissions, matching the WeChat
+ClawBot credential store.
 """
 
 import hashlib
 import json
+import secrets
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -25,12 +27,14 @@ class QQBotStore(LocalStateStore):
         self._accounts_path = self._root / "accounts.json"
         self._contacts_path = self._root / "contacts.json"
         self._preferences_path = self._root / "preferences.json"
+        self._bridge_token_path = self._root / "bridge-token.json"
         self._cursor_dir = self._root / "cursors"
         self.ensure_private_directory(self._cursor_dir, force=True)
         for path in (
             self._accounts_path,
             self._contacts_path,
             self._preferences_path,
+            self._bridge_token_path,
         ):
             self.restrict_file_permissions(path)
         for path in self._cursor_dir.glob("*.json"):
@@ -136,6 +140,20 @@ class QQBotStore(LocalStateStore):
                 "updated_at": (updated_at or datetime.now(UTC)).isoformat(),
             },
         )
+
+    def bridge_token(self) -> str:
+        """Return the stable owner-only bearer token used by the local Node bridge."""
+
+        raw = self.read_json(self._bridge_token_path)
+        token = raw.get("token") if isinstance(raw, dict) else None
+        if isinstance(token, str) and len(token) >= 32:
+            return token
+        token = secrets.token_urlsafe(48)
+        self.write_json(
+            self._bridge_token_path,
+            {"token": token, "created_at": datetime.now(UTC).isoformat()},
+        )
+        return token
 
     def decision_notifications_enabled(self) -> bool:
         return self._preferences().get("decision_notifications", True)
