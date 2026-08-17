@@ -5,11 +5,23 @@ export interface AuthUser {
   created_at: string;
 }
 
+export interface AccessGrant {
+  entitlement: string;
+  scope_type: "GLOBAL" | "SERIES" | "MAP" | string;
+  scope_ref: string | null;
+  campaign_key: string | null;
+  starts_at: string | null;
+  expires_at: string | null;
+}
+
 export interface AuthSessionState {
   enabled: boolean;
   authenticated: boolean;
   user: AuthUser | null;
+  /** Site-wide/global entitlements only. */
   entitlements: string[];
+  /** Includes GLOBAL plus resource-scoped SERIES/MAP grants. */
+  grants: AccessGrant[];
 }
 
 export interface LoginCodeRequestResult {
