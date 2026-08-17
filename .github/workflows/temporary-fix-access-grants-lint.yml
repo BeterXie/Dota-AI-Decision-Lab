@@ -1,4 +1,4 @@
-name: Temporary access-grants safe lint fixer
+name: Temporary access-grants residual lint fixer
 
 on:
   push:
@@ -26,20 +26,37 @@ jobs:
           enable-cache: true
       - name: Install locked development environment
         run: uv sync --frozen --extra dev
-      - name: Capture residual Ruff diagnostics
+      - name: Apply final residual lint fixes
         shell: bash
         run: |
-          set +e
-          uv run ruff check app migrations tests tools > ruff-residual-access-grants.txt 2>&1
-          code=$?
-          cat ruff-residual-access-grants.txt
-          echo "$code" > ruff-residual-access-grants.exit
-          exit 0
-      - name: Commit temporary diagnostics
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("app/notifications/secure_center.py")
+          text = path.read_text(encoding="utf-8")
+          old = '                delivery.last_error = "binding, preference, account, or scoped realtime entitlement is no longer active"\n'
+          new = '                delivery.last_error = (\n                    "binding, preference, account, or scoped realtime "\n                    "entitlement is no longer active"\n                )\n'
+          if old not in text:
+              raise SystemExit("secure_center residual line not found")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
+          path = Path("app/promotions/paddle_series.py")
+          text = path.read_text(encoding="utf-8")
+          old = '                    "a recent checkout for this series is still pending; complete or abandon it first"\n'
+          new = '                    "a recent checkout for this series is still pending; "\n                    "complete or abandon it first"\n'
+          if old not in text:
+              raise SystemExit("paddle_series residual line not found")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+          PY
+          rm -f ruff-residual-access-grants.txt ruff-residual-access-grants.exit
+          uv run ruff format app migrations tests tools
+          uv run ruff check app migrations tests tools
+      - name: Commit final lint fixes
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add ruff-residual-access-grants.txt ruff-residual-access-grants.exit
-          git commit -m "Capture residual Ruff diagnostics"
+          git add app/notifications/secure_center.py app/promotions/paddle_series.py
+          git add -u ruff-residual-access-grants.txt ruff-residual-access-grants.exit || true
+          git commit -m "Fix residual access grants lint"
           git push origin HEAD:feat/access-grants-promotions
