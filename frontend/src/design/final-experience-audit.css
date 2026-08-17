@@ -1,0 +1,59 @@
+/* Final 2.0 shell pass: demote legacy page chrome without touching the
+   underlying analytics/business components. */
+
+.premium-performance .performance-header,
+.premium-review .review-header {
+  min-height: 46px;
+}
+
+.premium-performance .performance-brand > div > .performance-kicker,
+.premium-review .review-brand .review-kicker,
+.premium-performance .performance-section-heading .performance-kicker,
+.premium-review .review-main .review-kicker {
+  display: none;
+}
+
+.premium-performance .performance-brand h1,
+.premium-review .review-brand h1 {
+  margin: 0;
+  font-size: 14px;
+  font-weight: 680;
+  color: var(--product-text-2);
+}
+
+.premium-performance .performance-section-heading h3,
+.premium-review .review-section-heading h3,
+.premium-review .review-list-toolbar h3 {
+  margin-top: 0;
+}
+
+/* Keep the account menu usable on short phone viewports instead of letting the
+   bottom actions fall below the fold. */
+.product-account-menu {
+  max-height: min(620px, calc(100dvh - 82px));
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+
+/* Keyboard focus should be as discoverable as mouse hover throughout the new
+   product shell. */
+.product-root a:focus-visible,
+.product-root button:focus-visible,
+.product-root input:focus-visible {
+  outline: 2px solid rgba(77, 217, 223, 0.82);
+  outline-offset: 3px;
+}
+
+@media (max-width: 460px) {
+  .product-account-menu {
+    top: 64px;
+    max-height: calc(100dvh - 74px);
+  }
+
+  .premium-performance .performance-header,
+  .premium-review .review-header {
+    min-height: 44px;
+    padding-block: 7px;
+  }
+}
