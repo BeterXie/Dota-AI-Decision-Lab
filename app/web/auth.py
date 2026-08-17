@@ -102,18 +102,30 @@ class AuthGuardMiddleware:
         elif scope_type == "websocket":
             if not _websocket_origin_allowed(_scope_origin(scope)):
                 await send(
-                    {"type": "websocket.close", "code": 4403, "reason": "websocket origin is not allowed"}
+                    {
+                        "type": "websocket.close",
+                        "code": 4403,
+                        "reason": "websocket origin is not allowed",
+                    }
                 )
                 return
             if not self._enabled:
                 await send(
-                    {"type": "websocket.close", "code": 4403, "reason": "authentication is disabled"}
+                    {
+                        "type": "websocket.close",
+                        "code": 4403,
+                        "reason": "authentication is disabled",
+                    }
                 )
                 return
             user = await self._authenticated_scope_user(scope)
             if user is None:
                 await send(
-                    {"type": "websocket.close", "code": 4401, "reason": "authentication required"}
+                    {
+                        "type": "websocket.close",
+                        "code": 4401,
+                        "reason": "authentication required",
+                    }
                 )
                 return
             scope.setdefault("state", {})["auth_user"] = user
@@ -155,7 +167,6 @@ def register_auth(
         entitlements=entitlements,
         enabled=enabled,
     )
-    app.router.add_event_handler("shutdown", social.close)
 
 
 def _auth_router(
@@ -181,9 +192,7 @@ def _auth_router(
                 )
             else:
                 active = await entitlements.active_entitlements(user.id)
-            grants = [
-                item.public_payload() for item in await entitlements.active_grants(user.id)
-            ]
+            grants = [item.public_payload() for item in await entitlements.active_grants(user.id)]
         return {
             "enabled": enabled,
             "authenticated": user is not None if enabled else True,
