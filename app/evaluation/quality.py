@@ -119,11 +119,9 @@ class TournamentQualityService:
             ).all()
         )
         stake_ratios = [
-            float(position.stake) / float(decision.bankroll_before)
-            for position, decision in position_pairs
-            if decision.bankroll_before is not None
-            and float(decision.bankroll_before) > 0
-            and position.status != "REJECTED"
+            float(position.stake) / float(position.cash_before)
+            for position, _ in position_pairs
+            if float(position.cash_before) > 0 and position.status != "REJECTED"
         ]
         settled_positions = [
             position for position, _ in position_pairs if position.status in {"WON", "LOST"}

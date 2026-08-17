@@ -170,3 +170,102 @@ def _decision(snapshot, *, experiment, stake: float, offset: int) -> AiDecisionR
         raw_response={"fixture": True},
         parse_status="SUCCESS",
     )
+
+
+@pytest.mark.asyncio
+async def test_postgres_same_decision_position_creation_is_idempotent() -> None:
+    database_url = os.environ.get("DATABASE_URL", "")
+    if not database_url.startswith("postgresql"):
+        pytest.skip("PostgreSQL row-lock regression requires DATABASE_URL")
+
+    engine = create_async_engine(database_url, pool_pre_ping=True)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    service = TournamentPortfolioService(initial_bankroll=10_000)
+    now = datetime.now(UTC).replace(microsecond=0)
+    experiment = ("idempotent", "fixture", "prompt", "policy", "view")
+
+    async with factory() as session, session.begin():
+        event = CanonicalEvent(name=f"Idempotent Cup {uuid4()}", started_at=now)
+        team_a = CanonicalTeam(name=f"A-{uuid4()}")
+        team_b = CanonicalTeam(name=f"B-{uuid4()}")
+        session.add_all([event, team_a, team_b])
+        await session.flush()
+        series = CanonicalSeries(
+            event_id=event.id,
+            team_a_id=team_a.id,
+            team_b_id=team_b.id,
+            best_of=1,
+            scheduled_at=now,
+        )
+        session.add(series)
+        await session.flush()
+        canonical_map = CanonicalMap(series_id=series.id, map_number=1, scheduled_at=now)
+        session.add(canonical_map)
+        await session.flush()
+        snapshot = DecisionSnapshotRecord(
+            id=uuid4(),
+            canonical_map_id=canonical_map.id,
+            decision_at=now + timedelta(minutes=1),
+            created_at=now + timedelta(minutes=1),
+            mode="LIVE_BASIC",
+            canonical_payload={
+                "identity": {
+                    "team_a": {"id": str(team_a.id)},
+                    "team_b": {"id": str(team_b.id)},
+                },
+                "market": {
+                    "observations": [
+                        {"selection_team_id": str(team_a.id), "price": "1.90"},
+                        {"selection_team_id": str(team_b.id), "price": "2.10"},
+                    ]
+                },
+            },
+            snapshot_hash=f"idempotent-{uuid4()}",
+        )
+        session.add(snapshot)
+        await session.flush()
+        decision = _decision(snapshot, experiment=experiment, stake=1000, offset=0)
+        session.add(decision)
+        await session.flush()
+        await service.context_for_snapshot(
+            session,
+            snapshot_id=snapshot.id,
+            experiment=experiment,
+        )
+        event_id = event.id
+        decision_id = decision.id
+
+    async def place():
+        async with factory() as session, session.begin():
+            decision = await session.get(AiDecisionRecord, decision_id)
+            assert decision is not None
+            position = await service.record_decision_position(session, decision)
+            assert position is not None
+            return position.id
+
+    first, second = await asyncio.gather(place(), place())
+    assert first == second
+
+    async with factory() as session:
+        account = await session.scalar(
+            select(TournamentPortfolioAccountRecord).where(
+                TournamentPortfolioAccountRecord.canonical_event_id == event_id,
+                TournamentPortfolioAccountRecord.provider == experiment[0],
+            )
+        )
+        assert account is not None
+        positions = list(
+            (
+                await session.scalars(
+                    select(TournamentPortfolioPositionRecord).where(
+                        TournamentPortfolioPositionRecord.portfolio_account_id == account.id
+                    )
+                )
+            ).all()
+        )
+        assert len(positions) == 1
+        assert positions[0].cash_before == Decimal("10000.00")
+        assert account.cash_balance == Decimal("9000.00")
+        assert account.locked_balance == Decimal("1000.00")
+
+    await engine.dispose()

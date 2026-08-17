@@ -66,6 +66,7 @@ def upgrade() -> None:
         sa.Column("canonical_series_id", sa.Uuid(), nullable=False),
         sa.Column("canonical_map_id", sa.Uuid(), nullable=False),
         sa.Column("action", sa.String(16), nullable=False),
+        sa.Column("cash_before", sa.Numeric(14, 2), nullable=False),
         sa.Column("stake", sa.Numeric(14, 2), nullable=False),
         sa.Column("odds", sa.Numeric(12, 5)),
         sa.Column("status", sa.String(24), nullable=False),

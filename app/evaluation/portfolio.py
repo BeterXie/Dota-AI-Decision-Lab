@@ -190,6 +190,13 @@ class TournamentPortfolioService:
         )
         if account is None:
             raise RuntimeError("tournament portfolio account disappeared")
+        existing = await session.scalar(
+            select(TournamentPortfolioPositionRecord).where(
+                TournamentPortfolioPositionRecord.ai_decision_id == record.id
+            )
+        )
+        if existing is not None:
+            return existing
 
         snapshot = await session.get(DecisionSnapshotRecord, record.snapshot_id)
         if snapshot is None:
@@ -206,18 +213,19 @@ class TournamentPortfolioService:
                 MapResultRecord.canonical_map_id == scope.canonical_map_id
             )
         )
+        cash_before = _money(account.cash_balance)
         decision_available_at = ensure_utc(
             record.response_received_at or record.decision_persisted_at or record.request_started_at
         )
         rejection_reason = None
         status = "OPEN"
-        if result is not None and ensure_utc(result.settled_at) <= decision_available_at:
+        if result is not None and ensure_utc(result.basic_first_usable_at) <= decision_available_at:
             status = "REJECTED"
             rejection_reason = "MAP_ALREADY_SETTLED"
         elif odds is None:
             status = "REJECTED"
             rejection_reason = "MISSING_DECISION_ODDS"
-        elif stake > _money(account.cash_balance):
+        elif stake > cash_before:
             status = "REJECTED"
             rejection_reason = "INSUFFICIENT_CASH"
 
@@ -228,6 +236,7 @@ class TournamentPortfolioService:
             canonical_series_id=scope.canonical_series_id,
             canonical_map_id=scope.canonical_map_id,
             action=decision.action,
+            cash_before=cash_before,
             stake=stake,
             odds=odds,
             status=status,
@@ -239,7 +248,7 @@ class TournamentPortfolioService:
         if status == "REJECTED":
             return position
 
-        account.cash_balance = _money(account.cash_balance - stake)
+        account.cash_balance = _money(cash_before - stake)
         account.locked_balance = _money(account.locked_balance + stake)
         account.updated_at = datetime.now(UTC)
         await self._ledger(
@@ -319,7 +328,8 @@ class TournamentPortfolioService:
             )
             for position in positions:
                 stake = _money(position.stake)
-                if provider_conflict or winner_team_id is None:
+                winner_is_valid = winner_team_id in {series.team_a_id, series.team_b_id}
+                if provider_conflict or not winner_is_valid:
                     payout = stake
                     pnl = _ZERO
                     position.status = "VOID"
@@ -569,27 +579,27 @@ def _selected_odds(
     team_a_id: UUID,
     team_b_id: UUID,
 ) -> Decimal | None:
-    observations = payload.get("market", {}).get("observations", [])
+    market = payload.get("market")
+    if not isinstance(market, dict):
+        return None
+    observations = market.get("observations")
+    if not isinstance(observations, list):
+        return None
     target = team_a_id if action == "BUY_A" else team_b_id
-    fallback: list[Decimal] = []
     for observation in observations:
         if not isinstance(observation, dict):
             continue
+        selection_team_id = observation.get("selection_team_id")
+        if selection_team_id is None or str(selection_team_id) != str(target):
+            continue
         raw_price = observation.get("price")
         if raw_price is None:
-            continue
+            return None
         try:
             price = Decimal(str(raw_price))
         except InvalidOperation, ValueError:
-            continue
-        if price <= 1:
-            continue
-        fallback.append(price)
-        selection_team_id = observation.get("selection_team_id")
-        if selection_team_id is not None and str(selection_team_id) == str(target):
-            return price
-    if len(fallback) >= 2:
-        return fallback[0] if action == "BUY_A" else fallback[1]
+            return None
+        return price if price > 1 else None
     return None
 
 

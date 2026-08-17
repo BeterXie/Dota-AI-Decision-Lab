@@ -254,3 +254,40 @@ async def test_void_result_returns_locked_capital_without_profit() -> None:
         assert entries == ["EVENT_FUNDED", "BET_PLACED", "BET_VOID"]
 
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_unknown_winner_identity_voids_positions() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    service = TournamentPortfolioService(initial_bankroll=10_000)
+
+    async with factory() as session, session.begin():
+        event, _, _, _, map1, _, snapshot1, _ = await _fixture(session)
+        outsider = CanonicalTeam(name="Outsider")
+        session.add(outsider)
+        await session.flush()
+        decision = _decision(snapshot1, action="BUY_A", stake=2500)
+        session.add(decision)
+        await session.flush()
+        position = await service.record_decision_position(session, decision)
+        assert position is not None and position.status == "OPEN"
+        await service.settle_map(
+            session,
+            canonical_map_id=map1.id,
+            winner_team_id=outsider.id,
+            provider_conflict=False,
+        )
+        assert position.status == "VOID"
+        account = await session.scalar(
+            select(TournamentPortfolioAccountRecord).where(
+                TournamentPortfolioAccountRecord.canonical_event_id == event.id
+            )
+        )
+        assert account is not None
+        assert account.cash_balance == Decimal("10000.00")
+        assert account.realized_pnl == Decimal("0.00")
+
+    await engine.dispose()

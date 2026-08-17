@@ -79,6 +79,7 @@ class TournamentPortfolioPositionRecord(Base):
         ForeignKey("canonical_maps.id", ondelete="CASCADE"), nullable=False
     )
     action: Mapped[str] = mapped_column(String(16), nullable=False)
+    cash_before: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     stake: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     odds: Mapped[Decimal | None] = mapped_column(Numeric(12, 5))
     status: Mapped[str] = mapped_column(String(24), nullable=False)
