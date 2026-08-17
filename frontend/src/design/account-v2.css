@@ -1,0 +1,326 @@
+.account-v2 {
+  padding: 44px 0 80px;
+}
+
+.account-v2-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 24px;
+  margin-bottom: 24px;
+}
+
+.account-v2-header h1 {
+  margin: 8px 0 8px;
+  font-size: clamp(30px, 4vw, 42px);
+  letter-spacing: -0.04em;
+}
+
+.account-v2-header p,
+.account-v2-card p,
+.account-v2-danger p,
+.account-v2-gate-card p {
+  margin: 0;
+  color: var(--product-text-2);
+  line-height: 1.65;
+}
+
+.account-v2-profile-card {
+  display: grid;
+  grid-template-columns: auto 1fr auto;
+  align-items: center;
+  gap: 16px;
+  padding: 18px;
+  margin-bottom: 18px;
+  border: 1px solid var(--product-border);
+  border-radius: var(--product-radius);
+  background: var(--product-surface);
+  box-shadow: var(--product-shadow);
+}
+
+.account-v2-avatar {
+  width: 54px;
+  height: 54px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 50%;
+  background: linear-gradient(145deg, #183247, #142131);
+  color: #e7fbff;
+  font-weight: 800;
+  font-size: 18px;
+}
+
+.account-v2-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+
+.account-v2-profile-copy {
+  min-width: 0;
+}
+
+.account-v2-profile-copy strong,
+.account-v2-profile-copy span {
+  display: block;
+}
+
+.account-v2-profile-copy strong {
+  color: var(--product-text);
+  font-size: 17px;
+  overflow-wrap: anywhere;
+}
+
+.account-v2-profile-copy span {
+  margin-top: 4px;
+  color: var(--product-text-3);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}
+
+.account-v2-plan {
+  padding: 6px 10px;
+  border: 1px solid var(--product-border-strong);
+  border-radius: 999px;
+  color: var(--product-text-2);
+  background: rgba(255, 255, 255, 0.03);
+  font-size: 11px;
+  font-weight: 850;
+  letter-spacing: 0.08em;
+}
+
+.account-v2-plan.is-pro,
+.account-v2-membership-row strong.is-pro {
+  color: #d9c2ff;
+}
+
+.account-v2-plan.is-pro {
+  border-color: rgba(155, 103, 238, 0.36);
+  background: rgba(155, 103, 238, 0.1);
+}
+
+.account-v2-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.account-v2-card {
+  min-width: 0;
+  padding: 20px;
+  border: 1px solid var(--product-border);
+  border-radius: var(--product-radius);
+  background: var(--product-surface-soft);
+}
+
+.account-v2-card-heading {
+  margin-bottom: 18px;
+}
+
+.account-v2-card-heading > div {
+  display: grid;
+  grid-template-columns: 34px 1fr;
+  gap: 12px;
+  align-items: start;
+}
+
+.account-v2-card-heading > div > span {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  border: 1px solid var(--product-border);
+  border-radius: 10px;
+  color: var(--product-teal);
+  background: rgba(77, 217, 223, 0.05);
+}
+
+.account-v2-card h2 {
+  margin: 0 0 4px;
+  font-size: 16px;
+  letter-spacing: -0.02em;
+}
+
+.account-v2-card-heading p {
+  font-size: 12px;
+}
+
+.account-v2-details {
+  margin: 0;
+}
+
+.account-v2-details > div,
+.account-v2-membership-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 18px;
+  padding: 11px 0;
+  border-top: 1px solid var(--product-border);
+}
+
+.account-v2-details > div:first-child,
+.account-v2-membership-row:first-of-type {
+  border-top: 0;
+}
+
+.account-v2-details dt,
+.account-v2-membership-row span {
+  color: var(--product-text-3);
+  font-size: 12px;
+}
+
+.account-v2-details dd,
+.account-v2-membership-row strong {
+  margin: 0;
+  color: var(--product-text);
+  font-size: 13px;
+  text-align: right;
+  overflow-wrap: anywhere;
+}
+
+.account-v2-note {
+  margin: 14px 0 16px !important;
+  padding: 12px 13px;
+  border: 1px solid rgba(151, 177, 202, 0.12);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.025);
+  font-size: 12px;
+}
+
+.account-v2-language {
+  display: inline-flex;
+  gap: 4px;
+  padding: 4px;
+  border: 1px solid var(--product-border);
+  border-radius: 10px;
+  background: rgba(0, 0, 0, 0.16);
+}
+
+.account-v2-language button {
+  border: 0;
+  border-radius: 7px;
+  padding: 8px 13px;
+  background: transparent;
+  color: var(--product-text-3);
+  font: inherit;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.account-v2-language button.is-active {
+  background: rgba(77, 217, 223, 0.1);
+  color: #dffcff;
+}
+
+.account-v2-danger {
+  margin-top: 16px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 18px;
+  padding: 18px 20px;
+  border: 1px solid rgba(255, 101, 114, 0.16);
+  border-radius: var(--product-radius);
+  background: rgba(255, 101, 114, 0.035);
+}
+
+.account-v2-danger strong {
+  display: block;
+  margin-bottom: 4px;
+  font-size: 14px;
+}
+
+.account-v2-danger p {
+  font-size: 12px;
+}
+
+.account-v2-danger button {
+  border: 1px solid rgba(255, 101, 114, 0.28);
+  border-radius: 9px;
+  padding: 9px 13px;
+  background: rgba(255, 101, 114, 0.07);
+  color: #ffacb4;
+  font: inherit;
+  cursor: pointer;
+}
+
+.account-v2-danger > span[role="alert"] {
+  grid-column: 1 / -1;
+  color: #ff9da7;
+  font-size: 12px;
+}
+
+.account-v2-gate,
+.account-v2-state {
+  min-height: calc(100vh - 64px);
+  display: grid;
+  place-items: center;
+  padding-block: 56px;
+}
+
+.account-v2-gate-card {
+  width: min(620px, 100%);
+  padding: clamp(24px, 5vw, 42px);
+  border: 1px solid var(--product-border);
+  border-radius: 18px;
+  background: var(--product-surface);
+  text-align: left;
+}
+
+.account-v2-gate-card h1 {
+  margin: 8px 0 12px;
+  font-size: clamp(28px, 5vw, 40px);
+  letter-spacing: -0.04em;
+}
+
+.account-v2-gate-card p {
+  margin-bottom: 22px;
+}
+
+.account-v2-state {
+  color: var(--product-text-2);
+  gap: 12px;
+  align-content: center;
+}
+
+.account-v2-state > span {
+  width: 28px;
+  height: 28px;
+  border: 2px solid rgba(255, 255, 255, 0.12);
+  border-top-color: var(--product-teal);
+  border-radius: 50%;
+  animation: accountV2Spin 0.8s linear infinite;
+}
+
+@keyframes accountV2Spin {
+  to { transform: rotate(360deg); }
+}
+
+@media (max-width: 760px) {
+  .account-v2 {
+    padding-top: 28px;
+  }
+
+  .account-v2-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .account-v2-profile-card {
+    grid-template-columns: auto 1fr;
+  }
+
+  .account-v2-plan {
+    grid-column: 1 / -1;
+    justify-self: start;
+  }
+
+  .account-v2-danger {
+    grid-template-columns: 1fr;
+  }
+
+  .account-v2-danger button {
+    justify-self: start;
+  }
+}

@@ -3,6 +3,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { App } from "./App";
 import { fetchMaps } from "./api";
 import { fetchAuthSession, logout, type AuthSessionState } from "./authApi";
+import { AccountPage } from "./components/AccountPage";
 import { EventsPage } from "./components/EventsPage";
 import { HomePage } from "./components/HomePage";
 import { LoginDialog } from "./components/LoginDialog";
@@ -24,6 +25,10 @@ function ProductExperience({ pathname }: { pathname: string }) {
   const queryClient = useQueryClient();
   const [loginOpen, setLoginOpen] = React.useState(false);
   const premiumSurface = premiumSurfaceForPath(pathname);
+  const accountRoute = pathname === "/account" || pathname.startsWith("/account/");
+  const isHome = pathname === "/";
+  const matchRouteId = matchIdFromPath(pathname);
+  const needsMatchDirectory = premiumSurface === null && !accountRoute;
   const auth = useQuery({
     queryKey: authSessionKey,
     queryFn: fetchAuthSession,
@@ -34,7 +39,7 @@ function ProductExperience({ pathname }: { pathname: string }) {
   const matches = useQuery({
     queryKey: ["product", "matches"],
     queryFn: fetchMaps,
-    enabled: premiumSurface === null,
+    enabled: needsMatchDirectory,
     refetchInterval: 15_000,
     retry: 1
   });
@@ -44,8 +49,6 @@ function ProductExperience({ pathname }: { pathname: string }) {
     session?.entitlements.includes("ai_decisions") &&
       session?.entitlements.includes("realtime_notifications")
   );
-  const isHome = pathname === "/";
-  const matchRouteId = matchIdFromPath(pathname);
 
   const handleAuthenticated = (next: AuthSessionState) => {
     queryClient.setQueryData(authSessionKey, next);
@@ -65,7 +68,16 @@ function ProductExperience({ pathname }: { pathname: string }) {
   };
 
   let page: React.ReactNode;
-  if (premiumSurface) {
+  if (accountRoute) {
+    page = (
+      <AccountPage
+        session={session}
+        authLoading={auth.isLoading}
+        onLogin={() => setLoginOpen(true)}
+        onLogout={handleLogout}
+      />
+    );
+  } else if (premiumSurface) {
     page = (
       <PremiumSurface
         surface={premiumSurface}
@@ -136,6 +148,7 @@ function activeNavForPath(
   pathname: string,
   premiumSurface: PremiumSurfaceKey | null
 ): ProductNavKey | null {
+  if (pathname === "/account" || pathname.startsWith("/account/")) return null;
   if (premiumSurface === "performance") return "performance";
   if (premiumSurface === "review") return "review";
   if (premiumSurface === "billing") return "billing";
@@ -150,6 +163,8 @@ function isProductRoute(pathname: string): boolean {
     pathname === "/events" ||
     pathname.startsWith("/events/") ||
     pathname.startsWith("/matches/") ||
+    pathname === "/account" ||
+    pathname.startsWith("/account/") ||
     premiumSurfaceForPath(pathname) !== null
   );
 }

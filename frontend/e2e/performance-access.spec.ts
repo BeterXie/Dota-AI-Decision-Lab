@@ -41,13 +41,13 @@ test("keeps the cross-event AI performance dashboard global-Pro only", async ({ 
 
   await page.goto("/performance");
 
-  await expect(page.getByRole("heading", { name: "AI 表现榜属于全局 Pro" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "AI 表现榜属于 Pro 功能" })).toBeVisible();
   await expect(
     page.getByText(
-      "这里比较不同 AI 配置跨赛事的 Shadow 表现、预测质量和逐笔审计，因此只开放给全局 Pro；单个系列赛通行证不会解锁全局历史。",
+      "这里会比较不同模型跨赛事的长期模拟表现和预测质量，因此需要全局 Pro。赛事 Pass 仍然只覆盖购买的赛事。",
       { exact: true }
     )
   ).toBeVisible();
-  await expect(page.getByText("当前账号尚未拥有全局 Pro 权限。", { exact: true })).toBeVisible();
+  await expect(page.getByText("当前账号还不是全局 Pro。", { exact: true })).toBeVisible();
   expect(leaderboardRequests).toBe(0);
 });
