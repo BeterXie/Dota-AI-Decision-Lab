@@ -67,7 +67,14 @@ export const AppShell: React.FC<AppShellProps> = ({ runtime, jobs, matches, sele
 
   return (
     <div className="dota-app-shell">
-      <TopBar runtime={runtime} onOpenDiagnostics={() => setIsDiagnosticsOpen(true)} onRefresh={onRefresh} />
+      <TopBar
+        runtime={runtime}
+        onOpenDiagnostics={() => setIsDiagnosticsOpen(true)}
+        onRefresh={onRefresh}
+        authEnabled={aiAccess.authEnabled}
+        authenticated={aiAccess.authenticated}
+        onLogin={onLogin}
+      />
       <div className="shell-body">
         <PlayerMatchRail matches={matches} selectedId={selectedMapId} onSelectMatch={(id) => { onSelectMatch(id); setActiveTab("OVERVIEW"); }} />
         <main ref={mainRef} className="main-workspace">
