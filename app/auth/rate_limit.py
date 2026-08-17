@@ -46,6 +46,7 @@ class LoginRequestLimiter:
         normalized_source = source.strip() if source and source.strip() else None
         async with self._lock:
             self._prune(self._global_attempts, now - self._global_window_seconds)
+            self._prune_sources(now)
             global_retry = self._retry_after(
                 self._global_attempts,
                 now=now,
@@ -58,7 +59,6 @@ class LoginRequestLimiter:
             source_attempts: deque[float] | None = None
             if normalized_source is not None:
                 source_attempts = self._source_attempts.setdefault(normalized_source, deque())
-                self._prune(source_attempts, now - self._source_window_seconds)
                 source_retry = self._retry_after(
                     source_attempts,
                     now=now,
@@ -71,13 +71,22 @@ class LoginRequestLimiter:
             self._global_attempts.append(now)
             if source_attempts is not None:
                 source_attempts.append(now)
-            self._drop_empty_sources()
             return RateLimitDecision(True)
 
     @staticmethod
     def _prune(attempts: deque[float], cutoff: float) -> None:
         while attempts and attempts[0] <= cutoff:
             attempts.popleft()
+
+    def _prune_sources(self, now: float) -> None:
+        cutoff = now - self._source_window_seconds
+        empty: list[str] = []
+        for source, attempts in self._source_attempts.items():
+            self._prune(attempts, cutoff)
+            if not attempts:
+                empty.append(source)
+        for source in empty:
+            self._source_attempts.pop(source, None)
 
     @staticmethod
     def _retry_after(
@@ -91,8 +100,3 @@ class LoginRequestLimiter:
             return 0
         remaining = window_seconds - (now - attempts[0])
         return max(1, int(remaining + 0.999))
-
-    def _drop_empty_sources(self) -> None:
-        empty = [source for source, attempts in self._source_attempts.items() if not attempts]
-        for source in empty:
-            self._source_attempts.pop(source, None)
