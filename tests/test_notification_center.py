@@ -13,10 +13,10 @@ from app.notifications.center import (
     CHANNEL_QQ,
     EVENT_AI_DECISION,
     NotificationBindingConflict,
-    NotificationCenterService,
     qq_destination_key,
 )
 from app.notifications.models import NotificationDeliveryRecord
+from app.notifications.secure_center import NotificationCenterService
 
 
 async def _factory():
@@ -82,6 +82,8 @@ async def test_pairing_code_verifies_qq_destination_and_prevents_cross_account_c
         second_id, _ = await _user(factory, "second@example.com")
         center = NotificationCenterService(factory)
         code, _ = await center.create_pairing_code(first_id, CHANNEL_QQ)
+        assert len(code.replace("-", "")) == 24
+        assert len(code.split("-")) == 6
         binding = await center.consume_pairing_code(
             channel=CHANNEL_QQ,
             code=code,
@@ -155,5 +157,47 @@ async def test_delivery_is_idempotent_and_rechecks_entitlement_before_send() -> 
         assert delivery.status == "CANCELLED"
         assert destination == {"email": "pro@example.com"}
         assert binding.user_id == user_id
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_disabled_account_is_removed_from_fanout_and_cancels_queued_delivery() -> None:
+    engine, factory = await _factory()
+    try:
+        user_id, verified_at = await _user(factory, "disabled@example.com")
+        entitlements = EntitlementService(factory)
+        await entitlements.grant(
+            user_id,
+            REALTIME_NOTIFICATIONS_ENTITLEMENT,
+            source="test",
+        )
+        center = NotificationCenterService(factory)
+        await center.ensure_email_binding(
+            user_id=user_id,
+            email="disabled@example.com",
+            verified_at=verified_at,
+        )
+        snapshot_id = uuid4()
+        decision_ids = [uuid4()]
+        async with factory.begin() as session:
+            deliveries = await center.ensure_deliveries(
+                session,
+                channel=CHANNEL_EMAIL,
+                snapshot_id=snapshot_id,
+                decision_ids=decision_ids,
+            )
+        assert len(deliveries) == 1
+
+        async with factory.begin() as session:
+            user = await session.get(UserAccountRecord, user_id)
+            assert user is not None
+            user.disabled_at = datetime.now(UTC)
+
+        async with factory() as session:
+            assert await center.eligible_bindings(session, CHANNEL_EMAIL) == []
+        assert await center.start_delivery(deliveries[0].id) is None
+        delivery, _ = await center.delivery_receipt(deliveries[0].id)
+        assert delivery.status == "CANCELLED"
     finally:
         await engine.dispose()
