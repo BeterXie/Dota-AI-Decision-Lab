@@ -21,8 +21,7 @@ export const HomePage: React.FC<HomePageProps> = ({
 }) => {
   const { locale } = useI18n();
   const groups = React.useMemo(() => buildEventSummaries(matches), [matches]);
-  const featured = groups.filter((group) => group.status !== "COMPLETED").slice(0, 3);
-  const featuredGroups = featured.length > 0 ? featured : groups.slice(0, 3);
+  const featuredGroups = groups.filter((group) => group.status !== "COMPLETED").slice(0, 3);
   const upcoming = matches
     .filter((match) => match.phase === "PREMATCH")
     .sort(byScheduledAscending)
@@ -31,13 +30,20 @@ export const HomePage: React.FC<HomePageProps> = ({
     .filter((match) => match.phase === "POSTMATCH")
     .sort(byScheduledDescending)
     .slice(0, 4);
+  const currentEventEmptyText = groups.length > 0
+    ? locale === "zh-CN"
+      ? "目前没有进行中或即将开始的赛事。历史赛事仍可在全部赛事中查看。"
+      : "No live or upcoming events right now. Historical events are still available in All events."
+    : locale === "zh-CN"
+      ? "暂时还没有同步到赛事。数据到达后，进行中和即将开始的赛事会出现在这里。"
+      : "No events have synced yet. Live and upcoming events will appear here once data arrives.";
 
   return (
     <div className="home-v2">
       <section className="home-hero product-container">
         <div className="home-hero-copy">
           <span className="home-eyebrow">DOTA MATCH INTELLIGENCE</span>
-          <h1>{locale === "zh-CN" ? "看懂比赛，验证 AI，追踪真实表现" : "Follow the match. Test the AI. See what held up."}</h1>
+          <h1>{locale === "zh-CN" ? "看懂比赛，验证 AI，追踪赛后表现" : "Follow the match. Test the AI. See what held up."}</h1>
           <p>
             {locale === "zh-CN"
               ? "追踪全球 Dota 赛事和比赛进程，对比 AI 在关键节点的判断，并在赛后用数据验证这些决策到底表现如何。"
@@ -56,7 +62,7 @@ export const HomePage: React.FC<HomePageProps> = ({
       </section>
 
       <section className="product-container product-section" id="current-events">
-        <SectionTitle title={locale === "zh-CN" ? "正在进行的赛事" : "Current events"} action={locale === "zh-CN" ? "全部赛事" : "All events"} href="/events" />
+        <SectionTitle title={locale === "zh-CN" ? "正在进行与即将开始" : "Live & upcoming events"} action={locale === "zh-CN" ? "全部赛事" : "All events"} href="/events" />
         {loading ? (
           <div className="tournament-grid">{[0, 1, 2].map((item) => <div key={item} className="tournament-card is-skeleton" />)}</div>
         ) : featuredGroups.length > 0 ? (
@@ -64,7 +70,7 @@ export const HomePage: React.FC<HomePageProps> = ({
             {featuredGroups.map((group, index) => <TournamentCard key={group.name} group={group} index={index} locale={locale} />)}
           </div>
         ) : (
-          <EmptyHomeState text={locale === "zh-CN" ? "还没有发现赛事。数据同步后，正在进行和即将开始的赛事会出现在这里。" : "No events discovered yet. Current and upcoming events will appear here once data arrives."} />
+          <EmptyHomeState text={currentEventEmptyText} />
         )}
       </section>
 
