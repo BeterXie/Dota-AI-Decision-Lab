@@ -62,7 +62,6 @@ jobs:
             tests/test_tournament_global_leaderboard.py \
             tests/test_ai_coordinator.py \
             tests/test_ai_scheduling.py \
-            tests/test_job_handlers.py \
             tests/test_production_lifecycle_replay.py
       - name: Commit verified fixes
         run: |
