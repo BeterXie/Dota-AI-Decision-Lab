@@ -95,7 +95,7 @@ test("event directory is public, searchable and drills into the event", async ({
   await page.goto("/events");
 
   await expect(page.getByRole("heading", { name: "全球 Dota 赛事，一处追踪" })).toBeVisible();
-  await expect(page.getByRole("link", { name: "赛事" })).toHaveAttribute("aria-current", "page");
+  await expect(page.getByRole("link", { name: "赛事", exact: true })).toHaveAttribute("aria-current", "page");
 
   const tiCard = page.locator(".event-directory-card").filter({ hasText: "TI15 国际邀请赛" });
   const dreamleagueCard = page.locator(".event-directory-card").filter({ hasText: "DreamLeague S24" });
