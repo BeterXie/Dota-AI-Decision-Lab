@@ -70,6 +70,7 @@ def test_node_bridge_health_events_and_idempotent_send(tmp_path: Path) -> None:
         ),
         encoding="utf-8",
     )
+    bridge_token = "smoke-test-bridge-token-0123456789abcdef0123456789"
     env = dict(os.environ)
     env.update(
         {
@@ -77,6 +78,7 @@ def test_node_bridge_health_events_and_idempotent_send(tmp_path: Path) -> None:
             "QQ_BOT_SDK_INDEX": str(sdk_index),
             "QQ_BOT_BRIDGE_HOST": "127.0.0.1",
             "QQ_BOT_BRIDGE_PORT": "18091",
+            "QQ_BOT_BRIDGE_TOKEN": bridge_token,
             "QQ_BOT_ACCOUNT_ID": "fake-app",
         }
     )
@@ -89,13 +91,26 @@ def test_node_bridge_health_events_and_idempotent_send(tmp_path: Path) -> None:
         text=True,
     )
     base_url = "http://127.0.0.1:18091"
+    headers = {"Authorization": f"Bearer {bridge_token}"}
     try:
         health = None
         for _ in range(80):
             if process.poll() is not None:
                 break
             try:
-                health = httpx.get(f"{base_url}/health", timeout=2).json()
+                response = httpx.get(f"{base_url}/health", timeout=2)
+                if response.status_code == 401:
+                    break
+            except httpx.HTTPError:
+                pass
+            time.sleep(0.05)
+        assert httpx.get(f"{base_url}/health", timeout=2).status_code == 401
+
+        for _ in range(80):
+            if process.poll() is not None:
+                break
+            try:
+                health = httpx.get(f"{base_url}/health", headers=headers, timeout=2).json()
                 if health.get("gateway_connected"):
                     break
             except httpx.HTTPError:
@@ -105,7 +120,12 @@ def test_node_bridge_health_events_and_idempotent_send(tmp_path: Path) -> None:
 
         events = None
         for _ in range(80):
-            events = httpx.get(f"{base_url}/events", params={"cursor": 0}, timeout=2).json()
+            events = httpx.get(
+                f"{base_url}/events",
+                params={"cursor": 0},
+                headers=headers,
+                timeout=2,
+            ).json()
             if events.get("cursor", 0) >= 1:
                 break
             time.sleep(0.05)
@@ -119,8 +139,8 @@ def test_node_bridge_health_events_and_idempotent_send(tmp_path: Path) -> None:
             "text": "当前比赛",
             "idempotency_key": "smoke-key",
         }
-        first = httpx.post(f"{base_url}/send", json=payload, timeout=2).json()
-        second = httpx.post(f"{base_url}/send", json=payload, timeout=2).json()
+        first = httpx.post(f"{base_url}/send", json=payload, headers=headers, timeout=2).json()
+        second = httpx.post(f"{base_url}/send", json=payload, headers=headers, timeout=2).json()
         assert first["message_id"] == second["message_id"] == "msg-1"
     finally:
         process.terminate()
