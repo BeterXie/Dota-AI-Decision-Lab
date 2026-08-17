@@ -14,7 +14,11 @@ from app.auth import (
     InvalidEmailError,
     InvalidLoginCodeError,
 )
-from app.entitlements import AI_DECISIONS_ENTITLEMENT, EntitlementService
+from app.entitlements import (
+    AI_DECISIONS_ENTITLEMENT,
+    REALTIME_NOTIFICATIONS_ENTITLEMENT,
+    EntitlementService,
+)
 
 
 class RequestLoginCodePayload(BaseModel):
@@ -22,18 +26,12 @@ class RequestLoginCodePayload(BaseModel):
 
 
 class VerifyLoginCodePayload(BaseModel):
-    email: str = Field(min_length=3, max_length=320)
+    email: str = Field(min_length=1, max_length=320)
     code: str = Field(min_length=1, max_length=20)
 
 
 class AuthGuardMiddleware:
-    """Attach identity to requests and enforce only non-public access classes.
-
-    Match browsing is public. Authentication is required for operational/account
-    endpoints, while premium AI endpoints additionally require the named
-    entitlement. This keeps authentication (who are you?) separate from
-    authorization (what have you paid for?).
-    """
+    """Attach identity and enforce an explicit, fail-closed API access policy."""
 
     def __init__(
         self,
@@ -245,6 +243,8 @@ def _require_service(service: EmailAuthService | None, enabled: bool) -> EmailAu
 
 
 def _http_access_requirement(path: str) -> tuple[str, str | None]:
+    if path.startswith("/api/notifications"):
+        return "ENTITLED", REALTIME_NOTIFICATIONS_ENTITLEMENT
     if (
         path.startswith("/api/snapshots/")
         or path.startswith("/api/review/")
@@ -253,7 +253,27 @@ def _http_access_requirement(path: str) -> tuple[str, str | None]:
         return "ENTITLED", AI_DECISIONS_ENTITLEMENT
     if path == "/metrics" or path == "/api/jobs/summary" or path.startswith("/api/account/"):
         return "AUTHENTICATED", None
+    if (
+        path in {"/health", "/ready", "/api/runtime", "/api/matches"}
+        or path == "/api/auth"
+        or path.startswith("/api/auth/")
+        or _is_public_map_path(path)
+    ):
+        return "PUBLIC", None
+    if path.startswith("/api/"):
+        return "AUTHENTICATED", None
     return "PUBLIC", None
+
+
+def _is_public_map_path(path: str) -> bool:
+    segments = [segment for segment in path.split("/") if segment]
+    if len(segments) == 3 and segments[:2] == ["api", "maps"]:
+        return True
+    return (
+        len(segments) == 4
+        and segments[:2] == ["api", "maps"]
+        and segments[3] == "draft-hero-recent"
+    )
 
 
 async def _json_error(
