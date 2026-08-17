@@ -179,7 +179,9 @@ class PublicMatchDataBoundaryMiddleware(BaseHTTPMiddleware):
             )
 
         if sanitize_readiness:
-            sanitized = _sanitize_readiness_payload(payload) if isinstance(payload, dict) else payload
+            sanitized = (
+                _sanitize_readiness_payload(payload) if isinstance(payload, dict) else payload
+            )
         elif sanitize_runtime:
             sanitized = _sanitize_runtime_payload(payload) if isinstance(payload, dict) else payload
         elif isinstance(payload, list):
