@@ -1,7 +1,12 @@
 export interface AuthUser {
   id: string;
+  // Email is optional at runtime for Steam-only accounts. This stays typed as a
+  // string for legacy screens until the account/notification migration lands;
+  // new 2.0 surfaces must use display_name as a fallback.
   email: string;
-  email_verified_at: string;
+  email_verified_at: string | null;
+  display_name?: string | null;
+  avatar_url?: string | null;
   created_at: string;
 }
 
@@ -14,6 +19,12 @@ export interface AccessGrant {
   expires_at: string | null;
 }
 
+export interface AuthProviderAvailability {
+  email: boolean;
+  google: boolean;
+  steam: boolean;
+}
+
 export interface AuthSessionState {
   enabled: boolean;
   authenticated: boolean;
@@ -22,6 +33,7 @@ export interface AuthSessionState {
   entitlements: string[];
   /** Includes GLOBAL plus resource-scoped SERIES/MAP grants. */
   grants: AccessGrant[];
+  providers?: AuthProviderAvailability;
 }
 
 export interface LoginCodeRequestResult {
@@ -72,3 +84,6 @@ export const logout = () =>
   authJson<{ ok: boolean }>("/api/auth/logout", {
     method: "POST"
   });
+
+export const socialLoginHref = (provider: "google" | "steam", returnTo = "/") =>
+  `/api/auth/${provider}/start?return_to=${encodeURIComponent(returnTo)}`;
