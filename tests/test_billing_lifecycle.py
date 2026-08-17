@@ -16,6 +16,7 @@ from app.billing.models import BillingEventRecord, BillingSubscriptionRecord
 from app.db import Base
 from app.entitlements import AI_DECISIONS_ENTITLEMENT, PREMIUM_ENTITLEMENTS, EntitlementService
 from app.entitlements.models import UserEntitlementRecord
+from app.time import ensure_utc
 
 
 @pytest.mark.asyncio
@@ -148,7 +149,7 @@ async def test_billing_events_idempotently_grant_revoke_and_ignore_stale_state()
         assert [item.applied for item in events] == [True, False, True]
         assert len(subscriptions) == 1
         assert subscriptions[0].access_state == BILLING_ACCESS_INACTIVE
-        assert subscriptions[0].last_event_occurred_at == cancelled_at
+        assert ensure_utc(subscriptions[0].last_event_occurred_at) == cancelled_at
         assert {item.entitlement for item in billing_entitlements} == set(PREMIUM_ENTITLEMENTS)
         assert all(item.status == "REVOKED" for item in billing_entitlements)
     finally:
