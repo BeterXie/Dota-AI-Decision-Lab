@@ -109,6 +109,7 @@ async def _fixture(session):
     session.add(canonical_map)
     await session.flush()
     snapshot = DecisionSnapshotRecord(
+        id=uuid4(),
         canonical_map_id=canonical_map.id,
         decision_at=NOW + timedelta(minutes=1),
         created_at=NOW + timedelta(minutes=1),
