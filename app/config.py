@@ -1,4 +1,5 @@
 from functools import lru_cache
+from typing import Literal
 
 from pydantic import Field, SecretStr, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
@@ -102,7 +103,7 @@ class Settings(BaseSettings):
     resend_base_url: str = "https://api.resend.com"
     resend_timeout_seconds: float = Field(default=30.0, gt=0)
 
-    # Passwordless email authentication. The login sender reuses the Resend
+    # Passwordless email login. The login sender reuses the Resend
     # transport configuration above but is independent from decision emails.
     auth_enabled: bool = False
     auth_secret_key: SecretStr | None = None
@@ -112,6 +113,24 @@ class Settings(BaseSettings):
     auth_session_ttl_days: int = Field(default=30, ge=1, le=365)
     auth_cookie_secure: bool = False
     auth_email_subject_prefix: str = "[Dota AI Decision Lab]"
+
+    # Paddle is the first real payment-provider adapter. It is disabled by
+    # default so development/test runtimes never make accidental live charges.
+    paddle_enabled: bool = False
+    paddle_environment: Literal["sandbox", "live"] = "sandbox"
+    paddle_api_key: SecretStr | None = None
+    paddle_webhook_secret: SecretStr | None = None
+    # Optional approved Paddle checkout URL. Blank uses the account's default
+    # payment link configured in Paddle.
+    paddle_checkout_url: str | None = None
+    # Catalog price ids are intentionally configuration, not code. The monthly
+    # price is recurring; 30/365-day prices are one-time passes so WeChat Pay can
+    # be offered without pretending it supports recurring billing.
+    paddle_pro_monthly_price_id: str = ""
+    paddle_pro_30d_price_id: str = ""
+    paddle_pro_365d_price_id: str = ""
+    paddle_timeout_seconds: float = Field(default=15.0, gt=0)
+    paddle_webhook_tolerance_seconds: int = Field(default=5, ge=1, le=300)
 
     # Official WeChat ClawBot channel (direct iLink HTTP API, no OpenClaw).
     wechat_clawbot_enabled: bool = False
@@ -274,6 +293,33 @@ class Settings(BaseSettings):
             missing.append("AUTH_SECRET_KEY")
         elif len(self.auth_secret_key.get_secret_value().encode("utf-8")) < 32:
             missing.append("AUTH_SECRET_KEY>=32_BYTES")
+        return tuple(missing)
+
+    @property
+    def paddle_api_base_url(self) -> str:
+        if self.paddle_environment == "live":
+            return "https://api.paddle.com"
+        return "https://sandbox-api.paddle.com"
+
+    @property
+    def paddle_configuration_errors(self) -> tuple[str, ...]:
+        if not self.paddle_enabled:
+            return ()
+        missing = []
+        if not self.auth_enabled:
+            missing.append("AUTH_ENABLED=true")
+        if self.paddle_api_key is None:
+            missing.append("PADDLE_API_KEY")
+        if self.paddle_webhook_secret is None:
+            missing.append("PADDLE_WEBHOOK_SECRET")
+        if not any(
+            (
+                self.paddle_pro_monthly_price_id.strip(),
+                self.paddle_pro_30d_price_id.strip(),
+                self.paddle_pro_365d_price_id.strip(),
+            )
+        ):
+            missing.append("PADDLE_PRO_*_PRICE_ID")
         return tuple(missing)
 
 
