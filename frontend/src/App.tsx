@@ -21,6 +21,9 @@ import { LoginPage } from "./components/LoginPage";
 const ReviewPage = lazy(() =>
   import("./components/ReviewPage").then((module) => ({ default: module.ReviewPage }))
 );
+const AiPerformancePage = lazy(() =>
+  import("./components/AiPerformancePage").then((module) => ({ default: module.AiPerformancePage }))
+);
 const NotificationCenterPage = lazy(() =>
   import("./components/NotificationCenterPage").then((module) => ({
     default: module.NotificationCenterPage
@@ -107,6 +110,7 @@ function AuthenticatedApp() {
 
   const pathname = typeof window !== "undefined" ? window.location.pathname : "/";
   const reviewRoute = isReviewRoute(pathname);
+  const performanceRoute = isPerformanceRoute(pathname);
   const notificationRoute = isNotificationRoute(pathname);
   const billingRoute = isBillingRoute(pathname);
   let content: React.ReactNode;
@@ -138,6 +142,18 @@ function AuthenticatedApp() {
         />
       );
     }
+  } else if (performanceRoute) {
+    content = hasAiAccess ? (
+      <Suspense fallback={<div className="auth-bootstrap">AI Performance</div>}>
+        <AiPerformancePage />
+      </Suspense>
+    ) : (
+      <PremiumReviewGate
+        authenticated={isSignedIn}
+        authEnabled={session?.enabled !== false}
+        onLogin={() => setLoginOpen(true)}
+      />
+    );
   } else if (reviewRoute) {
     content = hasAiAccess ? (
       <Suspense fallback={<div className="auth-bootstrap">Dota AI Decision Lab</div>}>
@@ -179,6 +195,10 @@ function AuthenticatedApp() {
 
 export function isReviewRoute(pathname: string): boolean {
   return pathname === "/review" || pathname.startsWith("/review/");
+}
+
+export function isPerformanceRoute(pathname: string): boolean {
+  return pathname === "/performance" || pathname.startsWith("/performance/");
 }
 
 export function isNotificationRoute(pathname: string): boolean {
@@ -407,13 +427,13 @@ function PremiumReviewGate({
           <div className="auth-brand-mark">◆</div>
           <div>
             <div className="auth-eyebrow">PRO INTELLIGENCE</div>
-            <h1>{locale === "zh-CN" ? "AI 复盘属于 Pro 权限" : "AI Review is a Pro feature"}</h1>
+            <h1>{locale === "zh-CN" ? "AI 复盘与盈利榜属于 Pro 权限" : "AI Review & Performance require Pro"}</h1>
           </div>
         </div>
         <p className="auth-description">
           {locale === "zh-CN"
-            ? "普通比赛数据保持公开；跨比赛 AI 历史复盘属于全局 Pro。单个系列赛通行证只解锁所购买比赛的 AI 与实时通知。"
-            : "Match data stays public. Cross-match AI review requires global Pro; a series pass unlocks only the purchased series AI and alerts."}
+            ? "普通比赛数据保持公开；跨比赛 AI 历史复盘和长期盈利榜属于全局 Pro。单个系列赛通行证只解锁所购买比赛的 AI 与实时通知。"
+            : "Match data stays public. Cross-match AI review and the long-run performance leaderboard require global Pro; a series pass unlocks only the purchased series AI and alerts."}
         </p>
         {!authenticated && authEnabled && (
           <button className="auth-primary-btn" type="button" onClick={onLogin}>
@@ -423,7 +443,7 @@ function PremiumReviewGate({
         {authenticated && (
           <div className="auth-error" role="status">
             {locale === "zh-CN"
-              ? "当前账号尚未拥有全局 AI Review 权限。"
+              ? "当前账号尚未拥有全局 AI Review / Performance 权限。"
               : "This account does not have global AI Review access yet."}
           </div>
         )}
