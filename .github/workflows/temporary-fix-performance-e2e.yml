@@ -1,0 +1,57 @@
+name: Temporary fix AI performance E2E selectors
+
+on:
+  push:
+    branches:
+      - feat/ai-performance-dashboard
+
+permissions:
+  contents: write
+
+jobs:
+  fix:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: feat/ai-performance-dashboard
+          fetch-depth: 1
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version-file: frontend/.node-version
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Fix selectors
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          path = Path("frontend/e2e/performance.spec.ts")
+          text = path.read_text(encoding="utf-8")
+          old = '''  await expect(page.getByText("+2,600", { exact: true })).toBeVisible();\n  await expect(page.getByText("−400", { exact: true })).toBeVisible();\n'''
+          new = '''  const gptRow = page.getByRole("button", { name: /#1 GPT gpt-5\\.6/ });\n  const deepseekRow = page.getByRole("button", { name: /#2 DeepSeek deepseek-reasoner/ });\n  await expect(gptRow).toContainText("+2,600");\n  await expect(deepseekRow).toContainText("−400");\n'''
+          if old not in text:
+              raise SystemExit("performance E2E selector block not found")
+          text = text.replace(old, new, 1)
+          text = text.replace(
+              '  await page.getByRole("button", { name: /DeepSeek/ }).click();\n',
+              '  await deepseekRow.click();\n',
+              1,
+          )
+          path.write_text(text, encoding="utf-8")
+          PY
+      - name: Verify focused performance E2E
+        working-directory: frontend
+        run: |
+          npm ci
+          npx playwright install --with-deps chromium
+          npx playwright test e2e/performance.spec.ts
+      - name: Commit verified selector fix
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/e2e/performance.spec.ts
+          git commit -m "Harden AI performance E2E selectors"
+          git push origin HEAD:feat/ai-performance-dashboard
