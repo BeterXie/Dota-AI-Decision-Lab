@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, UniqueConstraint, Uuid
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, Integer, String, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -9,6 +9,41 @@ from app.db import Base
 
 def utc_now() -> datetime:
     return datetime.now(UTC)
+
+
+class BillingCheckoutRecord(Base):
+    """Server-created payment checkout mapped to one authenticated account.
+
+    Provider metadata is useful for correlation, but it is not an authorization
+    source. Webhooks must resolve through this record before a checkout can grant
+    premium access.
+    """
+
+    __tablename__ = "billing_checkouts"
+    __table_args__ = (
+        UniqueConstraint("provider", "checkout_ref", name="uq_billing_checkouts_provider_ref"),
+        Index("ix_billing_checkouts_user_created", "user_id", "created_at"),
+        Index("ix_billing_checkouts_customer", "provider", "customer_ref"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False
+    )
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    checkout_ref: Mapped[str] = mapped_column(String(160), nullable=False)
+    customer_ref: Mapped[str | None] = mapped_column(String(160))
+    offer_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    price_ref: Mapped[str] = mapped_column(String(160), nullable=False)
+    plan_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    recurring: Mapped[bool] = mapped_column(Boolean, nullable=False)
+    grant_days: Mapped[int | None] = mapped_column(Integer)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="PENDING")
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
 
 
 class BillingSubscriptionRecord(Base):
