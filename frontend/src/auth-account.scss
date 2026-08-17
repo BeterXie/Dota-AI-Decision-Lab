@@ -53,10 +53,115 @@
   cursor: default;
 }
 
+.topbar-subscription-btn,
+.topbar-account-btn {
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 6px 11px;
+  border-radius: 999px;
+  white-space: nowrap;
+  text-decoration: none;
+  font-size: 12px;
+  font-weight: 750;
+  line-height: 1;
+  transition: border-color 0.18s ease, background 0.18s ease, color 0.18s ease;
+}
+
+.topbar-subscription-btn {
+  border: 1px solid color-mix(in srgb, var(--market) 50%, transparent);
+  background: color-mix(in srgb, var(--market) 10%, transparent);
+  color: var(--market);
+}
+
+.topbar-subscription-btn:hover {
+  border-color: color-mix(in srgb, var(--market) 78%, transparent);
+  background: color-mix(in srgb, var(--market) 16%, transparent);
+  color: var(--text-primary);
+}
+
+.topbar-subscription-mark {
+  font-size: 12px;
+}
+
+.topbar-account-btn {
+  border: 1px solid var(--border-subtle);
+  background: var(--surface-2);
+  color: var(--text-secondary);
+}
+
+.topbar-account-btn:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--ai-accent) 55%, transparent);
+  background: color-mix(in srgb, var(--ai-accent) 10%, var(--surface-2));
+  color: var(--text-primary);
+}
+
+.topbar-account-btn.is-authenticated {
+  color: #8fdad2;
+}
+
+.topbar-account-btn.is-disabled {
+  color: var(--text-muted);
+  opacity: 0.7;
+  cursor: not-allowed;
+}
+
+.topbar-account-dot {
+  width: 7px;
+  height: 7px;
+  flex: 0 0 7px;
+  border-radius: 50%;
+  background: #72cfc6;
+  box-shadow: 0 0 0 3px rgba(114, 207, 198, 0.12);
+}
+
+@media (max-width: 1200px) {
+  .top-bar {
+    padding-inline: 14px;
+  }
+
+  .top-bar-right {
+    gap: 8px;
+  }
+
+  .review-nav-btn,
+  .topbar-subscription-btn,
+  .topbar-account-btn {
+    padding-inline: 9px;
+  }
+}
+
+@media (max-width: 980px) {
+  .system-status-btn .status-label {
+    display: none;
+  }
+
+  .system-status-btn {
+    padding-inline: 10px;
+  }
+}
+
+@media (max-width: 760px) {
+  .review-nav-btn {
+    display: none;
+  }
+
+  .topbar-subscription-btn,
+  .topbar-account-btn {
+    font-size: 11px;
+  }
+}
+
 @media (max-width: 560px) {
   .auth-account-badge {
     right: 10px;
     bottom: 10px;
     max-width: calc(100vw - 20px);
+  }
+
+  .topbar-subscription-mark {
+    display: none;
   }
 }
