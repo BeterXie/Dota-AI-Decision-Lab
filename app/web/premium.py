@@ -1,12 +1,13 @@
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Query, Request, status
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.auth import AuthenticatedUser
 from app.entitlements import AI_DECISIONS_ENTITLEMENT, EntitlementService
 from app.models import CanonicalMap
 from app.web.api import _map_payload
+from app.web.performance import build_ai_performance_payload
 
 
 def create_premium_router(
@@ -54,6 +55,22 @@ def create_premium_router(
             "snapshot_payload": payload.get("snapshot_payload"),
             "future_odds": payload.get("future_odds", []),
         }
+
+    @router.get("/api/ai-performance")
+    async def ai_performance(
+        request: Request,
+        limit: int = Query(default=1000, ge=1, le=5000),
+    ) -> dict:
+        """Global cross-match experiment analytics for Pro users only."""
+
+        user = _request_user(request)
+        if not await entitlements.has_entitlement(user.id, AI_DECISIONS_ENTITLEMENT):
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail="global AI Performance access requires Pro",
+            )
+        async with session_factory() as session:
+            return await build_ai_performance_payload(session, limit=limit)
 
     return router
 
