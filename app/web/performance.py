@@ -94,9 +94,7 @@ async def build_ai_performance_payload(
 
     successful = [record for record in decisions if _successful(record)]
     evaluated = [
-        record
-        for record in successful
-        if evaluation_by_decision.get(record.id) is not None
+        record for record in successful if evaluation_by_decision.get(record.id) is not None
     ]
     settled_buys = [
         record
@@ -252,14 +250,18 @@ def _build_experiment_groups(
             if evaluation_by_decision.get(record.id) is not None
             and evaluation_by_decision[record.id].unit_pnl is not None
         ]
-        latencies = [record.latency_seconds for record in records if record.latency_seconds is not None]
+        latencies = [
+            record.latency_seconds for record in records if record.latency_seconds is not None
+        ]
         end_to_end = [
             seconds
             for record in records
             if (seconds := _duration_seconds(record.job_enqueued_at, record.decision_persisted_at))
             is not None
         ]
-        total_tokens = [record.total_tokens for record in records if record.total_tokens is not None]
+        total_tokens = [
+            record.total_tokens for record in records if record.total_tokens is not None
+        ]
         input_token_total = sum(
             record.input_tokens for record in records if record.input_tokens is not None
         )
@@ -401,7 +403,11 @@ async def _load_match_contexts(
     snapshots: list[DecisionSnapshotRecord],
 ) -> dict[UUID, dict[str, Any]]:
     map_ids = list(
-        {snapshot.canonical_map_id for snapshot in snapshots if snapshot.canonical_map_id is not None}
+        {
+            snapshot.canonical_map_id
+            for snapshot in snapshots
+            if snapshot.canonical_map_id is not None
+        }
     )
     if not map_ids:
         return {}
@@ -428,7 +434,9 @@ async def _load_match_contexts(
     )
     teams = (
         list(
-            (await session.scalars(select(CanonicalTeam).where(CanonicalTeam.id.in_(team_ids)))).all()
+            (
+                await session.scalars(select(CanonicalTeam).where(CanonicalTeam.id.in_(team_ids)))
+            ).all()
         )
         if team_ids
         else []
@@ -468,20 +476,14 @@ async def _load_match_contexts(
         team_a = team_by_id.get(series_record.team_a_id)
         team_b = team_by_id.get(series_record.team_b_id)
         event = (
-            event_by_id.get(series_record.event_id)
-            if series_record.event_id is not None
-            else None
+            event_by_id.get(series_record.event_id) if series_record.event_id is not None else None
         )
         payloads[canonical_map.id] = {
             "map_number": canonical_map.map_number,
             "valve_match_id": canonical_map.valve_match_id,
             "tournament_name": event.name if event is not None else None,
-            "team_a": (
-                {"id": str(team_a.id), "name": team_a.name} if team_a is not None else None
-            ),
-            "team_b": (
-                {"id": str(team_b.id), "name": team_b.name} if team_b is not None else None
-            ),
+            "team_a": ({"id": str(team_a.id), "name": team_a.name} if team_a is not None else None),
+            "team_b": ({"id": str(team_b.id), "name": team_b.name} if team_b is not None else None),
         }
     return payloads
 
