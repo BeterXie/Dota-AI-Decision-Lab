@@ -1,3 +1,4 @@
+import asyncio
 from datetime import UTC, datetime, timedelta
 
 import pytest
@@ -5,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.auth.models import UserAccountRecord
+from app.billing.models import BillingCheckoutRecord
 from app.db import Base
 from app.entitlements import PREMIUM_ENTITLEMENTS, EntitlementService, UserEntitlementRecord
 from app.promotions import PromotionService, ReferralClaimError
@@ -50,22 +52,54 @@ async def _fixture():
 async def test_referral_claim_requires_another_recent_account_and_is_idempotent() -> None:
     engine, _, service, inviter_id, invited_id, now = await _fixture()
     try:
-        code = await service.ensure_referral_code(inviter_id)
-        assert code == await service.ensure_referral_code(inviter_id)
-        attribution = await service.claim_referral(invited_id, code, now=now)
-        duplicate = await service.claim_referral(invited_id, code, now=now)
+        first_code, second_code = await asyncio.gather(
+            service.ensure_referral_code(inviter_id),
+            service.ensure_referral_code(inviter_id),
+        )
+        assert first_code == second_code
+        attribution = await service.claim_referral(invited_id, first_code, now=now)
+        duplicate = await service.claim_referral(invited_id, first_code, now=now)
         assert duplicate.id == attribution.id
         assert attribution.inviter_user_id == inviter_id
         assert attribution.status == "CLAIMED"
 
         with pytest.raises(ReferralClaimError, match="cannot refer itself"):
-            await service.claim_referral(inviter_id, code, now=now)
+            await service.claim_referral(inviter_id, first_code, now=now)
     finally:
         await engine.dispose()
 
 
 @pytest.mark.asyncio
-async def test_first_paid_purchase_grants_both_users_and_refund_revokes_only_reward_source() -> None:
+async def test_referral_cannot_be_claimed_after_first_paid_purchase() -> None:
+    engine, factory, service, inviter_id, invited_id, now = await _fixture()
+    try:
+        code = await service.ensure_referral_code(inviter_id)
+        async with factory.begin() as session:
+            session.add(
+                BillingCheckoutRecord(
+                    user_id=invited_id,
+                    provider="paddle",
+                    checkout_ref="txn_already_paid",
+                    customer_ref="ctm_existing",
+                    offer_key="pro_30d",
+                    price_ref="pri_existing",
+                    plan_key="PRO",
+                    recurring=False,
+                    grant_days=30,
+                    status="COMPLETED",
+                    completed_at=now,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+        with pytest.raises(ReferralClaimError, match="before.*first paid purchase"):
+            await service.claim_referral(invited_id, code, now=now)
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_first_paid_purchase_grants_both_users_and_refund_revokes_reward_source() -> None:
     engine, factory, service, inviter_id, invited_id, now = await _fixture()
     entitlements = EntitlementService(factory)
     try:
@@ -80,12 +114,18 @@ async def test_first_paid_purchase_grants_both_users_and_refund_revokes_only_rew
             )
             is True
         )
-        assert set(await entitlements.active_entitlements(inviter_id, now=now + timedelta(days=1))) == set(
-            PREMIUM_ENTITLEMENTS
-        )
-        assert set(await entitlements.active_entitlements(invited_id, now=now + timedelta(days=1))) == set(
-            PREMIUM_ENTITLEMENTS
-        )
+        assert set(
+            await entitlements.active_entitlements(
+                inviter_id,
+                now=now + timedelta(days=1),
+            )
+        ) == set(PREMIUM_ENTITLEMENTS)
+        assert set(
+            await entitlements.active_entitlements(
+                invited_id,
+                now=now + timedelta(days=1),
+            )
+        ) == set(PREMIUM_ENTITLEMENTS)
         assert (
             await service.qualify_referral_payment(
                 invited_id,
@@ -104,8 +144,20 @@ async def test_first_paid_purchase_grants_both_users_and_refund_revokes_only_rew
             )
             is True
         )
-        assert await entitlements.active_entitlements(inviter_id, now=now + timedelta(hours=2)) == ()
-        assert await entitlements.active_entitlements(invited_id, now=now + timedelta(hours=2)) == ()
+        assert (
+            await entitlements.active_entitlements(
+                inviter_id,
+                now=now + timedelta(hours=2),
+            )
+            == ()
+        )
+        assert (
+            await entitlements.active_entitlements(
+                invited_id,
+                now=now + timedelta(hours=2),
+            )
+            == ()
+        )
         async with factory() as session:
             stored = await session.get(ReferralAttributionRecord, attribution.id)
             assert stored is not None and stored.status == "REVOKED"
