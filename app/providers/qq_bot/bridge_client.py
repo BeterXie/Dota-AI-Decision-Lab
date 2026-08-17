@@ -26,7 +26,9 @@ class QQBridgeClient:
         self._base_url = base_url.rstrip("/")
         self._timeout_seconds = timeout_seconds
         self._owns_client = client is None
-        self._token = token if token is not None else (_default_bridge_token() if client is None else None)
+        self._token = (
+            token if token is not None else (_default_bridge_token() if client is None else None)
+        )
         self._client = client or httpx.AsyncClient(
             base_url=self._base_url,
             timeout=httpx.Timeout(timeout_seconds),
