@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 from uuid import UUID
 
@@ -87,11 +87,11 @@ class TournamentPortfolioService:
         row = (
             await session.execute(
                 select(
-                    CanonicalMap.id,
-                    CanonicalSeries.id,
-                    CanonicalSeries.event_id,
-                    CanonicalSeries.team_a_id,
-                    CanonicalSeries.team_b_id,
+                    CanonicalMap.id.label("canonical_map_id"),
+                    CanonicalSeries.id.label("canonical_series_id"),
+                    CanonicalSeries.event_id.label("canonical_event_id"),
+                    CanonicalSeries.team_a_id.label("team_a_id"),
+                    CanonicalSeries.team_b_id.label("team_b_id"),
                 )
                 .join(
                     DecisionSnapshotRecord,
@@ -101,12 +101,12 @@ class TournamentPortfolioService:
                 .where(DecisionSnapshotRecord.id == snapshot_id)
             )
         ).one_or_none()
-        if row is None or row.event_id is None:
+        if row is None or row.canonical_event_id is None:
             return None
         return PortfolioScope(
-            canonical_event_id=row.event_id,
-            canonical_series_id=row.id_1,
-            canonical_map_id=row.id,
+            canonical_event_id=row.canonical_event_id,
+            canonical_series_id=row.canonical_series_id,
+            canonical_map_id=row.canonical_map_id,
             team_a_id=row.team_a_id,
             team_b_id=row.team_b_id,
         )
@@ -421,9 +421,7 @@ class TournamentPortfolioService:
                     "hit_rate": len(wins) / len(settled_positions) if settled_positions else None,
                     "turnover": float(turnover),
                     "profit_factor": (
-                        float(gross_profit / gross_loss)
-                        if gross_loss > 0
-                        else None
+                        float(gross_profit / gross_loss) if gross_loss > 0 else None
                     ),
                     "status": account.status,
                 }
