@@ -17,7 +17,7 @@ import "./notification-center.css";
 const centerKey = ["notification-center"] as const;
 const channels: NotificationChannel[] = ["EMAIL", "QQ", "WECHAT"];
 
-export function NotificationCenterPage({ userEmail }: { userEmail: string }) {
+export function NotificationCenterPage({ userEmail }: { userEmail: string | null }) {
   const { locale } = useI18n();
   const queryClient = useQueryClient();
   const [pairing, setPairing] = useState<Partial<Record<"QQ" | "WECHAT", PairingCode>>>({});
@@ -51,7 +51,7 @@ export function NotificationCenterPage({ userEmail }: { userEmail: string }) {
     return (
       <main className="notification-page">
         <section className="notification-hero">
-          <a className="notification-back" href="/">← {locale === "zh-CN" ? "返回比赛" : "Back to matches"}</a>
+          <a className="notification-back" href="/">← {locale === "zh-CN" ? "返回首页" : "Back home"}</a>
           <h1>Notification Center</h1>
           <p role="alert">{locale === "zh-CN" ? "通知设置加载失败，请刷新重试。" : "Failed to load notification settings."}</p>
         </section>
@@ -64,18 +64,18 @@ export function NotificationCenterPage({ userEmail }: { userEmail: string }) {
     <main className="notification-page">
       <section className="notification-hero">
         <div>
-          <a className="notification-back" href="/">← {locale === "zh-CN" ? "返回比赛" : "Back to matches"}</a>
+          <a className="notification-back" href="/">← {locale === "zh-CN" ? "返回首页" : "Back home"}</a>
           <div className="notification-eyebrow">REALTIME PRO</div>
           <h1>Notification Center</h1>
           <p>
             {locale === "zh-CN"
-              ? "只在 AI 出现新的 BUY 决策时推送。每个渠道都绑定到你的账号，并在真正发送前再次检查实时通知权限。"
-              : "Alerts fire only for a new AI BUY decision. Every destination is tied to your account and entitlement is rechecked before delivery."}
+              ? "选择你希望接收比赛提醒的渠道。发送前会再次检查账号权限，失效的会员不会继续收到付费通知。"
+              : "Choose where match alerts should reach you. Membership is checked again before each paid notification is delivered."}
           </p>
         </div>
         <div className="notification-account">
           <span>{locale === "zh-CN" ? "当前账号" : "Account"}</span>
-          <strong>{userEmail}</strong>
+          <strong>{userEmail || (locale === "zh-CN" ? "尚未绑定邮箱" : "No email linked")}</strong>
         </div>
       </section>
 
@@ -85,6 +85,7 @@ export function NotificationCenterPage({ userEmail }: { userEmail: string }) {
             key={channel}
             channel={channel}
             state={state}
+            userHasEmail={Boolean(userEmail)}
             pairing={channel === "EMAIL" ? undefined : pairing[channel]}
             busy={bindEmail.isPending || preference.isPending || remove.isPending || pair.isPending}
             onBindEmail={() => bindEmail.mutate()}
@@ -127,6 +128,7 @@ export function NotificationCenterPage({ userEmail }: { userEmail: string }) {
 function ChannelCard({
   channel,
   state,
+  userHasEmail,
   pairing,
   busy,
   onBindEmail,
@@ -136,6 +138,7 @@ function ChannelCard({
 }: {
   channel: NotificationChannel;
   state: NotificationCenterState;
+  userHasEmail: boolean;
   pairing: PairingCode | undefined;
   busy: boolean;
   onBindEmail: () => void;
@@ -165,7 +168,7 @@ function ChannelCard({
         </label>
       </header>
 
-      <p className="notification-channel-description">{channelDescription(channel, locale)}</p>
+      <p className="notification-channel-description">{channelDescription(channel, locale, userHasEmail)}</p>
       <div className="notification-binding-list">
         {bindings.map((binding) => (
           <BindingRow key={binding.id} binding={binding} busy={busy} onRemove={onRemove} />
@@ -173,10 +176,17 @@ function ChannelCard({
       </div>
 
       {channel === "EMAIL" ? (
-        <button className="notification-primary" type="button" disabled={busy || bindings.length > 0} onClick={onBindEmail}>
+        <button
+          className="notification-primary"
+          type="button"
+          disabled={busy || bindings.length > 0 || !userHasEmail}
+          onClick={onBindEmail}
+        >
           {bindings.length > 0
             ? locale === "zh-CN" ? "已绑定验证邮箱" : "Verified email bound"
-            : locale === "zh-CN" ? "绑定登录邮箱" : "Bind login email"}
+            : !userHasEmail
+              ? locale === "zh-CN" ? "先绑定邮箱" : "Link an email first"
+              : locale === "zh-CN" ? "绑定登录邮箱" : "Bind login email"}
         </button>
       ) : (
         <div className="notification-pairing">
@@ -233,10 +243,19 @@ function channelLabel(channel: NotificationChannel, locale: string): string {
   return locale === "zh-CN" ? "微信机器人" : "WeChat Bot";
 }
 
-function channelDescription(channel: NotificationChannel, locale: string): string {
+function channelDescription(
+  channel: NotificationChannel,
+  locale: string,
+  userHasEmail: boolean
+): string {
   if (channel === "EMAIL") {
+    if (!userHasEmail) {
+      return locale === "zh-CN"
+        ? "Steam 登录不会生成虚假邮箱。绑定并验证邮箱后，才可以开启邮件通知。"
+        : "Steam sign-in does not fabricate an email address. Link and verify one before enabling email alerts.";
+    }
     return locale === "zh-CN"
-      ? "直接使用当前账号已验证的登录邮箱，不允许填写未验证地址。"
+      ? "使用当前账号已验证的登录邮箱，不允许填写未验证地址。"
       : "Uses the verified sign-in email for this account; arbitrary addresses are not accepted.";
   }
   if (channel === "QQ") {
