@@ -1,9 +1,6 @@
 export interface AuthUser {
   id: string;
-  // Email is optional at runtime for Steam-only accounts. This stays typed as a
-  // string for legacy screens until the account/notification migration lands;
-  // new 2.0 surfaces must use display_name as a fallback.
-  email: string;
+  email: string | null;
   email_verified_at: string | null;
   display_name?: string | null;
   avatar_url?: string | null;
