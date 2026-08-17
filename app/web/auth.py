@@ -18,7 +18,6 @@ from app.auth import (
 )
 from app.entitlements import (
     AI_DECISIONS_ENTITLEMENT,
-    REALTIME_NOTIFICATIONS_ENTITLEMENT,
     EntitlementService,
 )
 
@@ -182,17 +181,20 @@ def _auth_router(
 
     async def session_payload(user: AuthenticatedUser | None) -> dict:
         active: tuple[str, ...] = ()
+        grants: list[dict] = []
         if user is not None:
             active = await entitlements.ensure_development_grants(
                 user.id,
                 user.email,
                 development_grant_emails,
             )
+            grants = [item.public_payload() for item in await entitlements.active_grants(user.id)]
         return {
             "enabled": enabled,
             "authenticated": user is not None if enabled else True,
             "user": _user_payload(user) if user is not None else None,
             "entitlements": list(active),
+            "grants": grants,
         }
 
     @router.get("/session")
@@ -285,14 +287,18 @@ def _http_access_requirement(path: str) -> tuple[str, str | None]:
         return "PUBLIC", None
     if path == "/api/billing" or path.startswith("/api/billing/"):
         return "AUTHENTICATED", None
+    # Notification Center and map-specific AI routes perform resource-aware
+    # entitlement checks after identity is attached. Middleware only requires a
+    # valid session so SERIES/MAP grants are not mistaken for GLOBAL Pro.
     if path == "/api/notifications" or path.startswith("/api/notifications/"):
-        return "ENTITLED", REALTIME_NOTIFICATIONS_ENTITLEMENT
+        return "AUTHENTICATED", None
+    if path.startswith("/api/maps/") and path.endswith("/ai-decisions"):
+        return "AUTHENTICATED", None
     if (
         path == "/api/snapshots"
         or path.startswith("/api/snapshots/")
         or path == "/api/review"
         or path.startswith("/api/review/")
-        or (path.startswith("/api/maps/") and path.endswith("/ai-decisions"))
     ):
         return "ENTITLED", AI_DECISIONS_ENTITLEMENT
     if path == "/metrics" or path == "/api/jobs/summary" or path.startswith("/api/account/"):

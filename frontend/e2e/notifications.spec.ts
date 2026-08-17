@@ -36,7 +36,8 @@ async function mockNotificationApi(page: Page, { entitled }: { entitled: boolean
         enabled: true,
         authenticated: true,
         user,
-        entitlements: entitled ? ["ai_decisions", "realtime_notifications"] : ["ai_decisions"]
+        entitlements: entitled ? ["ai_decisions", "realtime_notifications"] : ["ai_decisions"],
+        grants: []
       };
     } else if (path === "/api/notifications") {
       notificationRequests += 1;
@@ -64,10 +65,10 @@ test("keeps Notification Center locked for signed-in users without realtime enti
   await page.goto("/notifications?e2e=free-notifications");
 
   await expect(
-    page.getByRole("heading", { name: "Realtime Notification Center is a Pro feature" })
+    page.getByRole("heading", { name: "Realtime Notification Center requires paid access" })
   ).toBeVisible();
   await expect(
-    page.getByText("This account does not have realtime_notifications access yet.")
+    page.getByText("This account does not have any active realtime notification grant.")
   ).toBeVisible();
   expect(notificationRequests()).toBe(0);
 });

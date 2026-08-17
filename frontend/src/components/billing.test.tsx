@@ -50,6 +50,8 @@ const offers = {
       payment_methods: { card: "one_time", alipay: "one_time", wechat_pay: "one_time" }
     }
   ],
+  series_pass: { enabled: false },
+  referral: { enabled: false, campaign_key: "referral-v1" },
   local_payment_notes: { alipay: "eligible", wechat_pay: "one time" },
   crypto: {
     enabled: false,
@@ -58,7 +60,7 @@ const offers = {
   }
 };
 
-const account = { entitlements: [], subscriptions: [] };
+const account = { entitlements: [], grants: [], subscriptions: [], series_passes: [] };
 
 test("shows WeChat Pay only on fixed-term offers and asks anonymous users to sign in", async () => {
   vi.stubGlobal(

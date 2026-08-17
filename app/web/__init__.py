@@ -8,13 +8,17 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.auth import EmailAuthService, ResendLoginCodeSender
 from app.config import Settings, get_settings
 from app.entitlements import EntitlementService
+from app.promotions import PromotionService
+from app.promotions.config import PromotionSettings
 from app.runtime.health import HealthRegistry
+from app.web.access import create_access_router
 from app.web.api import create_app as create_api_app
 from app.web.auth import register_auth
 from app.web.billing import create_billing_router
 from app.web.notifications import create_notification_router
 from app.web.player_hero_recent import register_player_hero_recent_routes
 from app.web.premium import create_premium_router
+from app.web.promotions import create_promotion_router
 from app.web.public_boundary import PublicMatchDataBoundaryMiddleware
 from app.web.server import WebServerWorker
 from app.web.spa import spa_file_response
@@ -34,6 +38,7 @@ def create_app(
     auth_cookie_secure: bool | None = None,
     development_grant_emails: tuple[str, ...] = (),
     settings: Settings | None = None,
+    promotion_settings: PromotionSettings | None = None,
 ) -> FastAPI:
     runtime_settings = settings
     owns_auth_service = False
@@ -48,10 +53,18 @@ def create_app(
         auth_service = _configured_auth_service(runtime_settings, session_factory)
         owns_auth_service = True
 
-    # Main passes the already validated runtime settings explicitly. Tests and
-    # focused app fixtures fall back to the normal settings loader.
     runtime_settings = runtime_settings or get_settings()
+    promotions = promotion_settings or PromotionSettings()
     entitlement_service = EntitlementService(session_factory)
+    promotion_service = PromotionService(
+        session_factory,
+        referral_enabled=promotions.referral_enabled,
+        campaign_key=promotions.referral_campaign_key,
+        claim_window_days=promotions.referral_claim_window_days,
+        inviter_reward_days=promotions.referral_inviter_reward_days,
+        invited_reward_days=promotions.referral_invited_reward_days,
+        max_rewards_per_inviter=promotions.referral_max_rewards_per_inviter,
+    )
 
     # Build API routes first without the SPA catch-all, so detail-scoped
     # extension routes remain reachable before the frontend fallback route.
@@ -73,8 +86,17 @@ def create_app(
             market_max_pair_skew_seconds=market_max_pair_skew_seconds,
         )
     )
+    app.include_router(create_access_router(session_factory, entitlement_service))
     app.include_router(create_notification_router(session_factory))
-    app.include_router(create_billing_router(session_factory, runtime_settings))
+    app.include_router(create_promotion_router(promotion_service))
+    app.include_router(
+        create_billing_router(
+            session_factory,
+            runtime_settings,
+            promotion_settings=promotions,
+            promotion_service=promotion_service,
+        )
+    )
     register_auth(
         app,
         service=auth_service,

@@ -7,7 +7,12 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.auth.models import UserAccountRecord
 from app.db import Base
-from app.entitlements import REALTIME_NOTIFICATIONS_ENTITLEMENT, EntitlementService
+from app.entitlements import (
+    ACCESS_SCOPE_SERIES,
+    REALTIME_NOTIFICATIONS_ENTITLEMENT,
+    EntitlementService,
+)
+from app.models import CanonicalMap, CanonicalSeries, CanonicalTeam, DecisionSnapshotRecord
 from app.notifications.center import (
     CHANNEL_EMAIL,
     CHANNEL_QQ,
@@ -38,6 +43,42 @@ async def _user(factory, email: str):
         session.add(user)
         await session.flush()
         return user.id, now
+
+
+async def _snapshot(factory, *, suffix: str):
+    now = datetime.now(UTC)
+    async with factory.begin() as session:
+        team_a = CanonicalTeam(name=f"Alpha {suffix}")
+        team_b = CanonicalTeam(name=f"Beta {suffix}")
+        session.add_all([team_a, team_b])
+        await session.flush()
+        series = CanonicalSeries(
+            team_a_id=team_a.id,
+            team_b_id=team_b.id,
+            best_of=3,
+            scheduled_at=now,
+        )
+        session.add(series)
+        await session.flush()
+        canonical_map = CanonicalMap(
+            series_id=series.id,
+            map_number=1,
+            scheduled_at=now,
+        )
+        session.add(canonical_map)
+        await session.flush()
+        snapshot = DecisionSnapshotRecord(
+            id=uuid4(),
+            canonical_map_id=canonical_map.id,
+            decision_at=now,
+            created_at=now,
+            mode="LIVE_BASIC",
+            canonical_payload={},
+            snapshot_hash=f"snapshot-{suffix}-{uuid4().hex}",
+        )
+        session.add(snapshot)
+        await session.flush()
+        return series.id, canonical_map.id, snapshot.id
 
 
 @pytest.mark.asyncio
@@ -157,6 +198,57 @@ async def test_delivery_is_idempotent_and_rechecks_entitlement_before_send() -> 
         assert delivery.status == "CANCELLED"
         assert destination == {"email": "pro@example.com"}
         assert binding.user_id == user_id
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_series_grant_fans_out_only_for_covered_series_and_rechecks_before_send() -> None:
+    engine, factory = await _factory()
+    try:
+        user_id, verified_at = await _user(factory, "series-pass@example.com")
+        covered_series_id, _, covered_snapshot_id = await _snapshot(factory, suffix="covered")
+        _, _, other_snapshot_id = await _snapshot(factory, suffix="other")
+        entitlements = EntitlementService(factory)
+        source = "billing:paddle-series:test"
+        await entitlements.grant(
+            user_id,
+            REALTIME_NOTIFICATIONS_ENTITLEMENT,
+            source=source,
+            scope_type=ACCESS_SCOPE_SERIES,
+            scope_ref=covered_series_id,
+        )
+        center = NotificationCenterService(factory)
+        await center.ensure_email_binding(
+            user_id=user_id,
+            email="series-pass@example.com",
+            verified_at=verified_at,
+        )
+
+        async with factory.begin() as session:
+            covered = await center.ensure_deliveries(
+                session,
+                channel=CHANNEL_EMAIL,
+                snapshot_id=covered_snapshot_id,
+                decision_ids=[uuid4()],
+            )
+            unrelated = await center.ensure_deliveries(
+                session,
+                channel=CHANNEL_EMAIL,
+                snapshot_id=other_snapshot_id,
+                decision_ids=[uuid4()],
+            )
+        assert len(covered) == 1
+        assert unrelated == []
+
+        await entitlements.revoke(
+            user_id,
+            REALTIME_NOTIFICATIONS_ENTITLEMENT,
+            source=source,
+        )
+        assert await center.start_delivery(covered[0].id) is None
+        delivery, _ = await center.delivery_receipt(covered[0].id)
+        assert delivery.status == "CANCELLED"
     finally:
         await engine.dispose()
 

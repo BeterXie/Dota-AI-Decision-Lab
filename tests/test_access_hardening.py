@@ -1,6 +1,5 @@
 from app.entitlements import (
     AI_DECISIONS_ENTITLEMENT,
-    REALTIME_NOTIFICATIONS_ENTITLEMENT,
 )
 from app.notifications.pairing_limiter import PairingAttemptLimiter
 from app.web.auth import _http_access_requirement
@@ -16,9 +15,11 @@ def test_http_access_policy_is_explicit_and_unknown_api_is_not_public() -> None:
     assert _http_access_requirement(
         "/api/maps/00000000-0000-0000-0000-000000000000/draft-hero-recent"
     ) == ("PUBLIC", None)
+    # Map AI is resource-aware: middleware authenticates identity, then the
+    # route checks GLOBAL / SERIES / MAP access against the canonical map.
     assert _http_access_requirement(
         "/api/maps/00000000-0000-0000-0000-000000000000/ai-decisions"
-    ) == ("ENTITLED", AI_DECISIONS_ENTITLEMENT)
+    ) == ("AUTHENTICATED", None)
     assert _http_access_requirement("/api/review") == (
         "ENTITLED",
         AI_DECISIONS_ENTITLEMENT,
@@ -27,9 +28,11 @@ def test_http_access_policy_is_explicit_and_unknown_api_is_not_public() -> None:
         "ENTITLED",
         AI_DECISIONS_ENTITLEMENT,
     )
+    # Notification Center also accepts scoped realtime grants, so middleware
+    # authenticates and the router performs the resource-aware grant check.
     assert _http_access_requirement("/api/notifications") == (
-        "ENTITLED",
-        REALTIME_NOTIFICATIONS_ENTITLEMENT,
+        "AUTHENTICATED",
+        None,
     )
     assert _http_access_requirement("/api/billing/offers") == ("PUBLIC", None)
     assert _http_access_requirement("/api/billing/webhooks/paddle") == ("PUBLIC", None)

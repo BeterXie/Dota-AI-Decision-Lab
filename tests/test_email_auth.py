@@ -10,6 +10,7 @@ from app.auth.models import EmailLoginChallengeRecord, UserAccountRecord
 from app.auth.service import EmailAuthService, InvalidLoginCodeError, normalize_email
 from app.db import Base
 from app.entitlements import AI_DECISIONS_ENTITLEMENT, EntitlementService
+from app.models import CanonicalMap
 from app.runtime.health import HealthRegistry
 from app.web import create_app
 from app.web.auth import AuthGuardMiddleware
@@ -156,7 +157,10 @@ async def test_auth_api_keeps_matches_public_and_requires_entitlement_for_ai(tmp
             auth_enabled=True,
             auth_cookie_secure=False,
         )
-        premium_path = "/api/maps/11111111-1111-1111-1111-111111111111/ai-decisions"
+        premium_map_id = UUID("11111111-1111-1111-1111-111111111111")
+        async with factory() as session, session.begin():
+            session.add(CanonicalMap(id=premium_map_id, map_number=1))
+        premium_path = f"/api/maps/{premium_map_id}/ai-decisions"
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             assert (await client.get("/health")).status_code == 200
             assert (await client.get("/api/matches")).status_code == 200
@@ -170,6 +174,7 @@ async def test_auth_api_keeps_matches_public_and_requires_entitlement_for_ai(tmp
                 "authenticated": False,
                 "user": None,
                 "entitlements": [],
+                "grants": [],
             }
 
             requested = await client.post(
@@ -201,8 +206,7 @@ async def test_auth_api_keeps_matches_public_and_requires_entitlement_for_ai(tmp
             forbidden = await client.get(premium_path)
             assert forbidden.status_code == 403
             assert forbidden.json() == {
-                "detail": "entitlement required",
-                "required_entitlement": AI_DECISIONS_ENTITLEMENT,
+                "detail": "AI Decision access is not granted for this match"
             }
 
             user_id = UUID(session.json()["user"]["id"])
@@ -211,8 +215,9 @@ async def test_auth_api_keeps_matches_public_and_requires_entitlement_for_ai(tmp
                 AI_DECISIONS_ENTITLEMENT,
                 source="test",
             )
-            entitled_missing_map = await client.get(premium_path)
-            assert entitled_missing_map.status_code == 404
+            entitled_map = await client.get(premium_path)
+            assert entitled_map.status_code == 200
+            assert entitled_map.json()["canonical_map_id"] == str(premium_map_id)
 
             refreshed = await client.get("/api/auth/session")
             assert refreshed.json()["entitlements"] == [AI_DECISIONS_ENTITLEMENT]
@@ -311,6 +316,7 @@ async def test_auth_disabled_preserves_public_access_but_closes_protected_apis(t
                 "authenticated": True,
                 "user": None,
                 "entitlements": [],
+                "grants": [],
             }
             assert (await client.get("/api/matches")).status_code == 200
             assert (await client.get("/metrics")).status_code == 503
@@ -318,6 +324,8 @@ async def test_auth_disabled_preserves_public_access_but_closes_protected_apis(t
                 "/api/maps/11111111-1111-1111-1111-111111111111/ai-decisions"
             )
             assert premium.status_code == 503
-            assert premium.json()["required_entitlement"] == AI_DECISIONS_ENTITLEMENT
+            assert premium.json() == {
+                "detail": "authentication is disabled for this protected endpoint"
+            }
     finally:
         await engine.dispose()

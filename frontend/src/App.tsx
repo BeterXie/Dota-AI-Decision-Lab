@@ -35,6 +35,7 @@ const REALTIME_NOTIFICATIONS_ENTITLEMENT = "realtime_notifications";
 
 interface PremiumAiPayload {
   canonical_map_id: string;
+  canonical_series_id?: string | null;
   latest_snapshot: MapSummary["latest_snapshot"];
   decisions: AiDecision[];
   checkpoint_decisions: AiDecision[];
@@ -65,9 +66,13 @@ function AuthenticatedApp() {
   const session = auth.data;
   const hasAiAccess = Boolean(session?.entitlements?.includes(AI_DECISIONS_ENTITLEMENT));
   const hasNotificationAccess = Boolean(
+    session?.entitlements?.includes(REALTIME_NOTIFICATIONS_ENTITLEMENT) ||
+      session?.grants?.some((grant) => grant.entitlement === REALTIME_NOTIFICATIONS_ENTITLEMENT)
+  );
+  const hasGlobalNotificationAccess = Boolean(
     session?.entitlements?.includes(REALTIME_NOTIFICATIONS_ENTITLEMENT)
   );
-  const hasPro = hasAiAccess && hasNotificationAccess;
+  const hasPro = hasAiAccess && hasGlobalNotificationAccess;
   const isSignedIn = Boolean(session?.enabled && session.authenticated && session.user);
 
   const handleAuthenticated = (next: AuthSessionState) => {
@@ -95,7 +100,8 @@ function AuthenticatedApp() {
       enabled: true,
       authenticated: false,
       user: null,
-      entitlements: []
+      entitlements: [],
+      grants: []
     });
   };
 
@@ -195,7 +201,6 @@ function DashboardApp({
   useRuntimeSocket();
   const queryClient = useQueryClient();
   const [selectedMapId, setSelectedMapId] = useState<string | null>(null);
-  const hasAiAccess = Boolean(session?.entitlements?.includes(AI_DECISIONS_ENTITLEMENT));
   const isSignedIn = Boolean(session?.enabled && session.authenticated && session.user);
   const canFetchOperationalData = Boolean(session && (!session.enabled || isSignedIn));
 
@@ -216,8 +221,6 @@ function DashboardApp({
     refetchInterval: 5000
   });
 
-  // Public detail enriches LIVE rows with current match facts only. AI decisions
-  // are fetched separately and only when the authenticated user is entitled.
   const liveCanonicalMapIds = (maps.data ?? [])
     .filter((match) => match.phase === "LIVE" && match.canonical_map_id)
     .map((match) => match.canonical_map_id as string);
@@ -241,6 +244,15 @@ function DashboardApp({
   const activeMapId = chooseActiveMapId(selectedMapId, enrichedMatches);
   const selectedMatch = enrichedMatches.find((match) => match.id === activeMapId) || enrichedMatches[0];
   const selectedCanonicalMapId = selectedMatch?.canonical_map_id ?? null;
+  const selectedSeriesId = selectedMatch?.series_id ?? null;
+  const aiScope = accessScopeForResource(
+    session,
+    AI_DECISIONS_ENTITLEMENT,
+    selectedSeriesId,
+    selectedCanonicalMapId
+  );
+  const hasSelectedAiAccess = aiScope !== null;
+
   const detail = useQuery({
     queryKey: selectedCanonicalMapId ? queryKeys.map(selectedCanonicalMapId) : ["map", "none"],
     queryFn: () => fetchMap(selectedCanonicalMapId!),
@@ -251,7 +263,7 @@ function DashboardApp({
   const premium = useQuery({
     queryKey: selectedCanonicalMapId ? ["map-ai", selectedCanonicalMapId] : ["map-ai", "none"],
     queryFn: () => fetchPremiumAi(selectedCanonicalMapId!),
-    enabled: Boolean(selectedCanonicalMapId && hasAiAccess),
+    enabled: Boolean(selectedCanonicalMapId && hasSelectedAiAccess),
     refetchInterval: 4000
   });
 
@@ -287,12 +299,45 @@ function DashboardApp({
       aiAccess={{
         authEnabled: session?.enabled !== false,
         authenticated: isSignedIn,
-        entitled: hasAiAccess,
-        loading: authLoading || premium.isLoading
+        entitled: hasSelectedAiAccess,
+        scope: aiScope,
+        loading: authLoading || premium.isLoading,
+        upgradeHref: selectedSeriesId ? `/billing?series=${encodeURIComponent(selectedSeriesId)}` : "/billing"
       }}
       onLogin={onLogin}
     />
   );
+}
+
+function accessScopeForResource(
+  session: AuthSessionState | undefined,
+  entitlement: string,
+  seriesId: string | null,
+  mapId: string | null
+): "GLOBAL" | "SERIES" | "MAP" | null {
+  if (session?.entitlements?.includes(entitlement)) return "GLOBAL";
+  const grants = session?.grants ?? [];
+  if (
+    seriesId &&
+    grants.some(
+      (grant) =>
+        grant.entitlement === entitlement &&
+        grant.scope_type === "SERIES" &&
+        grant.scope_ref === seriesId
+    )
+  ) {
+    return "SERIES";
+  }
+  if (
+    mapId &&
+    grants.some(
+      (grant) =>
+        grant.entitlement === entitlement && grant.scope_type === "MAP" && grant.scope_ref === mapId
+    )
+  ) {
+    return "MAP";
+  }
+  return null;
 }
 
 function chooseActiveMapId(selectedMapId: string | null, matches: MapSummary[]): string | null {
@@ -367,8 +412,8 @@ function PremiumReviewGate({
         </div>
         <p className="auth-description">
           {locale === "zh-CN"
-            ? "普通比赛数据保持公开；AI 历史决策、概率、置信度与结算分析仅向拥有 AI Decision 权限的账号开放。"
-            : "Match data stays public. Historical AI decisions, probabilities, confidence and settlement analytics require AI Decision access."}
+            ? "普通比赛数据保持公开；跨比赛 AI 历史复盘属于全局 Pro。单个系列赛通行证只解锁所购买比赛的 AI 与实时通知。"
+            : "Match data stays public. Cross-match AI review requires global Pro; a series pass unlocks only the purchased series AI and alerts."}
         </p>
         {!authenticated && authEnabled && (
           <button className="auth-primary-btn" type="button" onClick={onLogin}>
@@ -378,15 +423,15 @@ function PremiumReviewGate({
         {authenticated && (
           <div className="auth-error" role="status">
             {locale === "zh-CN"
-              ? "当前账号尚未拥有 AI Decision 权限。"
-              : "This account does not have AI Decision access yet."}
+              ? "当前账号尚未拥有全局 AI Review 权限。"
+              : "This account does not have global AI Review access yet."}
           </div>
         )}
         {!authEnabled && (
           <div className="auth-error" role="status">
             {locale === "zh-CN"
               ? "当前运行环境尚未启用登录，因此 Pro AI 接口保持关闭。"
-              : "Authentication is disabled in this runtime, so Pro AI access remains closed."}
+              : "Authentication is disabled in this runtime, so premium AI access remains closed."}
           </div>
         )}
       </section>
@@ -413,15 +458,15 @@ function NotificationAccessGate({
             <div className="auth-eyebrow">REALTIME PRO</div>
             <h1>
               {locale === "zh-CN"
-                ? "实时 Notification Center 属于 Pro 权限"
-                : "Realtime Notification Center is a Pro feature"}
+                ? "实时 Notification Center 属于付费权限"
+                : "Realtime Notification Center requires paid access"}
             </h1>
           </div>
         </div>
         <p className="auth-description">
           {locale === "zh-CN"
-            ? "拥有 realtime_notifications 后，可把已验证邮箱、QQ 和微信会话绑定到账号，接收新的 AI BUY 决策。"
-            : "With realtime_notifications, verified email, QQ and WeChat destinations can receive new AI BUY decisions."}
+            ? "全局 Pro 或有效的系列赛通行证都可以绑定邮箱、QQ 和微信；实际通知只会发送你拥有权限的比赛。"
+            : "Global Pro or an active series pass can bind Email, QQ and WeChat. Alerts are sent only for matches covered by your access grants."}
         </p>
         {!authenticated && authEnabled && (
           <button className="auth-primary-btn" type="button" onClick={onLogin}>
@@ -431,8 +476,8 @@ function NotificationAccessGate({
         {authenticated && (
           <div className="auth-error" role="status">
             {locale === "zh-CN"
-              ? "当前账号尚未拥有 realtime_notifications 权限。"
-              : "This account does not have realtime_notifications access yet."}
+              ? "当前账号没有任何有效的实时通知权限。"
+              : "This account does not have any active realtime notification grant."}
           </div>
         )}
         {!authEnabled && (

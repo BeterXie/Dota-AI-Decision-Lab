@@ -64,7 +64,14 @@ test("keeps canonical success visible while exposing a newer current timeout", a
       <PlayerAiDecisionPanel
         decisions={[canonical]}
         currentSnapshotId="snapshot-1"
-        access={{ authEnabled: true, authenticated: true, entitled: true, loading: false }}
+        access={{
+          authEnabled: true,
+          authenticated: true,
+          entitled: true,
+          scope: "GLOBAL",
+          loading: false,
+          upgradeHref: "/billing"
+        }}
         analysisAvailable
         completedModels={1}
         onLogin={vi.fn()}

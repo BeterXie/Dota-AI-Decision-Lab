@@ -32,7 +32,10 @@ export function PlayerAiDecisionPanel({
     let cancelled = false;
     let timer: number | null = null;
 
-    if (!access.entitled || !currentSnapshotId) {
+    // Snapshot detail remains a global-Pro diagnostics surface. SERIES/MAP
+    // access receives the authorized decisions from the map premium endpoint
+    // and must not accidentally poll the cross-product snapshot API.
+    if (!access.entitled || access.scope !== "GLOBAL" || !currentSnapshotId) {
       setAttempts([]);
       return () => { cancelled = true; };
     }
@@ -59,7 +62,7 @@ export function PlayerAiDecisionPanel({
       cancelled = true;
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [access.entitled, currentSnapshotId]);
+  }, [access.entitled, access.scope, currentSnapshotId]);
 
   const latest = useMemo(() => latestAttempts(attempts), [attempts]);
 
@@ -85,8 +88,8 @@ export function PlayerAiDecisionPanel({
           </span>
           <span>
             {locale === "zh-CN"
-              ? "方向、置信度、公允概率、下注建议与推理仅向 AI Decision 权限用户开放。"
-              : "Direction, confidence, fair probability, staking and reasoning require AI Decision access."}
+              ? "可以升级全局 Pro，也可以只购买当前 BO 系列赛通行证。方向、置信度、公允概率、下注建议与推理只在有效权限范围内开放。"
+              : "Upgrade to global Pro or buy only this BO series pass. Direction, confidence, fair probability, staking and reasoning stay inside the purchased access scope."}
           </span>
         </div>
         {!access.authenticated && access.authEnabled && (
@@ -95,11 +98,16 @@ export function PlayerAiDecisionPanel({
           </button>
         )}
         {access.authenticated && (
-          <div className="auth-error" role="status">
-            {locale === "zh-CN"
-              ? "当前账号为 Free，尚未拥有 AI Decision 权限。"
-              : "This Free account does not have AI Decision access."}
-          </div>
+          <>
+            <div className="auth-error" role="status">
+              {locale === "zh-CN"
+                ? "当前账号尚未拥有这场比赛的 AI Decision 权限。"
+                : "This account does not have AI Decision access for this match."}
+            </div>
+            <a className="auth-primary-btn" href={access.upgradeHref}>
+              {locale === "zh-CN" ? "查看当前比赛通行证 / Pro" : "View series pass / Pro"}
+            </a>
+          </>
         )}
         {!access.authEnabled && (
           <div className="auth-error" role="status">
@@ -114,6 +122,17 @@ export function PlayerAiDecisionPanel({
 
   return (
     <>
+      {access.scope !== "GLOBAL" && (
+        <section className="analytics-card ai-decision-container" aria-label="Scoped AI access">
+          <div className="player-agreement-summary">
+            <span>
+              {locale === "zh-CN"
+                ? `当前 AI 权限范围：${access.scope === "SERIES" ? "本 BO 系列赛" : "本局 Map"}`
+                : `Current AI access scope: ${access.scope === "SERIES" ? "this BO series" : "this map"}`}
+            </span>
+          </div>
+        </section>
+      )}
       {latest.length > 0 && (
         <section className="ai-decision-container player-ai-current-experiments" aria-label="Current AI experiment status">
           <div className="player-section-heading">
