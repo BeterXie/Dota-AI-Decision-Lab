@@ -156,15 +156,20 @@ def _configured_auth_service(
     *,
     local_auth: LocalDevelopmentAuth,
 ) -> EmailAuthService:
-    secret_key = _validated_auth_secret(settings)
     if local_auth.enabled:
+        secret_key = _validated_auth_secret(settings)
         sender = LocalLoginCodeSender(local_auth.code_path)
     else:
         if settings.auth_configuration_errors:
             missing = ", ".join(settings.auth_configuration_errors)
             raise RuntimeError(f"email authentication configuration is incomplete: {missing}")
-        if settings.resend_api_key is None or not settings.resend_from:
+        if (
+            settings.auth_secret_key is None
+            or settings.resend_api_key is None
+            or not settings.resend_from
+        ):
             raise RuntimeError("validated email authentication configuration is incomplete")
+        secret_key = settings.auth_secret_key.get_secret_value()
         sender = ResendLoginCodeSender(
             api_key=settings.resend_api_key.get_secret_value(),
             sender_from=settings.resend_from,
