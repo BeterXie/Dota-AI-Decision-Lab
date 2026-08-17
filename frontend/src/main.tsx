@@ -14,6 +14,7 @@ import "./design/events-v2.css";
 import "./design/match-v2.css";
 import "./design/premium-shell.css";
 import "./design/account-v2.css";
+import "./design/final-experience-audit.css";
 
 const queryClient = new QueryClient({
   defaultOptions: {
