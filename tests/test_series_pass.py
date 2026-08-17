@@ -1,7 +1,9 @@
 import json
 from datetime import UTC, datetime, timedelta
 
+import httpx
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.auth.models import UserAccountRecord
@@ -13,6 +15,7 @@ from app.entitlements import (
     EntitlementService,
 )
 from app.models import CanonicalSeries, CanonicalTeam
+from app.promotions import SeriesPassCheckoutConflict
 from app.promotions.models import SeriesPassPurchaseRecord
 from app.promotions.paddle_series import PaddleSeriesPassService
 
@@ -32,7 +35,12 @@ async def _fixture():
         team_c = CanonicalTeam(name="Gamma")
         session.add_all([team_a, team_b, team_c])
         await session.flush()
-        series = CanonicalSeries(team_a_id=team_a.id, team_b_id=team_b.id, best_of=3, scheduled_at=now)
+        series = CanonicalSeries(
+            team_a_id=team_a.id,
+            team_b_id=team_b.id,
+            best_of=3,
+            scheduled_at=now,
+        )
         other_series = CanonicalSeries(
             team_a_id=team_a.id,
             team_b_id=team_c.id,
@@ -220,4 +228,62 @@ async def test_payment_block_prevents_later_completed_event_from_regranting() ->
             is False
         )
     finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_checkout_reservation_blocks_second_provider_transaction() -> None:
+    engine, factory, service, user_id, series_id, _, _ = await _fixture()
+    requests: list[str] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        requests.append(request.url.path)
+        if request.url.path == "/transactions":
+            return httpx.Response(
+                201,
+                json={
+                    "data": {
+                        "id": "txn_reserved_checkout",
+                        "checkout": {"url": "https://pay.paddle.test/series"},
+                    }
+                },
+            )
+        return httpx.Response(404)
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://sandbox-api.paddle.com",
+    )
+    try:
+        async with factory.begin() as session:
+            existing = await session.scalar(select(SeriesPassPurchaseRecord))
+            assert existing is not None
+            existing.status = "FAILED"
+
+        checkout = await service.create_checkout(
+            user_id=user_id,
+            email="series@example.com",
+            canonical_series_id=series_id,
+            client=client,
+        )
+        assert checkout.transaction_ref == "txn_reserved_checkout"
+        assert requests == ["/transactions"]
+
+        with pytest.raises(SeriesPassCheckoutConflict, match="still pending"):
+            await service.create_checkout(
+                user_id=user_id,
+                email="series@example.com",
+                canonical_series_id=series_id,
+                client=client,
+            )
+        assert requests == ["/transactions"]
+        async with factory() as session:
+            stored = await session.scalar(
+                select(SeriesPassPurchaseRecord).where(
+                    SeriesPassPurchaseRecord.transaction_ref == "txn_reserved_checkout"
+                )
+            )
+            assert stored is not None and stored.status == "PENDING"
+    finally:
+        await client.aclose()
         await engine.dispose()
