@@ -41,7 +41,13 @@ test("keeps the cross-event AI performance dashboard global-Pro only", async ({ 
 
   await page.goto("/performance");
 
-  await expect(page.getByRole("heading", { name: "AI 复盘与盈利榜属于 Pro 权限" })).toBeVisible();
-  await expect(page.getByText("当前账号尚未拥有全局 AI Review / Performance 权限。", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "AI Performance 属于 Pro 权限" })).toBeVisible();
+  await expect(
+    page.getByText(
+      "普通比赛数据保持公开；跨比赛模型成绩、实验版本对比和完整决策追溯属于全局 Pro。单个系列赛通行证不会开放全局模型历史。",
+      { exact: true }
+    )
+  ).toBeVisible();
+  await expect(page.getByText("当前账号尚未拥有全局 AI Performance 权限。", { exact: true })).toBeVisible();
   expect(leaderboardRequests).toBe(0);
 });
