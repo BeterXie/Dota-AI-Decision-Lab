@@ -1,5 +1,6 @@
 import React from "react";
 import type { MapSummary } from "../api";
+import { buildEventSummaries, eventHref, eventName, type EventStatus, type EventSummary } from "../events";
 import { useI18n } from "../i18n";
 
 interface HomePageProps {
@@ -10,14 +11,6 @@ interface HomePageProps {
   onLogin: () => void;
 }
 
-interface TournamentGroup {
-  key: string;
-  name: string;
-  matches: MapSummary[];
-  status: "LIVE" | "UPCOMING" | "COMPLETED";
-  nextMatch: MapSummary | null;
-}
-
 export const HomePage: React.FC<HomePageProps> = ({
   matches,
   loading,
@@ -26,7 +19,7 @@ export const HomePage: React.FC<HomePageProps> = ({
   onLogin
 }) => {
   const { locale } = useI18n();
-  const groups = React.useMemo(() => tournamentGroups(matches), [matches]);
+  const groups = React.useMemo(() => buildEventSummaries(matches), [matches]);
   const featured = groups.filter((group) => group.status !== "COMPLETED").slice(0, 3);
   const featuredGroups = featured.length > 0 ? featured : groups.slice(0, 3);
   const upcoming = matches
@@ -50,7 +43,7 @@ export const HomePage: React.FC<HomePageProps> = ({
               : "Track Dota events and matches, compare AI calls at key moments, and verify after the match which decisions actually held up."}
           </p>
           <div className="home-hero-actions">
-            <a className="product-btn product-btn-primary" href="#current-events">{locale === "zh-CN" ? "探索赛事" : "Explore events"}<span>→</span></a>
+            <a className="product-btn product-btn-primary" href="/events">{locale === "zh-CN" ? "探索赛事" : "Explore events"}<span>→</span></a>
             <a className="product-btn product-btn-secondary" href="/performance">{locale === "zh-CN" ? "看看 AI 表现" : "See AI performance"}</a>
           </div>
         </div>
@@ -62,12 +55,12 @@ export const HomePage: React.FC<HomePageProps> = ({
       </section>
 
       <section className="product-container product-section" id="current-events">
-        <SectionTitle title={locale === "zh-CN" ? "正在进行的赛事" : "Current events"} action={locale === "zh-CN" ? "进入赛事工作台" : "Open event console"} href="/match-console" />
+        <SectionTitle title={locale === "zh-CN" ? "正在进行的赛事" : "Current events"} action={locale === "zh-CN" ? "全部赛事" : "All events"} href="/events" />
         {loading ? (
           <div className="tournament-grid">{[0, 1, 2].map((item) => <div key={item} className="tournament-card is-skeleton" />)}</div>
         ) : featuredGroups.length > 0 ? (
           <div className="tournament-grid">
-            {featuredGroups.map((group, index) => <TournamentCard key={group.key} group={group} index={index} locale={locale} />)}
+            {featuredGroups.map((group, index) => <TournamentCard key={group.name} group={group} index={index} locale={locale} />)}
           </div>
         ) : (
           <EmptyHomeState text={locale === "zh-CN" ? "还没有发现赛事。数据同步后，正在进行和即将开始的赛事会出现在这里。" : "No events discovered yet. Current and upcoming events will appear here once data arrives."} />
@@ -76,13 +69,13 @@ export const HomePage: React.FC<HomePageProps> = ({
 
       <section className="product-container home-match-grid product-section">
         <div className="home-list-card">
-          <SectionTitle title={locale === "zh-CN" ? "即将开始的比赛" : "Upcoming matches"} action={locale === "zh-CN" ? "查看比赛工作台" : "Open match console"} href="/match-console" compact />
+          <SectionTitle title={locale === "zh-CN" ? "即将开始的比赛" : "Upcoming matches"} action={locale === "zh-CN" ? "查看赛事" : "View events"} href="/events" compact />
           <div className="home-match-list">
             {upcoming.length > 0 ? upcoming.map((match) => <MatchRow key={match.id} match={match} mode="upcoming" locale={locale} />) : <ListEmpty text={locale === "zh-CN" ? "目前没有即将开始的比赛" : "No upcoming matches right now"} />}
           </div>
         </div>
         <div className="home-list-card">
-          <SectionTitle title={locale === "zh-CN" ? "最近结束的比赛" : "Recent results"} action={locale === "zh-CN" ? "查看复盘" : "Open review"} href="/review" compact />
+          <SectionTitle title={locale === "zh-CN" ? "最近结束的比赛" : "Recent results"} action={locale === "zh-CN" ? "查看赛事结果" : "View event results"} href="/events" compact />
           <div className="home-match-list">
             {completed.length > 0 ? completed.map((match) => <MatchRow key={match.id} match={match} mode="completed" locale={locale} />) : <ListEmpty text={locale === "zh-CN" ? "还没有已完成的比赛" : "No completed matches yet"} />}
           </div>
@@ -108,44 +101,23 @@ export const HomePage: React.FC<HomePageProps> = ({
 
 const SectionTitle: React.FC<{ title: string; action: string; href: string; compact?: boolean }> = ({ title, action, href, compact }) => <div className={`product-section-title ${compact ? "is-compact" : ""}`}><h2>{title}</h2><a href={href}>{action}<span>→</span></a></div>;
 
-const TournamentCard: React.FC<{ group: TournamentGroup; index: number; locale: string }> = ({ group, index, locale }) => {
-  const stage = group.matches.find((match) => match.round)?.round || (locale === "zh-CN" ? "赛事" : "Event");
+const TournamentCard: React.FC<{ group: EventSummary; index: number; locale: string }> = ({ group, index, locale }) => {
+  const stage = group.stages[0] || (locale === "zh-CN" ? "赛事" : "Event");
   const nextAt = group.nextMatch?.scheduled_at ? formatTime(group.nextMatch.scheduled_at, locale) : null;
-  return <article className={`tournament-card event-tone-${index % 3}`}><div className="event-emblem" aria-hidden="true">{eventInitial(group.name)}</div><div className="event-card-body"><div className="event-card-title"><h3>{group.name}</h3><StatusPill status={group.status} locale={locale} /></div><p>{stage}</p><div className="event-card-meta"><span>{group.matches.length} {locale === "zh-CN" ? "场比赛" : "matches"}</span>{nextAt && <span>{locale === "zh-CN" ? "下一场" : "Next"} {nextAt}</span>}</div></div><a className="event-card-action" href="/match-console">{locale === "zh-CN" ? "查看赛事" : "View event"}<span>›</span></a></article>;
+  return <article className={`tournament-card event-tone-${index % 3}`}><div className="event-emblem" aria-hidden="true">{eventInitial(group.name)}</div><div className="event-card-body"><div className="event-card-title"><h3>{group.name}</h3><StatusPill status={group.status} locale={locale} /></div><p>{stage}</p><div className="event-card-meta"><span>{group.seriesCount} {locale === "zh-CN" ? "个系列赛" : "series"}</span>{nextAt && <span>{locale === "zh-CN" ? "下一场" : "Next"} {nextAt}</span>}</div></div><a className="event-card-action" href={eventHref(group.name)}>{locale === "zh-CN" ? "查看赛事" : "View event"}<span>›</span></a></article>;
 };
 
 const MatchRow: React.FC<{ match: MapSummary; mode: "upcoming" | "completed"; locale: string }> = ({ match, mode, locale }) => {
   const a = match.team_a?.name || (locale === "zh-CN" ? "待定" : "TBD");
   const b = match.team_b?.name || (locale === "zh-CN" ? "待定" : "TBD");
   const score = match.series_score ? `${match.series_score.team_a} - ${match.series_score.team_b}` : mode === "completed" ? (locale === "zh-CN" ? "已结束" : "Final") : "vs";
-  return <div className="home-match-row"><time>{match.scheduled_at ? formatTime(match.scheduled_at, locale) : "—"}</time><div className="match-teams"><span><i>{teamInitial(a)}</i>{a}</span><b>{score}</b><span><i>{teamInitial(b)}</i>{b}</span></div><small>{match.best_of ? `BO${match.best_of}` : match.round || "—"}</small><a href={mode === "completed" ? "/review" : "/match-console"}>{mode === "completed" ? (locale === "zh-CN" ? "查看复盘" : "Review") : (locale === "zh-CN" ? "查看" : "View")}</a></div>;
+  return <div className="home-match-row"><time>{match.scheduled_at ? formatTime(match.scheduled_at, locale) : "—"}</time><div className="match-teams"><span><i>{teamInitial(a)}</i>{a}</span><b>{score}</b><span><i>{teamInitial(b)}</i>{b}</span></div><small>{match.best_of ? `BO${match.best_of}` : match.round || "—"}</small><a href={eventHref(eventName(match))}>{mode === "completed" ? (locale === "zh-CN" ? "赛事结果" : "Event") : (locale === "zh-CN" ? "查看赛事" : "Event")}</a></div>;
 };
 
-const StatusPill: React.FC<{ status: TournamentGroup["status"]; locale: string }> = ({ status, locale }) => <span className={`event-status status-${status.toLowerCase()}`}>{status === "LIVE" ? (locale === "zh-CN" ? "进行中" : "Live") : status === "UPCOMING" ? (locale === "zh-CN" ? "即将开始" : "Upcoming") : (locale === "zh-CN" ? "已结束" : "Finished")}</span>;
+const StatusPill: React.FC<{ status: EventStatus; locale: string }> = ({ status, locale }) => <span className={`event-status status-${status.toLowerCase()}`}>{status === "LIVE" ? (locale === "zh-CN" ? "进行中" : "Live") : status === "UPCOMING" ? (locale === "zh-CN" ? "即将开始" : "Upcoming") : status === "SETTLING" ? (locale === "zh-CN" ? "赛果确认中" : "Confirming") : (locale === "zh-CN" ? "已结束" : "Finished")}</span>;
 const ListEmpty: React.FC<{ text: string }> = ({ text }) => <div className="home-list-empty">{text}</div>;
 const EmptyHomeState: React.FC<{ text: string }> = ({ text }) => <div className="home-empty-state"><span aria-hidden="true">◇</span><p>{text}</p></div>;
 
-function tournamentGroups(matches: MapSummary[]): TournamentGroup[] {
-  const grouped = new Map<string, MapSummary[]>();
-  for (const match of matches) {
-    const name = match.tournament_name?.trim() || "Dota 2";
-    const key = `${name}:${match.series_id || match.id}`.split(":").slice(0, 1).join(":");
-    grouped.set(key, [...(grouped.get(key) ?? []), match]);
-  }
-  return Array.from(grouped.entries()).map<TournamentGroup>(([key, items]) => {
-    const upcoming = items.filter((item) => item.phase === "PREMATCH").sort(byScheduledAscending);
-    const live = items.some((item) => item.phase === "LIVE");
-    return {
-      key,
-      name: items[0]?.tournament_name?.trim() || "Dota 2",
-      matches: items,
-      status: live ? "LIVE" : upcoming.length > 0 ? "UPCOMING" : "COMPLETED",
-      nextMatch: upcoming[0] ?? null
-    };
-  }).sort((left, right) => statusRank(left.status) - statusRank(right.status) || byNullableDate(left.nextMatch?.scheduled_at, right.nextMatch?.scheduled_at));
-}
-
-function statusRank(status: TournamentGroup["status"]): number { return status === "LIVE" ? 0 : status === "UPCOMING" ? 1 : 2; }
 function byScheduledAscending(a: MapSummary, b: MapSummary): number { return byNullableDate(a.scheduled_at, b.scheduled_at); }
 function byScheduledDescending(a: MapSummary, b: MapSummary): number { return byNullableDate(b.scheduled_at, a.scheduled_at); }
 function byNullableDate(a: string | null | undefined, b: string | null | undefined): number { if (!a && !b) return 0; if (!a) return 1; if (!b) return -1; return new Date(a).getTime() - new Date(b).getTime(); }
