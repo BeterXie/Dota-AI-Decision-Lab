@@ -24,7 +24,8 @@ from app.ai.input import build_ai_input
 from app.canonical import canonical_bytes
 from app.domain.decision import AiDecision
 from app.domain.snapshot import DecisionSnapshot
-from app.evaluation.portfolio import PortfolioContext, TournamentPortfolioService
+from app.evaluation.portfolio import PortfolioContext, PortfolioScope, TournamentPortfolioService
+from app.evaluation.portfolio_models import TournamentPortfolioPositionRecord
 from app.models import AiDecisionRecord, DecisionSnapshotRecord
 
 ExperimentKey = tuple[str, str, str, str, str]
@@ -36,6 +37,9 @@ class _PriorDecision:
     mode: str
     decision: AiDecision
     bankroll_before: float | None = None
+    execution_status: str | None = None
+    rejection_reason: str | None = None
+    execution_cash_before: float | None = None
 
 
 @dataclass(frozen=True)
@@ -58,6 +62,7 @@ class PreparedAiDecision:
     existing_record: AiDecisionRecord | None = None
     job_enqueued_at: datetime | None = None
     job_claimed_at: datetime | None = None
+    portfolio_scope: PortfolioScope | None = None
 
 
 class AiCoordinator:
@@ -135,13 +140,19 @@ class AiCoordinator:
             provider=provider,
             model=model,
         )
-        portfolio_context = (
-            await self._portfolio.context_for_snapshot(
-                session,
-                snapshot_id=snapshot.snapshot_id,
-                experiment=experiment,
-            )
+        portfolio_scope = (
+            await self._portfolio.scope_for_snapshot(session, snapshot.snapshot_id)
             if self._portfolio is not None
+            else None
+        )
+        portfolio_context = (
+            await self._portfolio.context_for_scope(
+                session,
+                scope=portfolio_scope,
+                experiment=experiment,
+                funding_reference_at=snapshot.decision_at,
+            )
+            if self._portfolio is not None and portfolio_scope is not None
             else None
         )
         bankroll_context = self._bankroll_context(prior, portfolio_context=portfolio_context)
@@ -165,6 +176,7 @@ class AiCoordinator:
             existing_record=existing_record,
             job_enqueued_at=job_enqueued_at,
             job_claimed_at=job_claimed_at,
+            portfolio_scope=portfolio_scope,
         )
 
     async def prepare_all(
@@ -219,18 +231,24 @@ class AiCoordinator:
             snapshot=snapshot,
             providers=self._providers,
         )
+        portfolio_scope = (
+            await self._portfolio.scope_for_snapshot(session, snapshot.snapshot_id)
+            if self._portfolio is not None
+            else None
+        )
         prepared: list[PreparedAiDecision] = []
         for provider in self._providers:
             experiment = ai_experiment_key(provider.name, provider.model)
             existing_record = existing_by_experiment.get(experiment)
             prior = prior_by_provider_model.get((provider.name, provider.model), [])
             portfolio_context = (
-                await self._portfolio.context_for_snapshot(
+                await self._portfolio.context_for_scope(
                     session,
-                    snapshot_id=snapshot.snapshot_id,
+                    scope=portfolio_scope,
                     experiment=experiment,
+                    funding_reference_at=snapshot.decision_at,
                 )
-                if self._portfolio is not None
+                if self._portfolio is not None and portfolio_scope is not None
                 else None
             )
             bankroll_context = self._bankroll_context(prior, portfolio_context=portfolio_context)
@@ -255,6 +273,7 @@ class AiCoordinator:
                     existing_record=existing_record,
                     job_enqueued_at=job_enqueued_at,
                     job_claimed_at=job_claimed_at,
+                    portfolio_scope=portfolio_scope,
                 )
             )
         return prepared
@@ -353,7 +372,9 @@ class AiCoordinator:
         if self._portfolio is not None:
             for prepared, record in zip(prepared_jobs, records, strict=True):
                 if prepared.existing_record is None:
-                    await self._portfolio.record_decision_position(session, record)
+                    await self._portfolio.record_decision_position(
+                        session, record, scope=prepared.portfolio_scope
+                    )
         return records
 
     async def _prior_decisions(
@@ -392,10 +413,17 @@ class AiCoordinator:
                     AiDecisionRecord,
                     DecisionSnapshotRecord.decision_at,
                     DecisionSnapshotRecord.mode,
+                    TournamentPortfolioPositionRecord.status,
+                    TournamentPortfolioPositionRecord.rejection_reason,
+                    TournamentPortfolioPositionRecord.cash_before,
                 )
                 .join(
                     DecisionSnapshotRecord,
                     DecisionSnapshotRecord.id == AiDecisionRecord.snapshot_id,
+                )
+                .outerjoin(
+                    TournamentPortfolioPositionRecord,
+                    TournamentPortfolioPositionRecord.ai_decision_id == AiDecisionRecord.id,
                 )
                 .where(
                     DecisionSnapshotRecord.canonical_map_id == canonical_map_id,
@@ -412,10 +440,9 @@ class AiCoordinator:
             )
         ).all()
         by_provider_model: dict[tuple[str, str], list[tuple]] = {}
-        for record, decision_at, mode in rows:
-            by_provider_model.setdefault((record.provider, record.model), []).append(
-                (record, decision_at, mode)
-            )
+        for row in rows:
+            record = row[0]
+            by_provider_model.setdefault((record.provider, record.model), []).append(tuple(row))
         return {key: _prior_from_rows(value) for key, value in by_provider_model.items()}
 
     async def _prior_rows(
@@ -435,10 +462,17 @@ class AiCoordinator:
                     AiDecisionRecord,
                     DecisionSnapshotRecord.decision_at,
                     DecisionSnapshotRecord.mode,
+                    TournamentPortfolioPositionRecord.status,
+                    TournamentPortfolioPositionRecord.rejection_reason,
+                    TournamentPortfolioPositionRecord.cash_before,
                 )
                 .join(
                     DecisionSnapshotRecord,
                     DecisionSnapshotRecord.id == AiDecisionRecord.snapshot_id,
+                )
+                .outerjoin(
+                    TournamentPortfolioPositionRecord,
+                    TournamentPortfolioPositionRecord.ai_decision_id == AiDecisionRecord.id,
                 )
                 .where(
                     DecisionSnapshotRecord.canonical_map_id == canonical_map_id,
@@ -475,6 +509,7 @@ class AiCoordinator:
                             item,
                             bankroll_before=frozen_before,
                             stake=stake,
+                            execution_aware=True,
                         )
                     )
                 return {
@@ -517,7 +552,12 @@ class AiCoordinator:
                 else float(portfolio_context.cash_balance)
             )
             prior_decisions.append(
-                self._prior_payload(item, bankroll_before=frozen_before, stake=stake)
+                self._prior_payload(
+                    item,
+                    bankroll_before=frozen_before,
+                    stake=stake,
+                    execution_aware=True,
+                )
             )
         return {
             **portfolio_context.provider_payload(),
@@ -526,9 +566,26 @@ class AiCoordinator:
         }
 
     @staticmethod
-    def _prior_payload(item: _PriorDecision, *, bankroll_before: float, stake: float) -> dict:
-        bankroll_after = round(bankroll_before - stake, 2)
-        return {
+    def _prior_payload(
+        item: _PriorDecision,
+        *,
+        bankroll_before: float,
+        stake: float,
+        execution_aware: bool = False,
+    ) -> dict:
+        execution_cash_before = (
+            item.execution_cash_before
+            if execution_aware and item.execution_cash_before is not None
+            else bankroll_before
+        )
+        committed = (
+            item.execution_status in {"OPEN", "WON", "LOST", "VOID"} if execution_aware else True
+        )
+        bankroll_after = round(
+            execution_cash_before - stake if committed else execution_cash_before,
+            2,
+        )
+        payload = {
             "decision_at": item.decision_at.isoformat(),
             "mode": item.mode,
             "action": item.decision.action,
@@ -543,6 +600,22 @@ class AiCoordinator:
             "primary_reasons": item.decision.primary_reasons,
             "blockers": item.decision.blockers,
         }
+        if execution_aware:
+            payload.update(
+                {
+                    "execution_status": (
+                        item.execution_status
+                        or (
+                            "NOT_EXECUTED"
+                            if item.decision.action in {"BUY_A", "BUY_B"}
+                            else "NO_POSITION"
+                        )
+                    ),
+                    "rejection_reason": item.rejection_reason,
+                    "cash_before_execution": item.execution_cash_before,
+                }
+            )
+        return payload
 
     @staticmethod
     def _provider_input(base_input: dict, bankroll_context: dict) -> dict:
@@ -565,7 +638,11 @@ def _prior_from_rows(
     # leave several records on the same snapshot; keep the newest attempt
     # so the model sees one round and the bankroll counts it once.
     best_by_snapshot: dict[UUID, tuple[tuple, AiDecisionRecord, datetime, str]] = {}
-    for record, decision_at, mode in rows:
+    for row in rows:
+        record, decision_at, mode, *execution = row
+        execution_status = execution[0] if len(execution) > 0 else None
+        rejection_reason = execution[1] if len(execution) > 1 else None
+        execution_cash_before = execution[2] if len(execution) > 2 else None
         attempt = (
             record.request_started_at,
             record.prompt_version,
@@ -574,10 +651,26 @@ def _prior_from_rows(
         )
         current = best_by_snapshot.get(record.snapshot_id)
         if current is None or attempt > current[0]:
-            best_by_snapshot[record.snapshot_id] = (attempt, record, decision_at, mode)
+            best_by_snapshot[record.snapshot_id] = (
+                attempt,
+                record,
+                decision_at,
+                mode,
+                execution_status,
+                rejection_reason,
+                execution_cash_before,
+            )
 
     prior: list[_PriorDecision] = []
-    for _, record, decision_at, mode in sorted(best_by_snapshot.values(), key=lambda item: item[2]):
+    for (
+        _,
+        record,
+        decision_at,
+        mode,
+        execution_status,
+        rejection_reason,
+        execution_cash_before,
+    ) in sorted(best_by_snapshot.values(), key=lambda item: item[2]):
         if record.normalized_response is None:
             continue
         try:
@@ -591,6 +684,11 @@ def _prior_from_rows(
                 decision=decision,
                 bankroll_before=(
                     float(record.bankroll_before) if record.bankroll_before is not None else None
+                ),
+                execution_status=execution_status,
+                rejection_reason=rejection_reason,
+                execution_cash_before=(
+                    float(execution_cash_before) if execution_cash_before is not None else None
                 ),
             )
         )

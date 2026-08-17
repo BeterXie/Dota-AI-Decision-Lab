@@ -17,7 +17,7 @@ class _LaneState:
 
 
 class AiExperimentLaneRegistry:
-    """Process-local ordering for one match/provider/model decision stream.
+    """Process-local ordering for one account-scope/provider/model decision stream.
 
     The production runtime is a single supervised process with a concurrent AI
     worker pool.  Different providers and different matches remain concurrent,

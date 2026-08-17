@@ -124,10 +124,27 @@ class TournamentPortfolioService:
         scope = await self.scope_for_snapshot(session, snapshot_id)
         if scope is None:
             return None
+        snapshot = await session.get(DecisionSnapshotRecord, snapshot_id)
+        return await self.context_for_scope(
+            session,
+            scope=scope,
+            experiment=experiment,
+            funding_reference_at=snapshot.decision_at if snapshot is not None else None,
+        )
+
+    async def context_for_scope(
+        self,
+        session: AsyncSession,
+        *,
+        scope: PortfolioScope,
+        experiment: tuple[str, str, str, str, str],
+        funding_reference_at: datetime | None = None,
+    ) -> PortfolioContext:
         account = await self._ensure_account(
             session,
             canonical_event_id=scope.canonical_event_id,
             experiment=experiment,
+            funding_reference_at=funding_reference_at,
         )
         return _context(account)
 
@@ -143,6 +160,8 @@ class TournamentPortfolioService:
         self,
         session: AsyncSession,
         record: AiDecisionRecord,
+        *,
+        scope: PortfolioScope | None = None,
     ) -> TournamentPortfolioPositionRecord | None:
         if record.parse_status != "SUCCESS" or not isinstance(record.normalized_response, dict):
             return None
@@ -160,9 +179,13 @@ class TournamentPortfolioService:
         if existing is not None:
             return existing
 
-        scope = await self.scope_for_snapshot(session, record.snapshot_id)
+        if scope is None:
+            scope = await self.scope_for_snapshot(session, record.snapshot_id)
         if scope is None:
             return None
+        snapshot = await session.get(DecisionSnapshotRecord, record.snapshot_id)
+        if snapshot is None:
+            raise ValueError("AI decision references a missing snapshot")
         experiment = (
             record.provider,
             record.model,
@@ -174,6 +197,7 @@ class TournamentPortfolioService:
             session,
             canonical_event_id=scope.canonical_event_id,
             experiment=experiment,
+            funding_reference_at=snapshot.decision_at,
         )
         account = await session.scalar(
             select(TournamentPortfolioAccountRecord)
@@ -198,9 +222,6 @@ class TournamentPortfolioService:
         if existing is not None:
             return existing
 
-        snapshot = await session.get(DecisionSnapshotRecord, record.snapshot_id)
-        if snapshot is None:
-            raise ValueError("AI decision references a missing snapshot")
         stake = _money(Decimal(record.stake))
         odds = _selected_odds(
             snapshot.canonical_payload,
@@ -219,9 +240,13 @@ class TournamentPortfolioService:
         )
         rejection_reason = None
         status = "OPEN"
+        execution_quality_rejection = _execution_quality_rejection(snapshot.canonical_payload)
         if result is not None and ensure_utc(result.basic_first_usable_at) <= decision_available_at:
             status = "REJECTED"
             rejection_reason = "MAP_ALREADY_SETTLED"
+        elif execution_quality_rejection is not None:
+            status = "REJECTED"
+            rejection_reason = execution_quality_rejection
         elif odds is None:
             status = "REJECTED"
             rejection_reason = "MISSING_DECISION_ODDS"
@@ -452,6 +477,7 @@ class TournamentPortfolioService:
         *,
         canonical_event_id: UUID,
         experiment: tuple[str, str, str, str, str],
+        funding_reference_at: datetime | None = None,
     ) -> TournamentPortfolioAccountRecord:
         provider, model, prompt_version, decision_policy_version, ai_view_version = experiment
         predicates = (
@@ -467,11 +493,18 @@ class TournamentPortfolioService:
             return account
 
         event = await session.get(CanonicalEvent, canonical_event_id)
-        funded_at = (
-            event.started_at
+        event_started_at = (
+            ensure_utc(event.started_at)
             if event is not None and event.started_at is not None
-            else datetime.now(UTC)
+            else None
         )
+        reference_at = (
+            ensure_utc(funding_reference_at) if funding_reference_at is not None else None
+        )
+        if event_started_at is not None and reference_at is not None:
+            funded_at = min(event_started_at, reference_at)
+        else:
+            funded_at = event_started_at or reference_at or datetime.now(UTC)
         candidate = TournamentPortfolioAccountRecord(
             canonical_event_id=canonical_event_id,
             provider=provider,
@@ -570,6 +603,19 @@ def _context(account: TournamentPortfolioAccountRecord) -> PortfolioContext:
         max_drawdown=_money(account.max_drawdown),
         max_drawdown_pct=account.max_drawdown_pct,
     )
+
+
+def _execution_quality_rejection(payload: dict[str, Any]) -> str | None:
+    snapshot_quality = payload.get("quality")
+    if not isinstance(snapshot_quality, dict) or snapshot_quality.get("eligible") is not True:
+        return "SNAPSHOT_NOT_EXECUTABLE"
+    market = payload.get("market")
+    if not isinstance(market, dict):
+        return "MARKET_NOT_EXECUTABLE"
+    market_quality = market.get("quality")
+    if not isinstance(market_quality, dict) or market_quality.get("eligible") is not True:
+        return "MARKET_NOT_EXECUTABLE"
+    return None
 
 
 def _selected_odds(

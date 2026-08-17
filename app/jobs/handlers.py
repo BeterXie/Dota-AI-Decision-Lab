@@ -497,7 +497,11 @@ class ApplicationJobHandlers:
             if portfolio is not None:
                 for prepared, record in results:
                     if prepared.existing_record is None:
-                        await portfolio.record_decision_position(session, record)
+                        await portfolio.record_decision_position(
+                            session,
+                            record,
+                            scope=prepared.portfolio_scope,
+                        )
 
             snapshot_records = list(
                 (

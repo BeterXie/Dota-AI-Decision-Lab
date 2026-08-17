@@ -99,7 +99,22 @@ class FutureOddsService:
             if observation is not None:
                 captured.append(observation)
         captured.sort(key=lambda item: odds_ids.index(item.odds_id))
-        complete = len(captured) == 2
+        quality_reference_at = (
+            max(item.received_at for item in captured) if captured else observed_at
+        )
+        quality = _closing_pair_quality(
+            snapshot,
+            captured,
+            triggered_at=quality_reference_at,
+            max_age_seconds=self._market_max_age_seconds,
+            max_pair_skew_seconds=self._market_max_pair_skew_seconds,
+        )
+        complete = quality is not None and quality.eligible
+        status = (
+            captured[0].normalized_status
+            if complete and captured[0].normalized_status == captured[1].normalized_status
+            else "UNKNOWN"
+        )
         values = {
             "triggered_at": due_at,
             "observed_at": max(item.received_at for item in captured) if complete else observed_at,
@@ -107,8 +122,18 @@ class FutureOddsService:
             "odds_b": captured[1].price if complete else None,
             "market_type": _market_value(snapshot, "market_type"),
             "match_stage": _market_value(snapshot, "match_stage"),
-            "market_status": _market_status(snapshot),
-            "capture_policy_version": "time-horizon-v1",
+            "market_status": status,
+            "capture_policy_version": "time-horizon-v2-pair-validated",
+            "pair_quality": (
+                quality.model_dump(mode="json")
+                if quality is not None
+                else {
+                    "eligible": False,
+                    "blockers": ["MARKET_PAIR_IDENTITY_INVALID"],
+                    "warnings": [],
+                }
+            ),
+            "pair_skew_seconds": quality.pair_skew_seconds if quality is not None else None,
             "status": "CAPTURED" if complete else "MISSING",
         }
         if existing is None:

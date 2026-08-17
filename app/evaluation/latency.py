@@ -77,6 +77,8 @@ class LatencyExecutionService:
             by_snapshot[capture.decision_snapshot_id].append(capture)
 
         horizon_samples: dict[int, list[dict[str, float | bool]]] = defaultdict(list)
+        pre_response_capture_count = 0
+        invalid_pair_capture_count = 0
         for position, record in first_by_map.values():
             if position.odds is None or record.normalized_response is None:
                 continue
@@ -94,6 +96,19 @@ class LatencyExecutionService:
                 horizon = capture.horizon_seconds
                 if horizon is None:
                     continue
+                pair_quality = (
+                    capture.pair_quality if isinstance(capture.pair_quality, dict) else {}
+                )
+                if pair_quality.get("eligible") is not True:
+                    invalid_pair_capture_count += 1
+                    continue
+                if (
+                    record.response_received_at is not None
+                    and capture.observed_at is not None
+                    and ensure_utc(capture.observed_at) < ensure_utc(record.response_received_at)
+                ):
+                    pre_response_capture_count += 1
+                    continue
                 future_odds = _selected_future_odds(capture, action=position.action)
                 if future_odds is None or future_odds <= 1:
                     continue
@@ -104,19 +119,17 @@ class LatencyExecutionService:
                     "actionable": edge > 0,
                 }
                 if record.response_received_at is not None and capture.observed_at is not None:
-                    sample["observed_after_ai_seconds"] = max(
-                        0.0,
-                        (
-                            ensure_utc(capture.observed_at)
-                            - ensure_utc(record.response_received_at)
-                        ).total_seconds(),
-                    )
+                    sample["observed_after_ai_seconds"] = (
+                        ensure_utc(capture.observed_at) - ensure_utc(record.response_received_at)
+                    ).total_seconds()
                 horizon_samples[horizon].append(sample)
 
         return {
             "source": "DECISION_FUTURE_ODDS_TIME_HORIZON",
             "position_policy": "FIRST_SETTLED_POSITION_PER_MAP",
             "interpretation": "PAPER_MARKET_OBSERVATION_NOT_EXECUTION_CONFIRMATION",
+            "pre_response_capture_count": pre_response_capture_count,
+            "invalid_pair_capture_count": invalid_pair_capture_count,
             "horizons": {
                 str(horizon): _summarize_horizon(samples)
                 for horizon, samples in sorted(horizon_samples.items())
@@ -153,6 +166,8 @@ def _empty_report() -> dict[str, Any]:
         "source": "DECISION_FUTURE_ODDS_TIME_HORIZON",
         "position_policy": "FIRST_SETTLED_POSITION_PER_MAP",
         "interpretation": "PAPER_MARKET_OBSERVATION_NOT_EXECUTION_CONFIRMATION",
+        "pre_response_capture_count": 0,
+        "invalid_pair_capture_count": 0,
         "horizons": {},
     }
 

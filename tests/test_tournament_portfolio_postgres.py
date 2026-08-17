@@ -69,15 +69,17 @@ async def test_postgres_serializes_competing_positions_against_one_event_cash_po
                 created_at=now + timedelta(minutes=index),
                 mode="LIVE_BASIC",
                 canonical_payload={
+                    "quality": {"eligible": True, "blockers": [], "warnings": []},
                     "identity": {
                         "team_a": {"id": str(team_a.id)},
                         "team_b": {"id": str(team_b.id)},
                     },
                     "market": {
+                        "quality": {"eligible": True, "blockers": [], "warnings": []},
                         "observations": [
                             {"selection_team_id": str(team_a.id), "price": "1.90"},
                             {"selection_team_id": str(team_b.id), "price": "2.10"},
-                        ]
+                        ],
                     },
                 },
                 snapshot_hash=f"concurrency-{uuid4()}",
@@ -209,15 +211,17 @@ async def test_postgres_same_decision_position_creation_is_idempotent() -> None:
             created_at=now + timedelta(minutes=1),
             mode="LIVE_BASIC",
             canonical_payload={
+                "quality": {"eligible": True, "blockers": [], "warnings": []},
                 "identity": {
                     "team_a": {"id": str(team_a.id)},
                     "team_b": {"id": str(team_b.id)},
                 },
                 "market": {
+                    "quality": {"eligible": True, "blockers": [], "warnings": []},
                     "observations": [
                         {"selection_team_id": str(team_a.id), "price": "1.90"},
                         {"selection_team_id": str(team_b.id), "price": "2.10"},
-                    ]
+                    ],
                 },
             },
             snapshot_hash=f"idempotent-{uuid4()}",

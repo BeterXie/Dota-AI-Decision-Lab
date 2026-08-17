@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from collections import Counter
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Any
 from uuid import UUID
 
@@ -35,6 +36,8 @@ class QualityGatePolicy:
     min_settled_maps: int = 20
     min_settled_bets: int = 10
     min_prediction_samples: int = 20
+    min_clv_samples: int = 10
+    min_market_comparison_samples: int = 20
     min_roi: float = 0.0
     min_average_clv: float = 0.0
     min_brier_improvement_vs_market: float = 0.0
@@ -88,6 +91,8 @@ class TournamentQualityService:
                 "min_settled_maps": self._policy.min_settled_maps,
                 "min_settled_bets": self._policy.min_settled_bets,
                 "min_prediction_samples": self._policy.min_prediction_samples,
+                "min_clv_samples": self._policy.min_clv_samples,
+                "min_market_comparison_samples": self._policy.min_market_comparison_samples,
                 "min_roi": self._policy.min_roi,
                 "min_average_clv": self._policy.min_average_clv,
                 "min_brier_improvement_vs_market": (self._policy.min_brier_improvement_vs_market),
@@ -196,6 +201,7 @@ class TournamentQualityService:
                 result is None
                 or result.provider_conflict
                 or result.winner_team_id is None
+                or result.winner_team_id not in {series.team_a_id, series.team_b_id}
                 or snapshot.canonical_map_id is None
             ):
                 continue
@@ -333,6 +339,13 @@ class TournamentQualityService:
             sample_failures.append("MIN_SETTLED_BETS")
         if quality["prediction_sample_count"] < self._policy.min_prediction_samples:
             sample_failures.append("MIN_PREDICTION_SAMPLES")
+        if quality["clv_sample_count"] < self._policy.min_clv_samples:
+            sample_failures.append("MIN_CLV_SAMPLES")
+        if (
+            quality["market_comparison"]["sample_count"]
+            < self._policy.min_market_comparison_samples
+        ):
+            sample_failures.append("MIN_MARKET_COMPARISON_SAMPLES")
         if sample_failures:
             return {
                 "mode": QUALITY_GATE_MODE,
@@ -372,25 +385,39 @@ class TournamentQualityService:
                 await session.scalars(
                     select(TournamentPortfolioLedgerRecord)
                     .where(TournamentPortfolioLedgerRecord.portfolio_account_id == account_id)
-                    .order_by(
-                        TournamentPortfolioLedgerRecord.occurred_at,
-                        TournamentPortfolioLedgerRecord.id,
-                    )
+                    .order_by(TournamentPortfolioLedgerRecord.occurred_at)
                 )
             ).all()
         )
-        return [
-            {
-                "occurred_at": entry.occurred_at,
-                "entry_type": entry.entry_type,
-                "equity": float(entry.equity_after),
-                "cash": float(entry.cash_after),
-                "locked": float(entry.locked_after),
-                "realized_pnl_delta": float(entry.realized_pnl_delta),
-            }
-            for entry in entries
-            if entry.entry_type != "BET_PLACED"
-        ]
+        grouped: dict[Any, list[TournamentPortfolioLedgerRecord]] = {}
+        for entry in entries:
+            grouped.setdefault(entry.occurred_at, []).append(entry)
+
+        cash = Decimal("0")
+        locked = Decimal("0")
+        curve: list[dict[str, Any]] = []
+        for occurred_at, batch in sorted(grouped.items(), key=lambda item: item[0]):
+            cash += sum((Decimal(item.cash_delta) for item in batch), Decimal("0"))
+            locked += sum((Decimal(item.locked_delta) for item in batch), Decimal("0"))
+            realized_delta = sum(
+                (Decimal(item.realized_pnl_delta) for item in batch),
+                Decimal("0"),
+            )
+            visible_types = [item.entry_type for item in batch if item.entry_type != "BET_PLACED"]
+            if not visible_types:
+                continue
+            entry_type = visible_types[0] if len(set(visible_types)) == 1 else "SETTLEMENT_BATCH"
+            curve.append(
+                {
+                    "occurred_at": occurred_at,
+                    "entry_type": entry_type,
+                    "equity": float(cash + locked),
+                    "cash": float(cash),
+                    "locked": float(locked),
+                    "realized_pnl_delta": float(realized_delta),
+                }
+            )
+        return curve
 
 
 def _market_probability_a(
@@ -407,7 +434,6 @@ def _market_probability_a(
         return None
     odds_a = None
     odds_b = None
-    fallback: list[float] = []
     for item in observations:
         if not isinstance(item, dict):
             continue
@@ -417,16 +443,13 @@ def _market_probability_a(
             continue
         if price <= 1:
             continue
-        fallback.append(price)
         selection = item.get("selection_team_id")
         if selection is not None and str(selection) == str(team_a_id):
             odds_a = price
         elif selection is not None and str(selection) == str(team_b_id):
             odds_b = price
     if odds_a is None or odds_b is None:
-        if len(fallback) < 2:
-            return None
-        odds_a, odds_b = fallback[0], fallback[1]
+        return None
     implied_a = 1.0 / odds_a
     implied_b = 1.0 / odds_b
     total = implied_a + implied_b

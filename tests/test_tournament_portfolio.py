@@ -64,15 +64,17 @@ def _snapshot(map_id, team_a_id, team_b_id, index):
         created_at=NOW + timedelta(minutes=index),
         mode="LIVE_BASIC",
         canonical_payload={
+            "quality": {"eligible": True, "blockers": [], "warnings": []},
             "identity": {
                 "team_a": {"id": str(team_a_id)},
                 "team_b": {"id": str(team_b_id)},
             },
             "market": {
+                "quality": {"eligible": True, "blockers": [], "warnings": []},
                 "observations": [
                     {"selection_team_id": str(team_a_id), "price": "1.90"},
                     {"selection_team_id": str(team_b_id), "price": "2.10"},
-                ]
+                ],
             },
         },
         snapshot_hash=f"portfolio-snapshot-{index}",
@@ -297,5 +299,94 @@ async def test_unknown_winner_identity_voids_positions() -> None:
         assert account is not None
         assert account.cash_balance == Decimal("10000.00")
         assert account.realized_pnl == Decimal("0.00")
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_non_executable_snapshot_does_not_move_cash() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    service = TournamentPortfolioService(initial_bankroll=10_000)
+
+    async with factory() as session, session.begin():
+        event, _, _, _, _, _, snapshot1, _ = await _fixture(session)
+        snapshot1.canonical_payload["market"]["quality"] = {
+            "eligible": False,
+            "blockers": ["MARKET_STALE"],
+            "warnings": [],
+        }
+        decision = _decision(snapshot1, action="BUY_A", stake=1000)
+        session.add(decision)
+        await session.flush()
+        position = await service.record_decision_position(session, decision)
+        assert position is not None
+        assert position.status == "REJECTED"
+        assert position.rejection_reason == "MARKET_NOT_EXECUTABLE"
+        account = await session.scalar(
+            select(TournamentPortfolioAccountRecord).where(
+                TournamentPortfolioAccountRecord.canonical_event_id == event.id
+            )
+        )
+        assert account is not None
+        assert account.cash_balance == Decimal("10000.00")
+        assert account.locked_balance == Decimal("0.00")
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_event_funding_precedes_prematch_snapshot() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    service = TournamentPortfolioService(initial_bankroll=10_000)
+
+    async with factory() as session, session.begin():
+        decision_at = NOW - timedelta(minutes=30)
+        event = CanonicalEvent(name="Prematch Funding Cup", started_at=NOW + timedelta(hours=1))
+        team_a = CanonicalTeam(name="Prematch A")
+        team_b = CanonicalTeam(name="Prematch B")
+        session.add_all([event, team_a, team_b])
+        await session.flush()
+        series = CanonicalSeries(
+            event_id=event.id,
+            team_a_id=team_a.id,
+            team_b_id=team_b.id,
+            best_of=1,
+            scheduled_at=event.started_at,
+        )
+        session.add(series)
+        await session.flush()
+        canonical_map = CanonicalMap(
+            series_id=series.id,
+            map_number=1,
+            scheduled_at=event.started_at,
+        )
+        session.add(canonical_map)
+        await session.flush()
+        snapshot = _snapshot(canonical_map.id, team_a.id, team_b.id, 99)
+        snapshot.decision_at = decision_at
+        snapshot.created_at = decision_at
+        session.add(snapshot)
+        await session.flush()
+
+        context = await service.context_for_snapshot(
+            session,
+            snapshot_id=snapshot.id,
+            experiment=EXPERIMENT,
+        )
+        assert context is not None
+        funded_at = await session.scalar(
+            select(TournamentPortfolioLedgerRecord.occurred_at).where(
+                TournamentPortfolioLedgerRecord.portfolio_account_id == context.account_id,
+                TournamentPortfolioLedgerRecord.entry_type == "EVENT_FUNDED",
+            )
+        )
+        assert funded_at is not None
+        assert funded_at.replace(tzinfo=UTC) == decision_at
 
     await engine.dispose()

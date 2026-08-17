@@ -37,6 +37,8 @@ async def test_quality_report_combines_portfolio_calibration_and_market_baseline
             min_settled_maps=2,
             min_settled_bets=2,
             min_prediction_samples=2,
+            min_clv_samples=2,
+            min_market_comparison_samples=2,
             min_roi=0.0,
             min_average_clv=0.0,
             min_brier_improvement_vs_market=0.0,
@@ -76,15 +78,17 @@ async def test_quality_report_combines_portfolio_calibration_and_market_baseline
                 created_at=NOW + timedelta(minutes=index * 30 + 1),
                 mode="LIVE_BASIC",
                 canonical_payload={
+                    "quality": {"eligible": True, "blockers": [], "warnings": []},
                     "identity": {
                         "team_a": {"id": str(team_a.id)},
                         "team_b": {"id": str(team_b.id)},
                     },
                     "market": {
+                        "quality": {"eligible": True, "blockers": [], "warnings": []},
                         "observations": [
                             {"selection_team_id": str(team_a.id), "price": "1.90"},
                             {"selection_team_id": str(team_b.id), "price": "2.10"},
-                        ]
+                        ],
                     },
                 },
                 snapshot_hash=f"quality-{index}-{uuid4()}",
@@ -155,6 +159,26 @@ async def test_quality_report_combines_portfolio_calibration_and_market_baseline
                     )
                     == 1
                 )
+            if index == 1:
+                session.add(
+                    DecisionFutureOdds(
+                        decision_snapshot_id=snapshot.id,
+                        capture_type="TIME_HORIZON",
+                        horizon_seconds=15,
+                        triggered_at=snapshot.decision_at,
+                        due_at=snapshot.decision_at + timedelta(seconds=15),
+                        observed_at=decision.response_received_at - timedelta(seconds=1),
+                        odds_a=Decimal("1.85"),
+                        odds_b=Decimal("2.15"),
+                        market_type="match_winner",
+                        match_stage=f"Map {index}",
+                        market_status="READY",
+                        capture_policy_version="quality-test-v1",
+                        pair_quality={"eligible": True},
+                        pair_skew_seconds=0.0,
+                        status="CAPTURED",
+                    )
+                )
             session.add(
                 DecisionFutureOdds(
                     decision_snapshot_id=snapshot.id,
@@ -224,6 +248,8 @@ async def test_quality_report_combines_portfolio_calibration_and_market_baseline
         }
         latency = experiment["execution_latency"]
         assert latency["position_policy"] == "FIRST_SETTLED_POSITION_PER_MAP"
+        assert latency["pre_response_capture_count"] == 1
+        assert "15" not in latency["horizons"]
         horizon = latency["horizons"]["30"]
         assert horizon["sample_count"] == 2
         assert horizon["actionable_rate"] == 1.0
@@ -335,3 +361,50 @@ def _insufficient_decision(snapshot: DecisionSnapshotRecord) -> AiDecisionRecord
         raw_response={"fixture": True},
         parse_status="SUCCESS",
     )
+
+
+def test_gate_requires_clv_and_market_comparison_samples() -> None:
+    service = TournamentQualityService(
+        policy=QualityGatePolicy(
+            min_settled_maps=2,
+            min_settled_bets=2,
+            min_prediction_samples=2,
+            min_clv_samples=2,
+            min_market_comparison_samples=2,
+        )
+    )
+    portfolio = {
+        "bet_count": 2,
+        "roi": 0.1,
+        "max_drawdown_pct": 0.1,
+        "status": "ACTIVE",
+    }
+    quality = {
+        "settled_maps": 2,
+        "prediction_sample_count": 2,
+        "clv_sample_count": 1,
+        "average_clv": 0.1,
+        "market_comparison": {
+            "sample_count": 1,
+            "brier_improvement_vs_market": 0.1,
+        },
+    }
+    gate = service._gate(portfolio, quality)
+    assert gate["status"] == "INSUFFICIENT_SAMPLE"
+    assert gate["failures"] == ["MIN_CLV_SAMPLES", "MIN_MARKET_COMPARISON_SAMPLES"]
+
+
+def test_market_baseline_requires_explicit_team_identity() -> None:
+    from app.evaluation.quality import _market_probability_a
+
+    team_a = uuid4()
+    team_b = uuid4()
+    payload = {
+        "market": {
+            "observations": [
+                {"price": "1.80"},
+                {"price": "2.20"},
+            ]
+        }
+    }
+    assert _market_probability_a(payload, team_a_id=team_a, team_b_id=team_b) is None
