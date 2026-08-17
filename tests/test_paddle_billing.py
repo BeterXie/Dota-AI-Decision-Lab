@@ -3,13 +3,16 @@ from datetime import UTC, datetime, timedelta
 
 import httpx
 import pytest
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.auth.models import UserAccountRecord
+from app.billing.models import BillingCheckoutRecord
 from app.billing.paddle import (
     PaddleBillingGateway,
     PaddleOffer,
     PaddleWebhookError,
+    PaddleWebhookSignatureError,
     paddle_signature_for_test,
 )
 from app.db import Base
@@ -71,12 +74,41 @@ async def _fixture(*offers: PaddleOffer):
     return engine, factory, user_id, now, gateway
 
 
+async def _seed_checkout(
+    factory,
+    *,
+    user_id,
+    offer: PaddleOffer,
+    transaction_ref: str,
+    customer_ref: str = "ctm_buyer",
+) -> None:
+    now = datetime.now(UTC)
+    async with factory.begin() as session:
+        session.add(
+            BillingCheckoutRecord(
+                user_id=user_id,
+                provider="paddle",
+                checkout_ref=transaction_ref,
+                customer_ref=customer_ref,
+                offer_key=offer.key,
+                price_ref=offer.price_id,
+                plan_key="PRO",
+                recurring=offer.recurring,
+                grant_days=offer.grant_days,
+                status="PENDING",
+                created_at=now,
+                updated_at=now,
+            )
+        )
+
+
 def _event(
     *,
     event_id: str,
     event_type: str,
     occurred_at: datetime,
     user_id,
+    offer_key: str,
     data: dict,
 ) -> bytes:
     payload = {
@@ -89,6 +121,7 @@ def _event(
                 "dota_ai_billing": "dota-ai-billing-v1",
                 "dota_user_id": str(user_id),
                 "dota_plan": "PRO",
+                "dota_offer": offer_key,
             },
         },
     }
@@ -110,13 +143,21 @@ async def _deliver(gateway: PaddleBillingGateway, body: bytes, *, now: datetime)
 
 @pytest.mark.asyncio
 async def test_one_time_completed_transaction_grants_fixed_term_pro_idempotently() -> None:
-    engine, factory, user_id, now, gateway = await _fixture(_offer_30d())
+    offer = _offer_30d()
+    engine, factory, user_id, now, gateway = await _fixture(offer)
     try:
+        await _seed_checkout(
+            factory,
+            user_id=user_id,
+            offer=offer,
+            transaction_ref="txn_one_time",
+        )
         body = _event(
             event_id="evt_one_time",
             event_type="transaction.completed",
             occurred_at=now,
             user_id=user_id,
+            offer_key=offer.key,
             data={
                 "id": "txn_one_time",
                 "customer_id": "ctm_buyer",
@@ -139,33 +180,45 @@ async def test_one_time_completed_transaction_grants_fixed_term_pro_idempotently
             user_id,
             now=now + timedelta(days=30, seconds=1),
         ) == ()
+        async with factory() as session:
+            checkout = await session.scalar(select(BillingCheckoutRecord))
+            assert checkout is not None
+            assert checkout.status == "COMPLETED"
     finally:
         await engine.dispose()
 
 
 @pytest.mark.asyncio
 async def test_subscription_cancel_revokes_and_delayed_activation_cannot_restore_access() -> None:
-    engine, factory, user_id, now, gateway = await _fixture(_offer_monthly())
+    offer = _offer_monthly()
+    engine, factory, user_id, now, gateway = await _fixture(offer)
     try:
-        activated_at = now
-        period_end = now + timedelta(days=30)
-        active_body = _event(
-            event_id="evt_active",
-            event_type="subscription.activated",
-            occurred_at=activated_at,
+        await _seed_checkout(
+            factory,
             user_id=user_id,
+            offer=offer,
+            transaction_ref="txn_monthly",
+        )
+        period_end = now + timedelta(days=30)
+        purchase = _event(
+            event_id="evt_monthly_purchase",
+            event_type="transaction.completed",
+            occurred_at=now,
+            user_id=user_id,
+            offer_key=offer.key,
             data={
-                "id": "sub_monthly",
+                "id": "txn_monthly",
                 "customer_id": "ctm_buyer",
-                "status": "active",
+                "subscription_id": "sub_monthly",
+                "status": "completed",
                 "items": [{"price": {"id": _PRICE_MONTHLY}}],
-                "current_billing_period": {
-                    "starts_at": activated_at.isoformat(),
+                "billing_period": {
+                    "starts_at": now.isoformat(),
                     "ends_at": period_end.isoformat(),
                 },
             },
         )
-        await _deliver(gateway, active_body, now=activated_at)
+        await _deliver(gateway, purchase, now=now)
         assert set(await EntitlementService(factory).active_entitlements(user_id)) == set(
             PREMIUM_ENTITLEMENTS
         )
@@ -176,13 +229,14 @@ async def test_subscription_cancel_revokes_and_delayed_activation_cannot_restore
             event_type="subscription.canceled",
             occurred_at=canceled_at,
             user_id=user_id,
+            offer_key=offer.key,
             data={
                 "id": "sub_monthly",
                 "customer_id": "ctm_buyer",
                 "status": "canceled",
                 "items": [{"price": {"id": _PRICE_MONTHLY}}],
                 "current_billing_period": {
-                    "starts_at": activated_at.isoformat(),
+                    "starts_at": now.isoformat(),
                     "ends_at": period_end.isoformat(),
                 },
             },
@@ -195,13 +249,14 @@ async def test_subscription_cancel_revokes_and_delayed_activation_cannot_restore
             event_type="subscription.activated",
             occurred_at=now + timedelta(minutes=1),
             user_id=user_id,
+            offer_key=offer.key,
             data={
                 "id": "sub_monthly",
                 "customer_id": "ctm_buyer",
                 "status": "active",
                 "items": [{"price": {"id": _PRICE_MONTHLY}}],
                 "current_billing_period": {
-                    "starts_at": activated_at.isoformat(),
+                    "starts_at": now.isoformat(),
                     "ends_at": period_end.isoformat(),
                 },
             },
@@ -215,13 +270,21 @@ async def test_subscription_cancel_revokes_and_delayed_activation_cannot_restore
 
 @pytest.mark.asyncio
 async def test_full_approved_refund_revokes_one_time_pass_but_partial_refund_does_not() -> None:
-    engine, factory, user_id, now, gateway = await _fixture(_offer_30d())
+    offer = _offer_30d()
+    engine, factory, user_id, now, gateway = await _fixture(offer)
     try:
+        await _seed_checkout(
+            factory,
+            user_id=user_id,
+            offer=offer,
+            transaction_ref="txn_refundable",
+        )
         purchase = _event(
             event_id="evt_purchase",
             event_type="transaction.completed",
             occurred_at=now,
             user_id=user_id,
+            offer_key=offer.key,
             data={
                 "id": "txn_refundable",
                 "customer_id": "ctm_buyer",
@@ -237,6 +300,7 @@ async def test_full_approved_refund_revokes_one_time_pass_but_partial_refund_doe
             event_type="adjustment.updated",
             occurred_at=partial_at,
             user_id=user_id,
+            offer_key=offer.key,
             data={
                 "id": "adj_partial",
                 "action": "refund",
@@ -258,6 +322,7 @@ async def test_full_approved_refund_revokes_one_time_pass_but_partial_refund_doe
             event_type="adjustment.updated",
             occurred_at=refund_at,
             user_id=user_id,
+            offer_key=offer.key,
             data={
                 "id": "adj_full",
                 "action": "refund",
@@ -275,21 +340,55 @@ async def test_full_approved_refund_revokes_one_time_pass_but_partial_refund_doe
 
 
 @pytest.mark.asyncio
-async def test_signature_replay_and_unknown_configured_price_fail_closed() -> None:
-    engine, _, user_id, now, gateway = await _fixture(_offer_30d())
+async def test_signed_unmapped_transaction_cannot_grant_an_arbitrary_user() -> None:
+    offer = _offer_30d()
+    engine, factory, user_id, now, gateway = await _fixture(offer)
     try:
+        body = _event(
+            event_id="evt_unmapped",
+            event_type="transaction.completed",
+            occurred_at=now,
+            user_id=user_id,
+            offer_key=offer.key,
+            data={
+                "id": "txn_not_created_by_server",
+                "customer_id": "ctm_attacker",
+                "status": "completed",
+                "items": [{"price": {"id": _PRICE_30D}}],
+            },
+        )
+        result = await _deliver(gateway, body, now=now)
+        assert result.ignored is True
+        assert await EntitlementService(factory).active_entitlements(user_id) == ()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_signature_replay_and_checkout_price_mismatch_fail_closed() -> None:
+    offer = _offer_30d()
+    engine, factory, user_id, now, gateway = await _fixture(offer)
+    try:
+        await _seed_checkout(
+            factory,
+            user_id=user_id,
+            offer=offer,
+            transaction_ref="txn_unknown",
+        )
         body = _event(
             event_id="evt_unknown_price",
             event_type="transaction.completed",
             occurred_at=now,
             user_id=user_id,
+            offer_key=offer.key,
             data={
                 "id": "txn_unknown",
+                "customer_id": "ctm_buyer",
                 "status": "completed",
                 "items": [{"price": {"id": "pri_not_ours"}}],
             },
         )
-        with pytest.raises(PaddleWebhookError, match="unknown price"):
+        with pytest.raises(PaddleWebhookError, match="price does not match"):
             await _deliver(gateway, body, now=now)
 
         stale_signature = paddle_signature_for_test(
@@ -297,13 +396,13 @@ async def test_signature_replay_and_unknown_configured_price_fail_closed() -> No
             secret=_WEBHOOK_SECRET,
             timestamp=int((now - timedelta(minutes=1)).timestamp()),
         )
-        with pytest.raises(PaddleWebhookError, match="outside tolerance"):
+        with pytest.raises(PaddleWebhookSignatureError, match="outside tolerance"):
             await gateway.process_webhook(
                 raw_body=body,
                 signature_header=stale_signature,
                 now=now,
             )
-        with pytest.raises(PaddleWebhookError, match="invalid"):
+        with pytest.raises(PaddleWebhookSignatureError, match="invalid"):
             await gateway.process_webhook(
                 raw_body=body,
                 signature_header=f"ts={int(now.timestamp())};h1={'0' * 64}",
@@ -315,7 +414,8 @@ async def test_signature_replay_and_unknown_configured_price_fail_closed() -> No
 
 @pytest.mark.asyncio
 async def test_checkout_uses_server_owned_user_and_catalog_price_metadata() -> None:
-    engine, _, user_id, _, gateway = await _fixture(_offer_30d())
+    offer = _offer_30d()
+    engine, factory, user_id, _, gateway = await _fixture(offer)
     requests: list[dict] = []
 
     async def handler(request: httpx.Request) -> httpx.Response:
@@ -356,6 +456,13 @@ async def test_checkout_uses_server_owned_user_and_catalog_price_metadata() -> N
             "dota_plan": "PRO",
             "dota_offer": "pro_30d",
         }
+        async with factory() as session:
+            stored = await session.scalar(select(BillingCheckoutRecord))
+            assert stored is not None
+            assert stored.user_id == user_id
+            assert stored.checkout_ref == "txn_checkout"
+            assert stored.price_ref == _PRICE_30D
+            assert stored.status == "PENDING"
     finally:
         await client.aclose()
         await engine.dispose()
