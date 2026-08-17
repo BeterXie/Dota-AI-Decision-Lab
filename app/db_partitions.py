@@ -1,7 +1,7 @@
 from datetime import UTC, date, datetime, timedelta
 
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine, AsyncSession
+from sqlalchemy.ext.asyncio import AsyncConnection, AsyncEngine
 
 from app.auth.maintenance import prune_auth_records
 
@@ -47,8 +47,7 @@ async def ensure_weekly_partitions(
         # and every six hours. Co-schedule bounded auth-record retention here so
         # expired login challenges and old revoked/expired sessions cannot grow
         # forever without adding another long-lived worker.
-        async with AsyncSession(bind=connection, expire_on_commit=False) as session:
-            await prune_auth_records(session, now=reference)
+        await prune_auth_records(connection, now=reference)
     return created
 
 
