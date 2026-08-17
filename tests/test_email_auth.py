@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.auth.models import EmailLoginChallengeRecord, UserAccountRecord
 from app.auth.service import EmailAuthService, InvalidLoginCodeError, normalize_email
 from app.db import Base
+from app.entitlements import AI_DECISIONS_ENTITLEMENT, EntitlementService
 from app.runtime.health import HealthRegistry
 from app.web import create_app
 from app.web.auth import AuthGuardMiddleware
@@ -112,14 +113,11 @@ async def test_login_code_attempt_limit_is_persisted_and_session_can_be_revoked(
         with pytest.raises(InvalidLoginCodeError):
             await service.verify_login_code(email, code)
 
-        # Exhausting the attempt budget must not reset the send-rate budget.
         blocked_replacement = await service.request_login_code(email)
         assert blocked_replacement.sent is False
         assert blocked_replacement.retry_after_seconds > 0
         assert len(sender.messages) == 1
 
-        # Move the persisted challenge outside the cooldown window to prove that
-        # a fresh code is allowed after the server-side rate limit expires.
         async with factory() as session, session.begin():
             persisted = await session.get(EmailLoginChallengeRecord, exhausted_id)
             assert persisted is not None
@@ -146,7 +144,7 @@ async def test_login_code_attempt_limit_is_persisted_and_session_can_be_revoked(
 
 
 @pytest.mark.asyncio
-async def test_auth_api_protects_business_routes_and_sets_http_only_cookie(tmp_path) -> None:
+async def test_auth_api_keeps_matches_public_and_requires_entitlement_for_ai(tmp_path) -> None:
     engine, factory, sender, service = await _auth_fixture()
     try:
         health = HealthRegistry()
@@ -158,14 +156,21 @@ async def test_auth_api_protects_business_routes_and_sets_http_only_cookie(tmp_p
             auth_enabled=True,
             auth_cookie_secure=False,
         )
+        premium_path = "/api/maps/11111111-1111-1111-1111-111111111111/ai-decisions"
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             assert (await client.get("/health")).status_code == 200
-            assert (await client.get("/api/matches")).status_code == 401
+            assert (await client.get("/api/matches")).status_code == 200
             assert (await client.get("/metrics")).status_code == 401
+            assert (await client.get(premium_path)).status_code == 401
 
             initial = await client.get("/api/auth/session")
             assert initial.status_code == 200
-            assert initial.json() == {"enabled": True, "authenticated": False, "user": None}
+            assert initial.json() == {
+                "enabled": True,
+                "authenticated": False,
+                "user": None,
+                "entitlements": [],
+            }
 
             requested = await client.post(
                 "/api/auth/request-code", json={"email": "viewer@example.com"}
@@ -179,7 +184,9 @@ async def test_auth_api_protects_business_routes_and_sets_http_only_cookie(tmp_p
                 json={"email": "viewer@example.com", "code": code},
             )
             assert verified.status_code == 200
-            assert verified.json()["authenticated"] is True
+            verified_payload = verified.json()
+            assert verified_payload["authenticated"] is True
+            assert verified_payload["entitlements"] == []
             cookie = verified.headers["set-cookie"].lower()
             assert "httponly" in cookie
             assert "samesite=strict" in cookie
@@ -187,26 +194,46 @@ async def test_auth_api_protects_business_routes_and_sets_http_only_cookie(tmp_p
             session = await client.get("/api/auth/session")
             assert session.status_code == 200
             assert session.json()["user"]["email"] == "viewer@example.com"
+            assert session.json()["entitlements"] == []
             assert (await client.get("/api/matches")).status_code == 200
             assert (await client.get("/metrics")).status_code == 200
 
+            forbidden = await client.get(premium_path)
+            assert forbidden.status_code == 403
+            assert forbidden.json() == {
+                "detail": "entitlement required",
+                "required_entitlement": AI_DECISIONS_ENTITLEMENT,
+            }
+
+            user_id = UUID(session.json()["user"]["id"])
+            await EntitlementService(factory).grant(
+                user_id,
+                AI_DECISIONS_ENTITLEMENT,
+                source="test",
+            )
+            entitled_missing_map = await client.get(premium_path)
+            assert entitled_missing_map.status_code == 404
+
+            refreshed = await client.get("/api/auth/session")
+            assert refreshed.json()["entitlements"] == [AI_DECISIONS_ENTITLEMENT]
+
             logged_out = await client.post("/api/auth/logout")
             assert logged_out.status_code == 200
-            assert (await client.get("/api/matches")).status_code == 401
+            assert (await client.get("/api/matches")).status_code == 200
+            assert (await client.get(premium_path)).status_code == 401
     finally:
         await service.close()
         await engine.dispose()
 
 
 @pytest.mark.asyncio
-async def test_auth_guard_rejects_unauthenticated_websocket() -> None:
-    engine, _, _, service = await _auth_fixture()
-    called = False
+async def test_auth_guard_rejects_private_websocket_but_status_socket_is_public() -> None:
+    engine, factory, _, service = await _auth_fixture()
+    called: list[str] = []
     sent: list[dict] = []
 
     async def inner(scope, receive, send) -> None:
-        nonlocal called
-        called = True
+        called.append(scope["path"])
 
     async def receive() -> dict:
         return {"type": "websocket.connect"}
@@ -214,24 +241,31 @@ async def test_auth_guard_rejects_unauthenticated_websocket() -> None:
     async def send(message: dict) -> None:
         sent.append(message)
 
-    scope = {
-        "type": "websocket",
-        "asgi": {"version": "3.0"},
-        "http_version": "1.1",
-        "scheme": "ws",
-        "path": "/ws/status",
-        "raw_path": b"/ws/status",
-        "query_string": b"",
-        "headers": [],
-        "client": ("127.0.0.1", 12345),
-        "server": ("127.0.0.1", 8000),
-        "subprotocols": [],
-        "state": {},
-    }
+    def scope(path: str) -> dict:
+        return {
+            "type": "websocket",
+            "asgi": {"version": "3.0"},
+            "http_version": "1.1",
+            "scheme": "ws",
+            "path": path,
+            "raw_path": path.encode(),
+            "query_string": b"",
+            "headers": [],
+            "client": ("127.0.0.1", 12345),
+            "server": ("127.0.0.1", 8000),
+            "subprotocols": [],
+            "state": {},
+        }
+
     try:
-        middleware = AuthGuardMiddleware(inner, service=service, enabled=True)
-        await middleware(scope, receive, send)  # type: ignore[arg-type]
-        assert called is False
+        middleware = AuthGuardMiddleware(
+            inner,
+            service=service,
+            entitlements=EntitlementService(factory),
+            enabled=True,
+        )
+        await middleware(scope("/ws/private"), receive, send)  # type: ignore[arg-type]
+        assert called == []
         assert sent == [
             {
                 "type": "websocket.close",
@@ -239,13 +273,18 @@ async def test_auth_guard_rejects_unauthenticated_websocket() -> None:
                 "reason": "authentication required",
             }
         ]
+
+        sent.clear()
+        await middleware(scope("/ws/status"), receive, send)  # type: ignore[arg-type]
+        assert called == ["/ws/status"]
+        assert sent == []
     finally:
         await service.close()
         await engine.dispose()
 
 
 @pytest.mark.asyncio
-async def test_auth_disabled_preserves_existing_business_api_access(tmp_path) -> None:
+async def test_auth_disabled_preserves_public_access_but_closes_premium_api(tmp_path) -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
@@ -261,8 +300,18 @@ async def test_auth_disabled_preserves_existing_business_api_access(tmp_path) ->
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             session = await client.get("/api/auth/session")
             assert session.status_code == 200
-            assert session.json() == {"enabled": False, "authenticated": True, "user": None}
+            assert session.json() == {
+                "enabled": False,
+                "authenticated": True,
+                "user": None,
+                "entitlements": [],
+            }
             assert (await client.get("/api/matches")).status_code == 200
             assert (await client.get("/metrics")).status_code == 200
+            premium = await client.get(
+                "/api/maps/11111111-1111-1111-1111-111111111111/ai-decisions"
+            )
+            assert premium.status_code == 503
+            assert premium.json()["required_entitlement"] == AI_DECISIONS_ENTITLEMENT
     finally:
         await engine.dispose()

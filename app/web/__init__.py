@@ -7,10 +7,14 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.auth import EmailAuthService, ResendLoginCodeSender
 from app.config import Settings, get_settings
+from app.entitlements import EntitlementService
 from app.runtime.health import HealthRegistry
 from app.web.api import create_app as create_api_app
 from app.web.auth import register_auth
+from app.web.notifications import create_notification_router
 from app.web.player_hero_recent import register_player_hero_recent_routes
+from app.web.premium import create_premium_router
+from app.web.public_boundary import PublicMatchDataBoundaryMiddleware
 from app.web.server import WebServerWorker
 from app.web.spa import spa_file_response
 
@@ -27,6 +31,7 @@ def create_app(
     auth_service: EmailAuthService | None = None,
     auth_enabled: bool | None = None,
     auth_cookie_secure: bool | None = None,
+    development_grant_emails: tuple[str, ...] = (),
 ) -> FastAPI:
     settings: Settings | None = None
     owns_auth_service = False
@@ -41,6 +46,8 @@ def create_app(
         auth_service = _configured_auth_service(settings, session_factory)
         owns_auth_service = True
 
+    entitlement_service = EntitlementService(session_factory)
+
     # Build API routes first without the SPA catch-all, so detail-scoped
     # extension routes remain reachable before the frontend fallback route.
     app = create_api_app(
@@ -53,12 +60,26 @@ def create_app(
         ai_min_game_time_seconds=ai_min_game_time_seconds,
     )
     register_player_hero_recent_routes(app, session_factory)
+    app.include_router(
+        create_premium_router(
+            session_factory,
+            live_state_max_age_seconds=live_state_max_age_seconds,
+            live_market_max_age_seconds=live_market_max_age_seconds,
+            market_max_pair_skew_seconds=market_max_pair_skew_seconds,
+        )
+    )
+    app.include_router(create_notification_router(session_factory))
     register_auth(
         app,
         service=auth_service,
+        entitlements=entitlement_service,
         enabled=auth_enabled,
         cookie_secure=auth_cookie_secure,
+        development_grant_emails=development_grant_emails,
     )
+    # This is deliberately independent of frontend behavior: even a hand-written
+    # HTTP client cannot extract premium decision payloads from public match APIs.
+    app.add_middleware(PublicMatchDataBoundaryMiddleware)
     if owns_auth_service and auth_service is not None:
         app.router.add_event_handler("shutdown", auth_service.close)
 

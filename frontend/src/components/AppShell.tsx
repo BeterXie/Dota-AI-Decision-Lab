@@ -16,6 +16,20 @@ import { useI18n } from "../i18n";
 
 export type NavTab = "OVERVIEW" | "DRAFT" | "HISTORICAL" | "EVALUATION";
 
+export interface AiAccessState {
+  authEnabled: boolean;
+  authenticated: boolean;
+  entitled: boolean;
+  loading: boolean;
+}
+
+interface PublicAiSummary {
+  required_entitlement: string;
+  analysis_available: boolean;
+  updated_at: string | null;
+  completed_models: number;
+}
+
 interface AppShellProps {
   runtime: RuntimeSnapshot | undefined;
   jobs: JobSummary | undefined;
@@ -27,9 +41,11 @@ interface AppShellProps {
   selectedMapId: string | null;
   onSelectMatch: (id: string) => void;
   onRefresh: () => void;
+  aiAccess: AiAccessState;
+  onLogin: () => void;
 }
 
-export const AppShell: React.FC<AppShellProps> = ({ runtime, jobs, matches, selectedMatch, detail, detailLoading, detailError, selectedMapId, onSelectMatch, onRefresh }) => {
+export const AppShell: React.FC<AppShellProps> = ({ runtime, jobs, matches, selectedMatch, detail, detailLoading, detailError, selectedMapId, onSelectMatch, onRefresh, aiAccess, onLogin }) => {
   const { locale, t } = useI18n();
   const [activeTab, setActiveTab] = useState<NavTab>("OVERVIEW");
   const [isDiagnosticsOpen, setIsDiagnosticsOpen] = useState(false);
@@ -37,6 +53,9 @@ export const AppShell: React.FC<AppShellProps> = ({ runtime, jobs, matches, sele
   const activeMatch = detail || selectedMatch;
   const pendingIdentity = activeMatch?.identity_status === "PENDING_MAP_IDENTITY";
   const waitingForDetail = Boolean(selectedMatch?.canonical_map_id && detailLoading && !detail);
+  const publicAi = (activeMatch as (MapSummary & { ai_access?: PublicAiSummary }) | undefined)?.ai_access;
+  const checkpointDecisions = (activeMatch as MapDetail | undefined)?.checkpoint_decisions ?? [];
+  const aiDecisions = checkpointDecisions.length > 0 ? checkpointDecisions : activeMatch?.decisions ?? [];
 
   React.useEffect(() => {
     if (selectedMapId != null && typeof mainRef.current?.scrollTo === "function") {
@@ -64,8 +83,12 @@ export const AppShell: React.FC<AppShellProps> = ({ runtime, jobs, matches, sele
                 <>
                   <DecisionStatusBanner match={activeMatch} />
                   <PlayerAiDecisionPanel
-                    decisions={(activeMatch as MapDetail).checkpoint_decisions ?? activeMatch.decisions ?? []}
+                    decisions={aiDecisions}
                     currentSnapshotId={activeMatch.latest_snapshot?.id}
+                    access={aiAccess}
+                    analysisAvailable={publicAi?.analysis_available ?? Boolean(activeMatch.latest_snapshot)}
+                    completedModels={publicAi?.completed_models ?? 0}
+                    onLogin={onLogin}
                   />
                   <div className="secondary-nav-bar" aria-label={t("mapIntelligenceViews")}>
                     <button className={`nav-tab-btn ${activeTab === "OVERVIEW" ? "active" : ""}`} onClick={() => setActiveTab("OVERVIEW")}>{t("matchOverview")}</button>
@@ -108,7 +131,7 @@ function DetailErrorView({ error, locale }: { error: Error; locale: string }) {
 }
 
 function LoadingIntelligence({ locale }: { locale: string }) {
-  return <section className="analytics-card"><div className="empty-rail-msg"><strong>{locale === "zh-CN" ? "正在加载比赛情报" : "Loading match intelligence"}</strong><div>{locale === "zh-CN" ? "已选择比赛，正在读取 Draft、AI、Live 与 Historical 详情。" : "Match selected; loading Draft, AI, Live and Historical detail."}</div></div></section>;
+  return <section className="analytics-card"><div className="empty-rail-msg"><strong>{locale === "zh-CN" ? "正在加载比赛情报" : "Loading match intelligence"}</strong><div>{locale === "zh-CN" ? "已选择比赛，正在读取公开的 Draft、Live 与 Historical 详情。" : "Match selected; loading public Draft, Live and Historical detail."}</div></div></section>;
 }
 
 function PendingIdentityView({ match, locale }: { match: MapSummary | MapDetail; locale: string }) {

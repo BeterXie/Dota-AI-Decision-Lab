@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from "react";
 import type { AiDecision } from "../api";
 import { useI18n } from "../i18n";
+import type { AiAccessState } from "./AppShell";
 import { PlayerAiDecisionStrip } from "./PlayerAiDecisionStrip";
 
 interface SnapshotDecisionPayload {
@@ -11,10 +12,18 @@ const CURRENT_ATTEMPT_REFRESH_MS = 4_000;
 
 export function PlayerAiDecisionPanel({
   decisions,
-  currentSnapshotId
+  currentSnapshotId,
+  access,
+  analysisAvailable,
+  completedModels,
+  onLogin
 }: {
   decisions: AiDecision[];
   currentSnapshotId?: string | null;
+  access: AiAccessState;
+  analysisAvailable: boolean;
+  completedModels: number;
+  onLogin: () => void;
 }) {
   const { locale } = useI18n();
   const [attempts, setAttempts] = useState<AiDecision[]>([]);
@@ -23,7 +32,7 @@ export function PlayerAiDecisionPanel({
     let cancelled = false;
     let timer: number | null = null;
 
-    if (!currentSnapshotId) {
+    if (!access.entitled || !currentSnapshotId) {
       setAttempts([]);
       return () => { cancelled = true; };
     }
@@ -32,6 +41,7 @@ export function PlayerAiDecisionPanel({
       try {
         const response = await fetch(`/api/snapshots/${currentSnapshotId}`, {
           cache: "no-store",
+          credentials: "same-origin",
           headers: { Accept: "application/json" }
         });
         if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
@@ -49,9 +59,58 @@ export function PlayerAiDecisionPanel({
       cancelled = true;
       if (timer !== null) window.clearTimeout(timer);
     };
-  }, [currentSnapshotId]);
+  }, [access.entitled, currentSnapshotId]);
 
   const latest = useMemo(() => latestAttempts(attempts), [attempts]);
+
+  if (!access.entitled) {
+    return (
+      <section className="analytics-card ai-decision-container" aria-label="AI Decision Pro">
+        <div className="player-section-heading">
+          <div>
+            <span className="section-kicker">PRO INTELLIGENCE</span>
+            <h3>{locale === "zh-CN" ? "AI 实时决策" : "Live AI decisions"}</h3>
+          </div>
+          <span className="trust-pill degraded">LOCKED</span>
+        </div>
+        <div className="player-agreement-summary">
+          <span>
+            {analysisAvailable
+              ? locale === "zh-CN"
+                ? `AI 分析已生成${completedModels > 0 ? ` · ${completedModels} 个模型已完成` : ""}`
+                : `AI analysis is ready${completedModels > 0 ? ` · ${completedModels} models completed` : ""}`
+              : locale === "zh-CN"
+                ? "AI 正在等待满足决策条件"
+                : "AI is waiting for decision conditions"}
+          </span>
+          <span>
+            {locale === "zh-CN"
+              ? "方向、置信度、公允概率、下注建议与推理仅向 AI Decision 权限用户开放。"
+              : "Direction, confidence, fair probability, staking and reasoning require AI Decision access."}
+          </span>
+        </div>
+        {!access.authenticated && access.authEnabled && (
+          <button className="auth-primary-btn" type="button" onClick={onLogin}>
+            {locale === "zh-CN" ? "登录查看 AI 权限" : "Sign in for AI access"}
+          </button>
+        )}
+        {access.authenticated && (
+          <div className="auth-error" role="status">
+            {locale === "zh-CN"
+              ? "当前账号为 Free，尚未拥有 AI Decision 权限。"
+              : "This Free account does not have AI Decision access."}
+          </div>
+        )}
+        {!access.authEnabled && (
+          <div className="auth-error" role="status">
+            {locale === "zh-CN"
+              ? "当前运行环境尚未启用登录，因此付费 AI 接口保持关闭。"
+              : "Authentication is disabled in this runtime, so premium AI access remains closed."}
+          </div>
+        )}
+      </section>
+    );
+  }
 
   return (
     <>
@@ -73,7 +132,15 @@ export function PlayerAiDecisionPanel({
           </div>
         </section>
       )}
-      <PlayerAiDecisionStrip decisions={decisions} />
+      {access.loading && decisions.length === 0 ? (
+        <section className="analytics-card ai-decision-container">
+          <div className="empty-rail-msg">
+            {locale === "zh-CN" ? "正在读取 Pro AI 决策…" : "Loading Pro AI decisions…"}
+          </div>
+        </section>
+      ) : (
+        <PlayerAiDecisionStrip decisions={decisions} />
+      )}
     </>
   );
 }

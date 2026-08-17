@@ -10,6 +10,8 @@ const runtime = {
   observed_at: now
 };
 
+const decision = { id: "d1", snapshot_id: "snapshot-1", provider: "openai", model: "gpt-5.6", model_version: "gpt-5.6", prompt_version: "v2", decision_policy_version: "shadow-v1", snapshot_hash: "fixture-hash", request_started_at: now, response_received_at: now, parse_status: "PARSED", latency_seconds: 0.8, decision: { action: "BUY_A", confidence: 0.66, fair_probability_a: 0.59, primary_reasons: ["Draft edge"], counter_arguments: ["Late crossover"], data_quality_concerns: [] }, error: null };
+
 const match = {
   entity_type: "MAP",
   identity_status: "RESOLVED",
@@ -56,24 +58,53 @@ const match = {
   },
   live: { game_time_seconds: 1540, radiant_kills: 18, dire_kills: 14, radiant_nw_lead: 3200, first_blood: "radiant", received_at: now, last_message_received_at: now, last_state_change_received_at: now, message_age_seconds: 2, effective_state_age_seconds: 4, connection_id: "c1", reconnect_generation: 0 },
   sync: { status: "CAUTION", p50_seconds: 2.1, p90_seconds: 4.7, jitter_seconds: 1.4, sample_size: 8, accepted_pair_ratio: 0.88, ambiguous_ratio: 0.08, outlier_ratio: 0.04, confidence: "MEDIUM", calculated_at: now },
-  latest_snapshot: { id: "snapshot-1", decision_at: now, created_at: now, mode: "POST_DRAFT", snapshot_hash: "fixture-hash", market_quality: null, history_coverage: null, quality: { eligible: true, blockers: [], warnings: ["LIVE_DATA_DESYNC"] } },
-  decisions: [{ id: "d1", provider: "openai", model: "gpt-5.6", model_version: "gpt-5.6", prompt_version: "v2", decision_policy_version: "shadow-v1", snapshot_hash: "fixture-hash", request_started_at: now, response_received_at: now, parse_status: "PARSED", latency_seconds: 0.8, decision: { action: "BUY_A", confidence: 0.66, fair_probability_a: 0.59, primary_reasons: ["Draft edge"], counter_arguments: ["Late crossover"], data_quality_concerns: [] }, error: null }]
+  latest_snapshot: { id: "snapshot-1", decision_at: now, created_at: now, mode: "POST_DRAFT", market_quality: null, history_coverage: null, quality: { eligible: true, blockers: [], warnings: ["LIVE_DATA_DESYNC"] } },
+  ai_access: { required_entitlement: "ai_decisions", analysis_available: true, updated_at: now, completed_models: 1 },
+  decisions: []
 };
 
-const detail = { ...match, market_timeline: [], live_timeline: [], snapshot_payload: { history: {}, quality: {} }, future_odds: [], result: null, result_evidence: [] };
+const detail = { ...match, market_timeline: [], live_timeline: [], result: null, result_evidence: [] };
+const premium = { canonical_map_id: mapId, latest_snapshot: match.latest_snapshot, decisions: [decision], checkpoint_decisions: [], snapshot_payload: { history: {}, quality: {} }, future_odds: [] };
 const jobs = { by_status: { COMPLETED: 18 }, by_type: [], oldest_pending_at: null, recent_failures: [] };
-const authSession = { enabled: false, authenticated: false, user: null };
+const anonymousSession = { enabled: true, authenticated: false, user: null, entitlements: [] };
+const proSession = {
+  enabled: true,
+  authenticated: true,
+  user: { id: "99999999-9999-9999-9999-999999999999", email: "pro@example.com", email_verified_at: now, created_at: now },
+  entitlements: ["ai_decisions"]
+};
 
-async function mockApi(page: Page) {
+async function mockApi(page: Page, { entitled }: { entitled: boolean }) {
   await page.route("**/api/**", async (route) => {
     const path = new URL(route.request().url()).pathname;
-    const payload = path === "/api/auth/session" ? authSession : path === "/api/runtime" ? runtime : path === "/api/matches" ? [match] : path === `/api/maps/${mapId}` ? detail : path === "/api/jobs/summary" ? jobs : null;
+    const payload =
+      path === "/api/auth/session" ? (entitled ? proSession : anonymousSession) :
+      path === "/api/runtime" ? runtime :
+      path === "/api/matches" ? [match] :
+      path === `/api/maps/${mapId}` ? detail :
+      path === `/api/maps/${mapId}/ai-decisions` && entitled ? premium :
+      path === "/api/snapshots/snapshot-1" && entitled ? { decisions: [decision] } :
+      path === "/api/jobs/summary" && entitled ? jobs : null;
     await route.fulfill({ status: payload === null ? 404 : 200, contentType: "application/json", body: JSON.stringify(payload) });
   });
 }
 
-test("renders player-first Dota decision workspace", async ({ page }) => {
-  await mockApi(page);
+test("keeps ordinary match data public while premium AI remains locked", async ({ page }) => {
+  await mockApi(page, { entitled: false });
+  await page.goto("/?e2e=public-match");
+
+  await expect(page.getByText("Team Spirit", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Tundra", { exact: true }).first()).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Live AI decisions" })).toBeVisible();
+  await expect(page.getByText(/AI analysis is ready/)).toBeVisible();
+  await expect(page.getByRole("button", { name: "Sign in for AI access" })).toBeVisible();
+  await expect(page.getByText("BUY A", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "R.O.S.H. Draft Advantage" })).toBeVisible();
+  await expect(page.getByText("Collapse", { exact: true })).toBeVisible();
+});
+
+test("renders player-first premium AI decision workspace for entitled users", async ({ page }) => {
+  await mockApi(page, { entitled: true });
   await page.goto("/?e2e=player-first");
 
   await expect(page.getByText("Team Spirit", { exact: true }).first()).toBeVisible();

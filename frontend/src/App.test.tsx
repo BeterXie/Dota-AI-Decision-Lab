@@ -12,6 +12,23 @@ const runtime = {
 };
 
 const jobs = { by_status: {}, by_type: [], oldest_pending_at: null, recent_failures: [] };
+const anonymousSession = {
+  enabled: true,
+  authenticated: false,
+  user: null,
+  entitlements: []
+};
+const proSession = {
+  enabled: true,
+  authenticated: true,
+  user: {
+    id: "99999999-9999-9999-9999-999999999999",
+    email: "pro@example.com",
+    email_verified_at: "2026-08-12T10:00:00Z",
+    created_at: "2026-08-12T10:00:00Z"
+  },
+  entitlements: ["ai_decisions"]
+};
 
 beforeEach(() => {
   window.localStorage.clear();
@@ -28,8 +45,11 @@ function renderApp() {
   return render(<QueryClientProvider client={client}><App /></QueryClientProvider>);
 }
 
-function response(payload: unknown) {
-  return new Response(JSON.stringify(payload), { status: 200, headers: { "Content-Type": "application/json" } });
+function response(payload: unknown, status = 200) {
+  return new Response(JSON.stringify(payload), {
+    status,
+    headers: { "Content-Type": "application/json" }
+  });
 }
 
 function liveMatchFixture() {
@@ -78,31 +98,44 @@ function liveMatchFixture() {
       message_age_seconds: 1, effective_state_age_seconds: 2, connection_id: "conn-1", reconnect_generation: 0
     },
     sync: { status: "SAFE", p50_seconds: 1.2, p90_seconds: 2.1, jitter_seconds: 0.3, sample_size: 100, accepted_pair_ratio: 0.98, ambiguous_ratio: 0.01, outlier_ratio: 0.01, confidence: "HIGH", calculated_at: "2026-08-12T12:21:59Z" },
-    latest_snapshot: { id: "snap-1", decision_at: "2026-08-12T12:21:59Z", created_at: "2026-08-12T12:22:00Z", mode: "LIVE_BASIC", snapshot_hash: "3a7f89b1c4e20d", market_quality: null, history_coverage: null, quality: { eligible: true, blockers: [], warnings: [] } },
+    latest_snapshot: { id: "snap-1", decision_at: "2026-08-12T12:21:59Z", created_at: "2026-08-12T12:22:00Z", mode: "LIVE_BASIC", market_quality: null, history_coverage: null, quality: { eligible: true, blockers: [], warnings: [] } },
+    ai_access: { required_entitlement: "ai_decisions", analysis_available: true, updated_at: "2026-08-12T12:21:59Z", completed_models: 1 },
+    decisions: [],
+    market_timeline: [], live_timeline: [], result: null, result_evidence: []
+  };
+}
+
+function premiumFixture(match = liveMatchFixture()) {
+  return {
+    canonical_map_id: match.canonical_map_id,
+    latest_snapshot: match.latest_snapshot,
     decisions: [
-      { id: "dec-gpt", provider: "openai", model: "gpt-5", model_version: "2026-08", prompt_version: "v2.1", decision_policy_version: "v1.0", snapshot_hash: "3a7f89b1c4e20d", request_started_at: "2026-08-12T12:21:59Z", response_received_at: "2026-08-12T12:22:00Z", parse_status: "PARSED", latency_seconds: 0.8, decision: { action: "BUY_A", confidence: 0.76, fair_probability_a: 0.61, primary_reasons: ["Draft and price align"], counter_arguments: ["Late crossover risk"], data_quality_concerns: [] }, error: null }
+      { id: "dec-gpt", snapshot_id: "snap-1", provider: "openai", model: "gpt-5", model_version: "2026-08", prompt_version: "v2.1", decision_policy_version: "v1.0", snapshot_hash: "3a7f89b1c4e20d", request_started_at: "2026-08-12T12:21:59Z", response_received_at: "2026-08-12T12:22:00Z", parse_status: "PARSED", latency_seconds: 0.8, decision: { action: "BUY_A", confidence: 0.76, fair_probability_a: 0.61, primary_reasons: ["Draft and price align"], counter_arguments: ["Late crossover risk"], data_quality_concerns: [] }, error: null }
     ],
-    market_timeline: [], live_timeline: [], snapshot_payload: { history: {}, quality: {} }, future_odds: [], result: null, result_evidence: []
+    checkpoint_decisions: [],
+    snapshot_payload: { history: {}, quality: {} },
+    future_odds: []
   };
 }
 
 function summaryFromDetail(detail: ReturnType<typeof liveMatchFixture>) {
   const summary: Record<string, unknown> = { ...detail };
-  for (const key of ["market_timeline", "live_timeline", "snapshot_payload", "future_odds", "result", "result_evidence"]) {
-    delete summary[key];
-  }
+  for (const key of ["market_timeline", "live_timeline", "result", "result_evidence"]) delete summary[key];
   return summary;
 }
 
-test("renders operational empty state and persists locale", async () => {
+test("renders public empty state without requiring login and persists locale", async () => {
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
-    return response(url.endsWith("/api/matches") ? [] : url.endsWith("/api/jobs/summary") ? jobs : runtime);
+    if (url.endsWith("/api/auth/session")) return response(anonymousSession);
+    if (url.endsWith("/api/matches")) return response([]);
+    return response(runtime);
   }));
 
   const first = renderApp();
   expect((await screen.findAllByText("No discovered matches")).length).toBeGreaterThan(0);
   expect(screen.getByText("Dota AI Decision Lab")).toBeInTheDocument();
+  expect(await screen.findByRole("button", { name: "Sign in" })).toBeInTheDocument();
   fireEvent.click(screen.getByRole("button", { name: "中文" }));
   expect(window.localStorage.getItem("dota-ai-decision-lab-locale")).toBe("zh-CN");
   first.unmount();
@@ -111,13 +144,36 @@ test("renders operational empty state and persists locale", async () => {
   expect(await screen.findByRole("button", { name: "中文" })).toHaveAttribute("aria-pressed", "true");
 });
 
-test("renders player-first match intelligence and explicit R.O.S.H. side advantage", async () => {
+test("anonymous users see match intelligence but not the AI decision", async () => {
   const match = liveMatchFixture();
-
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
-    if (url.endsWith("/api/matches")) return response([match]);
-    if (url.includes("/api/maps/")) return response(match);
+    if (url.endsWith("/api/auth/session")) return response(anonymousSession);
+    if (url.endsWith("/api/matches")) return response([summaryFromDetail(match)]);
+    if (url.includes(`/api/maps/${match.canonical_map_id}`)) return response(match);
+    return response(runtime);
+  }));
+
+  renderApp();
+  expect((await screen.findAllByText("Team Spirit")).length).toBeGreaterThan(0);
+  expect(screen.getByText("Live AI decisions")).toBeInTheDocument();
+  expect(screen.getByText(/AI analysis is ready/)).toBeInTheDocument();
+  expect(screen.getByRole("button", { name: "Sign in for AI access" })).toBeInTheDocument();
+  expect(screen.queryByText("BUY A")).not.toBeInTheDocument();
+  expect(screen.getByText("R.O.S.H. Draft Advantage")).toBeInTheDocument();
+  expect(screen.getByText("Radiant +5.2pp")).toBeInTheDocument();
+});
+
+test("entitled users receive premium AI decisions without losing public match data", async () => {
+  const match = liveMatchFixture();
+  const premium = premiumFixture(match);
+  vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input);
+    if (url.endsWith("/api/auth/session")) return response(proSession);
+    if (url.endsWith("/api/matches")) return response([summaryFromDetail(match)]);
+    if (url.endsWith("/ai-decisions")) return response(premium);
+    if (url.includes("/api/snapshots/")) return response({ decisions: premium.decisions });
+    if (url.includes(`/api/maps/${match.canonical_map_id}`)) return response(match);
     if (url.endsWith("/api/jobs/summary")) return response({ ...jobs, by_status: { COMPLETED: 15 } });
     return response(runtime);
   }));
@@ -125,14 +181,11 @@ test("renders player-first match intelligence and explicit R.O.S.H. side advanta
   renderApp();
   expect((await screen.findAllByText("Team Spirit")).length).toBeGreaterThan(0);
   expect(screen.getByText("Decision data ready")).toBeInTheDocument();
-  expect(screen.getByText("Independent AI decisions")).toBeInTheDocument();
+  expect(await screen.findByText("Independent AI decisions")).toBeInTheDocument();
   expect(screen.getAllByText("BUY A").length).toBeGreaterThan(0);
   expect(screen.getByText("R.O.S.H. Draft Advantage")).toBeInTheDocument();
   expect(screen.getByText("Radiant advantage")).toBeInTheDocument();
-  expect(screen.getByText("Radiant +5.2pp")).toBeInTheDocument();
   expect(screen.getByText("46m → Dire")).toBeInTheDocument();
-  expect(screen.queryByText("Team Spirit advantage")).not.toBeInTheDocument();
-  expect(screen.getByText("DRAFT LINEUP")).toBeInTheDocument();
   expect(screen.getAllByText("Yatoro").length).toBeGreaterThan(0);
 
   fireEvent.click(screen.getByTitle("Open Engineering Diagnostics"));
@@ -158,12 +211,12 @@ test("default-selects the LIVE match instead of the first list row", async () =>
 
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
+    if (url.endsWith("/api/auth/session")) return response(anonymousSession);
     if (url.endsWith("/api/matches")) return response([prematch, live]);
     if (url.includes("/api/maps/")) {
       requestedDetails.push(url);
       return response(url.includes(live.canonical_map_id) ? live : prematch);
     }
-    if (url.endsWith("/api/jobs/summary")) return response({ ...jobs, by_status: { COMPLETED: 15 } });
     return response(runtime);
   }));
 
@@ -173,16 +226,18 @@ test("default-selects the LIVE match instead of the first list row", async () =>
   expect(requestedDetails.some((url) => url.includes(`/api/maps/${prematch.canonical_map_id}`))).toBe(false);
 });
 
-test("enriches LIVE summary decisions and shows probability for the selected BUY side", async () => {
+test("entitled AI view shows probability for the selected BUY side", async () => {
   const detail = liveMatchFixture();
-  detail.decisions[0].decision.action = "BUY_B";
-  detail.decisions[0].decision.fair_probability_a = 0.25;
-  const summary = summaryFromDetail(detail);
-  summary.decisions = [];
+  const premium = premiumFixture(detail);
+  premium.decisions[0].decision.action = "BUY_B";
+  premium.decisions[0].decision.fair_probability_a = 0.25;
 
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
-    if (url.endsWith("/api/matches")) return response([summary]);
+    if (url.endsWith("/api/auth/session")) return response(proSession);
+    if (url.endsWith("/api/matches")) return response([summaryFromDetail(detail)]);
+    if (url.endsWith("/ai-decisions")) return response(premium);
+    if (url.includes("/api/snapshots/")) return response({ decisions: premium.decisions });
     if (url.includes("/api/maps/")) return response(detail);
     if (url.endsWith("/api/jobs/summary")) return response(jobs);
     return response(runtime);
@@ -192,20 +247,15 @@ test("enriches LIVE summary decisions and shows probability for the selected BUY
   expect(await screen.findByText("BUY B 75%")).toBeInTheDocument();
 });
 
-test("renders a detail error instead of leaving a failed request in loading state", async () => {
+test("renders a public detail error instead of leaving a failed request in loading state", async () => {
   const summary = summaryFromDetail(liveMatchFixture());
-  summary.decisions = [];
-
   vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
     const url = String(input);
+    if (url.endsWith("/api/auth/session")) return response(anonymousSession);
     if (url.endsWith("/api/matches")) return response([summary]);
     if (url.includes("/api/maps/")) {
-      return new Response(JSON.stringify({ detail: "fixture failure" }), {
-        status: 500,
-        headers: { "Content-Type": "application/json" }
-      });
+      return response({ detail: "fixture failure" }, 500);
     }
-    if (url.endsWith("/api/jobs/summary")) return response(jobs);
     return response(runtime);
   }));
 
@@ -213,8 +263,6 @@ test("renders a detail error instead of leaving a failed request in loading stat
   expect(await screen.findByText("Failed to load match intelligence")).toBeInTheDocument();
   expect(screen.queryByText("Loading match intelligence")).not.toBeInTheDocument();
 });
-
-
 
 test("review route predicate does not capture unrelated prefixes", () => {
   expect(isReviewRoute("/review")).toBe(true);
