@@ -260,7 +260,10 @@ class NotificationCenterService(BaseNotificationCenterService):
                 canonical_map_id=canonical_map_id,
             ):
                 delivery.status = "CANCELLED"
-                delivery.last_error = "binding, preference, account, or scoped realtime entitlement is no longer active"
+                delivery.last_error = (
+                    "binding, preference, account, or scoped realtime "
+                    "entitlement is no longer active"
+                )
                 return None
             delivery.status = "SENDING"
             delivery.attempt_count += 1

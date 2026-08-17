@@ -344,7 +344,8 @@ class PaddleSeriesPassService:
             )
             if pending is not None:
                 raise SeriesPassCheckoutConflict(
-                    "a recent checkout for this series is still pending; complete or abandon it first"
+                    "a recent checkout for this series is still pending; "
+                    "complete or abandon it first"
                 )
             intent = SeriesPassPurchaseRecord(
                 user_id=user_id,
