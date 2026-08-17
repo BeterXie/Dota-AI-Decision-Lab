@@ -180,3 +180,7 @@ Changes to authentication, premium authorization, or Notification Center must re
 - Free-user Notification Center lock state and entitled-user pairing flow;
 - authentication-disabled backward compatibility for public APIs while premium APIs remain closed;
 - Alembic upgrade/check from a clean PostgreSQL database.
+
+## Phase scope
+
+Phases 2-4 now cover public/premium API separation, capability entitlements, and the user Notification Center. They do **not** implement a payment processor, checkout, subscription renewal, webhook billing events, or production remote-host deployment hardening. Those systems should integrate with the existing entitlement records rather than bypass them.
