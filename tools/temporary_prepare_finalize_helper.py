@@ -10,4 +10,9 @@ new = '''                    "market_log_loss": (float(market_loss) if market_lo
 '''
 if old not in text:
     raise SystemExit("finalize helper already differs from expected pre-Ruff market_log_loss block")
-path.write_text(text.replace(old, new, 1), encoding="utf-8")
+text = text.replace(old, new, 1)
+old_assertion = "        assert placed_at == first.response_received_at\n"
+new_assertion = "        assert placed_at.replace(tzinfo=UTC) == first.response_received_at\n"
+if old_assertion not in text:
+    raise SystemExit("finalize helper placement chronology assertion target not found")
+path.write_text(text.replace(old_assertion, new_assertion, 1), encoding="utf-8")
