@@ -243,10 +243,12 @@ def _require_service(service: EmailAuthService | None, enabled: bool) -> EmailAu
 
 
 def _http_access_requirement(path: str) -> tuple[str, str | None]:
-    if path.startswith("/api/notifications"):
+    if path == "/api/notifications" or path.startswith("/api/notifications/"):
         return "ENTITLED", REALTIME_NOTIFICATIONS_ENTITLEMENT
     if (
-        path.startswith("/api/snapshots/")
+        path == "/api/snapshots"
+        or path.startswith("/api/snapshots/")
+        or path == "/api/review"
         or path.startswith("/api/review/")
         or (path.startswith("/api/maps/") and path.endswith("/ai-decisions"))
     ):
