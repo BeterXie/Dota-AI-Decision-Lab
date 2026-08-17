@@ -14,6 +14,7 @@ A provider adapter supplies:
 
 - `provider`: stable provider key, for example `stripe` or `paddle`.
 - `event_ref`: provider event identifier used for idempotency.
+- `occurred_at`: provider event/state observation time used to reject delayed older state.
 - `user_id`: authenticated Dota AI Decision Lab account owner. The adapter must obtain this from trusted checkout/subscription metadata or a verified server-side mapping; never from an arbitrary browser-supplied user id.
 - `subscription_ref`: stable provider subscription identifier.
 - `plan_key`: internal plan key. V1 supports `PRO`.
@@ -28,6 +29,8 @@ Billing events are persisted without raw webhook payloads. A SHA-256 digest of n
 
 The `(provider, event_ref)` pair is unique. Replaying the exact same event is a no-op; replaying the same event id with different normalized content fails closed. PostgreSQL transaction-scoped advisory locks serialize concurrent deliveries for the same event or subscription before first insert.
 
+Each subscription remembers the latest applied `occurred_at`. A strictly older delayed event is stored for audit with `applied=false` but cannot mutate the subscription or restore revoked entitlements. Provider adapters should preserve the provider's highest-precision event/state timestamp. If a provider cannot provide reliable ordering, the adapter should fetch the provider's current authoritative subscription state before invoking the lifecycle service instead of trusting a stale webhook body.
+
 Entitlements are granted with a subscription-specific source such as `billing:<provider>:<digest>`. Cancellation or expiry revokes only that source. A promo, development, admin, or other independent entitlement source therefore survives billing cancellation.
 
 There is deliberately no public endpoint that grants premium access. A future provider webhook route must verify the provider signature before invoking the lifecycle service.
@@ -39,7 +42,8 @@ Before enabling real payments, the selected adapter must:
 1. verify webhook authenticity using the provider's official mechanism;
 2. resolve the subscription to a trusted internal `user_id`;
 3. map provider states to `ACTIVE` or `INACTIVE` conservatively;
-4. pass the provider event id unchanged as `event_ref`;
-5. acknowledge the webhook only after the lifecycle transaction succeeds;
-6. retry safely because the lifecycle service is idempotent;
-7. never let frontend subscription state directly grant an entitlement.
+4. pass the provider event id unchanged as `event_ref` and preserve its reliable occurrence/state-observation timestamp;
+5. fetch current authoritative subscription state when provider event ordering is ambiguous;
+6. acknowledge the webhook only after the lifecycle transaction succeeds;
+7. retry safely because the lifecycle service is idempotent;
+8. never let frontend subscription state directly grant an entitlement.
