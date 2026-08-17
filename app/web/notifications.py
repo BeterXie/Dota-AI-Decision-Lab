@@ -5,7 +5,7 @@ from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.auth import AuthenticatedUser
-from app.entitlements import REALTIME_NOTIFICATIONS_ENTITLEMENT
+from app.entitlements import REALTIME_NOTIFICATIONS_ENTITLEMENT, EntitlementService
 from app.notifications.center import (
     PAIRABLE_CHANNELS,
     NotificationBindingConflict,
@@ -23,15 +23,16 @@ def create_notification_router(
 ) -> APIRouter:
     router = APIRouter(prefix="/api/notifications", tags=["notifications"])
     center = NotificationCenterService(session_factory)
+    entitlements = EntitlementService(session_factory)
 
     @router.get("")
     async def notification_center(request: Request) -> dict:
-        user = _request_user(request)
+        user = await _request_user(request, entitlements)
         return await center.overview(user.id)
 
     @router.post("/bindings/email")
     async def bind_verified_email(request: Request) -> dict:
-        user = _request_user(request)
+        user = await _request_user(request, entitlements)
         try:
             await center.ensure_email_binding(
                 user_id=user.id,
@@ -44,7 +45,7 @@ def create_notification_router(
 
     @router.post("/pairing/{channel}")
     async def create_pairing(channel: str, request: Request) -> dict:
-        user = _request_user(request)
+        user = await _request_user(request, entitlements)
         try:
             normalized = normalize_channel(channel)
         except ValueError as exc:
@@ -67,7 +68,7 @@ def create_notification_router(
         payload: NotificationPreferencePayload,
         request: Request,
     ) -> dict:
-        user = _request_user(request)
+        user = await _request_user(request, entitlements)
         try:
             normalized = normalize_channel(channel)
         except ValueError as exc:
@@ -77,7 +78,7 @@ def create_notification_router(
 
     @router.delete("/bindings/{binding_id}")
     async def disable_binding(binding_id: UUID, request: Request) -> dict:
-        user = _request_user(request)
+        user = await _request_user(request, entitlements)
         if not await center.disable_binding(user.id, binding_id):
             raise HTTPException(status_code=404, detail="notification binding not found")
         return await center.overview(user.id)
@@ -85,14 +86,19 @@ def create_notification_router(
     return router
 
 
-def _request_user(request: Request) -> AuthenticatedUser:
+async def _request_user(
+    request: Request,
+    entitlements: EntitlementService,
+) -> AuthenticatedUser:
     user = getattr(request.state, "auth_user", None)
     if not isinstance(user, AuthenticatedUser):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required"
         )
-    entitlements = tuple(getattr(request.state, "auth_entitlements", ()))
-    if REALTIME_NOTIFICATIONS_ENTITLEMENT not in entitlements:
+    if not await entitlements.has_any_entitlement(
+        user.id,
+        REALTIME_NOTIFICATIONS_ENTITLEMENT,
+    ):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail="entitlement required",
