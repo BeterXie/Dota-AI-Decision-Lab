@@ -34,4 +34,26 @@ class BillingSubscriptionRecord(Base):
     provider_status: Mapped[str | None] = mapped_column(String(64))
     current_period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_event_occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(Uuid, primary_key=False)  # placeholder replaced below
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=utc_now, onupdate=utc_now
+    )
+
+
+class BillingEventRecord(Base):
+    __tablename__ = "billing_events"
+    __table_args__ = (
+        UniqueConstraint("provider", "event_ref", name="uq_billing_events_provider_ref"),
+        Index("ix_billing_events_subscription", "provider", "subscription_ref"),
+    )
+
+    id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
+    provider: Mapped[str] = mapped_column(String(32), nullable=False)
+    event_ref: Mapped[str] = mapped_column(String(160), nullable=False)
+    subscription_ref: Mapped[str] = mapped_column(String(160), nullable=False)
+    user_id: Mapped[UUID] = mapped_column(
+        ForeignKey("user_accounts.id", ondelete="CASCADE"), nullable=False
+    )
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    payload_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
