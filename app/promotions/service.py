@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import secrets
@@ -62,6 +63,10 @@ class PromotionService:
         self.inviter_reward_days = inviter_reward_days
         self.invited_reward_days = invited_reward_days
         self.max_rewards_per_inviter = max_rewards_per_inviter
+        # Same-process calls need an in-memory serialization point because
+        # SQLite ignores SELECT ... FOR UPDATE in unit tests. PostgreSQL's
+        # account-row lock below remains the cross-worker serialization guard.
+        self._referral_code_locks: dict[UUID, asyncio.Lock] = {}
 
     async def overview(self, user_id: UUID) -> dict:
         if not self.enabled:
@@ -104,10 +109,15 @@ class PromotionService:
     async def ensure_referral_code(self, user_id: UUID) -> str:
         if not self.enabled:
             raise PromotionDisabledError("referral campaign is disabled")
+        lock = self._referral_code_locks.setdefault(user_id, asyncio.Lock())
+        async with lock:
+            return await self._ensure_referral_code_locked(user_id)
+
+    async def _ensure_referral_code_locked(self, user_id: UUID) -> str:
         async with self._session_factory() as session, session.begin():
-            # Serialize first-code creation per account. The unique constraints
-            # remain the final guard, but this prevents ordinary double-clicks or
-            # concurrent workers from racing to create two stable referral codes.
+            # PostgreSQL serializes first-code creation per account across
+            # application workers. The in-process asyncio lock above covers
+            # engines without row-level FOR UPDATE semantics.
             account = await session.scalar(
                 select(UserAccountRecord)
                 .where(UserAccountRecord.id == user_id)
