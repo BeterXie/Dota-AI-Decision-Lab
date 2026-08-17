@@ -4,6 +4,7 @@ from uuid import UUID
 from fastapi import APIRouter, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.evaluation.leaderboard import TournamentLeaderboardService
 from app.evaluation.quality import TournamentQualityService
 from app.models import CanonicalEvent
 
@@ -13,6 +14,12 @@ def create_quality_router(
 ) -> APIRouter:
     router = APIRouter()
     quality = TournamentQualityService()
+    leaderboard = TournamentLeaderboardService()
+
+    @router.get("/api/review/ai-quality/leaderboard")
+    async def global_ai_quality_leaderboard() -> dict[str, Any]:
+        async with session_factory() as session:
+            return await leaderboard.build_report(session)
 
     @router.get("/api/review/events/{canonical_event_id}/ai-quality")
     async def event_ai_quality(canonical_event_id: UUID) -> dict[str, Any]:
