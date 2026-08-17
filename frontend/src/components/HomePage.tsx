@@ -132,7 +132,7 @@ function tournamentGroups(matches: MapSummary[]): TournamentGroup[] {
     const key = `${name}:${match.series_id || match.id}`.split(":").slice(0, 1).join(":");
     grouped.set(key, [...(grouped.get(key) ?? []), match]);
   }
-  return Array.from(grouped.entries()).map(([key, items]) => {
+  return Array.from(grouped.entries()).map<TournamentGroup>(([key, items]) => {
     const upcoming = items.filter((item) => item.phase === "PREMATCH").sort(byScheduledAscending);
     const live = items.some((item) => item.phase === "LIVE");
     return {
