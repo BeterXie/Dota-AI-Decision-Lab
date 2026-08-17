@@ -14,7 +14,7 @@ interface ProductShellProps {
 
 const navItems: Array<{ key: ProductNavKey; href: string; zh: string; en: string }> = [
   { key: "home", href: "/", zh: "首页", en: "Home" },
-  { key: "events", href: "/match-console", zh: "赛事", en: "Events" },
+  { key: "events", href: "/events", zh: "赛事", en: "Events" },
   { key: "performance", href: "/performance", zh: "AI 表现", en: "AI Performance" },
   { key: "review", href: "/review", zh: "复盘", en: "Review" },
   { key: "billing", href: "/billing", zh: "订阅", en: "Plans" }

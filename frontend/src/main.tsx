@@ -10,6 +10,7 @@ import "./design/player-first-v2.css";
 import "./design/rosh-direction.css";
 import "./design/player-layout-v3.css";
 import "./design/product-shell.css";
+import "./design/events-v2.css";
 
 const queryClient = new QueryClient({
   defaultOptions: {
