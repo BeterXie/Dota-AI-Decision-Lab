@@ -63,6 +63,7 @@ async def test_postgres_serializes_competing_positions_against_one_event_cash_po
         snapshots = []
         for index, canonical_map in enumerate(maps, start=1):
             snapshot = DecisionSnapshotRecord(
+                id=uuid4(),
                 canonical_map_id=canonical_map.id,
                 decision_at=now + timedelta(minutes=index),
                 created_at=now + timedelta(minutes=index),
