@@ -32,6 +32,7 @@ def main() -> None:
             git,
             "log",
             "--all",
+            "--patch",
             "--format=commit %H",
             "--no-ext-diff",
             "--unified=0",
@@ -60,12 +61,22 @@ def _scan_patch_stream(raw: bytes) -> set[Finding]:
     findings: set[Finding] = set()
     commit = "unknown"
     path = "unknown"
+    old_path = "unknown"
     for line in raw.splitlines():
         if line.startswith(b"commit "):
             commit = line[7:].decode("ascii", errors="replace")
+            path = "unknown"
+            old_path = "unknown"
+            continue
+        if line.startswith(b"--- a/"):
+            old_path = line[6:].decode("utf-8", errors="replace")
+            path = old_path
             continue
         if line.startswith(b"+++ b/"):
             path = line[6:].decode("utf-8", errors="replace")
+            continue
+        if line == b"+++ /dev/null":
+            path = old_path
             continue
         if path == _SCANNER_PATH or not line.startswith((b"+", b"-")):
             continue
