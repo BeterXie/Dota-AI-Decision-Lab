@@ -58,6 +58,8 @@ Paddle `custom_data` is retained as a correlation and tamper-detection signal, b
 
 For recurring purchases, Paddle's `subscription.created` event includes the originating transaction ID. The adapter can therefore establish the subscription from the same server-owned checkout mapping even if subscription events and `transaction.completed` arrive in a different order. Later subscription lifecycle events resolve ownership from the persisted `billing_subscriptions` record.
 
+The checkout endpoint refuses to create another Paddle purchase while the account already has an active, unexpired Paddle billing record. This prevents accidental overlapping passes or parallel active subscriptions. A customer with active Paddle billing should use the customer portal instead.
+
 ### Webhook route and events
 
 Webhook endpoint:
@@ -66,7 +68,7 @@ Webhook endpoint:
 POST /api/billing/webhooks/paddle
 ```
 
-The endpoint is intentionally reachable without a browser session, but it verifies the exact raw body against `Paddle-Signature` using HMAC-SHA256 and a timestamp tolerance before parsing the event.
+The endpoint is intentionally reachable without a browser session, but it verifies the exact raw body against `Paddle-Signature` using HMAC-SHA256 and a timestamp tolerance before parsing the event. The application reads the body as a bounded stream and rejects payloads larger than 1 MiB before signature processing.
 
 Configure the Paddle notification destination for at least:
 
@@ -82,7 +84,7 @@ Configure the Paddle notification destination for at least:
 - `adjustment.created`
 - `adjustment.updated`
 
-Full approved refunds, chargebacks, and chargeback warnings revoke the affected billing entitlement source. A successful chargeback reversal can restore it. Partial refunds do not automatically remove the whole Pro purchase.
+Full approved refunds, chargebacks, and chargeback warnings create a persistent fail-closed payment block for the affected billing source. A later ordinary `subscription.updated` with `status=active` cannot silently clear that block. Partial refunds do not automatically remove the whole Pro purchase. Chargeback reversal events are deliberately **not** sufficient by themselves to restore access; V1 keeps the source blocked until a new purchase or explicit operator reconciliation confirms that access should be restored.
 
 ### Configuration
 
