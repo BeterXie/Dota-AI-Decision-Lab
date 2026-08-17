@@ -26,6 +26,9 @@ const NotificationCenterPage = lazy(() =>
     default: module.NotificationCenterPage
   }))
 );
+const BillingPage = lazy(() =>
+  import("./components/BillingPage").then((module) => ({ default: module.BillingPage }))
+);
 const authSessionKey = ["auth", "session"] as const;
 const AI_DECISIONS_ENTITLEMENT = "ai_decisions";
 const REALTIME_NOTIFICATIONS_ENTITLEMENT = "realtime_notifications";
@@ -64,6 +67,7 @@ function AuthenticatedApp() {
   const hasNotificationAccess = Boolean(
     session?.entitlements?.includes(REALTIME_NOTIFICATIONS_ENTITLEMENT)
   );
+  const hasPro = hasAiAccess && hasNotificationAccess;
   const isSignedIn = Boolean(session?.enabled && session.authenticated && session.user);
 
   const handleAuthenticated = (next: AuthSessionState) => {
@@ -98,8 +102,19 @@ function AuthenticatedApp() {
   const pathname = typeof window !== "undefined" ? window.location.pathname : "/";
   const reviewRoute = isReviewRoute(pathname);
   const notificationRoute = isNotificationRoute(pathname);
+  const billingRoute = isBillingRoute(pathname);
   let content: React.ReactNode;
-  if (notificationRoute) {
+  if (billingRoute) {
+    content = (
+      <Suspense fallback={<div className="auth-bootstrap">Pro Billing</div>}>
+        <BillingPage
+          authenticated={isSignedIn}
+          hasPro={hasPro}
+          onLogin={() => setLoginOpen(true)}
+        />
+      </Suspense>
+    );
+  } else if (notificationRoute) {
     if (auth.isLoading) {
       content = <div className="auth-bootstrap">Dota AI Decision Lab</div>;
     } else if (hasNotificationAccess && session?.user) {
@@ -162,6 +177,10 @@ export function isReviewRoute(pathname: string): boolean {
 
 export function isNotificationRoute(pathname: string): boolean {
   return pathname === "/notifications" || pathname.startsWith("/notifications/");
+}
+
+export function isBillingRoute(pathname: string): boolean {
+  return pathname === "/billing" || pathname.startsWith("/billing/");
 }
 
 function DashboardApp({
