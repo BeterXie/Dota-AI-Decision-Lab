@@ -9,13 +9,10 @@ permissions:
 
 jobs:
   backend:
-    runs-on: ubuntu-latest
-    defaults:
-      run:
-        shell: pwsh
+    runs-on: ubuntu-24.04
     services:
       postgres:
-        image: postgres:18-alpine
+        image: postgres:18-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
         env:
           POSTGRES_DB: dota_ai_decision_lab
           POSTGRES_USER: postgres
@@ -30,13 +27,16 @@ jobs:
     env:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/dota_ai_decision_lab
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
         with:
           version: "0.12.0"
           python-version: "3.14"
           enable-cache: true
       - run: uv sync --frozen --extra dev
+      - run: uv run python tools/scan_git_history_secrets.py
       - run: uv run alembic upgrade head
       - run: uv run alembic check
       - run: uv run ruff format --check app migrations tests tools
@@ -45,14 +45,13 @@ jobs:
       - run: uv run pytest -W error
 
   frontend:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     defaults:
       run:
-        shell: pwsh
         working-directory: frontend
     steps:
-      - uses: actions/checkout@v6
-      - uses: actions/setup-node@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
         with:
           node-version-file: frontend/.node-version
           cache: npm

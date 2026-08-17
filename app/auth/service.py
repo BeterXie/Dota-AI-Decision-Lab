@@ -13,10 +13,12 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.auth.models import AuthSessionRecord, EmailLoginChallengeRecord, UserAccountRecord
+from app.auth.rate_limit import LoginRequestLimiter
 from app.time import ensure_utc
 
 SESSION_COOKIE_NAME = "dota_session"
 _LOGIN_CODE_DIGITS = 6
+_EMAIL_LOCK_STRIPES = 64
 _EMAIL_LOCAL_RE = re.compile(r"^[A-Za-z0-9.!#$%&'*+/=?^_`{|}~-]+$")
 _DOMAIN_LABEL_RE = re.compile(r"^[A-Za-z0-9](?:[A-Za-z0-9-]{0,61}[A-Za-z0-9])?$")
 
@@ -44,6 +46,12 @@ class InvalidLoginCodeError(ValueError):
 
 class AuthDeliveryError(RuntimeError):
     pass
+
+
+class AuthRateLimitError(RuntimeError):
+    def __init__(self, retry_after_seconds: int) -> None:
+        super().__init__("too many login code requests")
+        self.retry_after_seconds = max(1, retry_after_seconds)
 
 
 @dataclass(frozen=True, slots=True)
@@ -78,6 +86,10 @@ class EmailAuthService:
         resend_cooldown_seconds: int = 60,
         max_attempts: int = 5,
         session_ttl_days: int = 30,
+        source_rate_limit_max_requests: int = 5,
+        source_rate_limit_window_seconds: int = 60,
+        global_rate_limit_max_requests: int = 30,
+        global_rate_limit_window_seconds: int = 60,
     ) -> None:
         if len(secret_key.encode("utf-8")) < 32:
             raise ValueError("auth secret key must be at least 32 bytes")
@@ -88,14 +100,29 @@ class EmailAuthService:
         self._resend_cooldown_seconds = resend_cooldown_seconds
         self._max_attempts = max_attempts
         self._session_ttl_days = session_ttl_days
-        # Login traffic is tiny; serializing challenge mutation inside one runtime
-        # closes request/verify races on SQLite and complements row locks on Postgres.
-        self._challenge_lock = asyncio.Lock()
+        self._request_limiter = LoginRequestLimiter(
+            source_max_requests=source_rate_limit_max_requests,
+            source_window_seconds=source_rate_limit_window_seconds,
+            global_max_requests=global_rate_limit_max_requests,
+            global_window_seconds=global_rate_limit_window_seconds,
+        )
+        # Same-email challenge creation/verification must serialize, but unrelated
+        # users must not wait on a slow Resend request. A bounded stripe set keeps
+        # the lock table from growing with attacker-controlled email addresses.
+        self._challenge_locks = tuple(asyncio.Lock() for _ in range(_EMAIL_LOCK_STRIPES))
 
-    async def request_login_code(self, raw_email: str) -> LoginCodeRequestResult:
+    async def request_login_code(
+        self,
+        raw_email: str,
+        *,
+        request_source: str | None = None,
+    ) -> LoginCodeRequestResult:
         email = normalize_email(raw_email)
+        rate_limit = await self._request_limiter.check(request_source)
+        if not rate_limit.allowed:
+            raise AuthRateLimitError(rate_limit.retry_after_seconds)
         now = datetime.now(UTC)
-        async with self._challenge_lock:
+        async with self._challenge_lock(email):
             async with self._session_factory() as session, session.begin():
                 latest = await session.scalar(
                     select(EmailLoginChallengeRecord)
@@ -163,7 +190,7 @@ class EmailAuthService:
         failure: str | None = None
         verification: LoginVerificationResult | None = None
 
-        async with self._challenge_lock:
+        async with self._challenge_lock(email):
             async with self._session_factory() as session, session.begin():
                 challenge = await session.scalar(
                     select(EmailLoginChallengeRecord)
@@ -283,6 +310,11 @@ class EmailAuthService:
 
     async def close(self) -> None:
         await self._sender.close()
+
+    def _challenge_lock(self, email: str) -> asyncio.Lock:
+        digest = hashlib.sha256(email.encode("utf-8")).digest()
+        index = int.from_bytes(digest[:2], "big") % len(self._challenge_locks)
+        return self._challenge_locks[index]
 
     def _code_digest(self, challenge_id: UUID, code: str) -> str:
         payload = f"email-login:{challenge_id}:{code}".encode()
