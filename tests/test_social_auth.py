@@ -63,9 +63,6 @@ def test_public_plain_http_origin_does_not_enable_social_login() -> None:
 
 def test_steam_claimed_id_is_reduced_to_stable_steam_id() -> None:
     steam_id = "76561198000000000"
-    assert (
-        _steam_id_from_claimed_id(f"https://steamcommunity.com/openid/id/{steam_id}")
-        == steam_id
-    )
+    assert _steam_id_from_claimed_id(f"https://steamcommunity.com/openid/id/{steam_id}") == steam_id
     with pytest.raises(SocialAuthProviderError):
         _steam_id_from_claimed_id("https://example.com/not-steam")
