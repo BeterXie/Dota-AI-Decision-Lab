@@ -181,6 +181,9 @@ export interface AiPositionAudit {
   canonical_map_id: string;
   map_number: number | null;
   action: string;
+  team_a: { id: string; name: string };
+  team_b: { id: string; name: string };
+  selected_team: { id: string; name: string } | null;
   cash_before: number;
   stake: number;
   odds: number | null;

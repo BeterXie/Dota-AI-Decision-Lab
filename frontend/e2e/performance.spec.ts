@@ -240,6 +240,9 @@ const positions = {
       canonical_map_id: "map-1234567890",
       map_number: 2,
       action: "BUY_A",
+      team_a: { id: "team-spirit", name: "Team Spirit" },
+      team_b: { id: "team-aurora", name: "Aurora" },
+      selected_team: { id: "team-spirit", name: "Team Spirit" },
       cash_before: 10700,
       stake: 700,
       odds: 2.1,
@@ -257,6 +260,9 @@ const positions = {
       canonical_map_id: "map-2234567890",
       map_number: 3,
       action: "BUY_B",
+      team_a: { id: "team-spirit", name: "Team Spirit" },
+      team_b: { id: "team-aurora", name: "Aurora" },
+      selected_team: { id: "team-aurora", name: "Aurora" },
       cash_before: 11470,
       stake: 900,
       odds: null,
@@ -323,6 +329,7 @@ test("compares AI portfolios and drills into an auditable event position", async
   await expect(page.getByText("22/20", { exact: true })).toBeVisible();
   await expect(page.getByText("T+30s", { exact: true })).toBeVisible();
 
+  await expect(page.getByText("Team Spirit", { exact: true })).toBeVisible();
   await page.getByText("MAP 2", { exact: true }).click();
   await expect(page.getByText("10,700", { exact: true })).toBeVisible();
   await expect(page.getByText(/decision…7890/)).toBeVisible();

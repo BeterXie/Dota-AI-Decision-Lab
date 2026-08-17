@@ -502,7 +502,7 @@ function PositionRow({
     <div className={`performance-position ${expanded ? "expanded" : ""}`}>
       <button type="button" className="performance-position-main" onClick={onToggle} aria-expanded={expanded}>
         <span><b>MAP {position.map_number ?? "?"}</b><small>{formatDateTime(position.opened_at, locale)}</small></span>
-        <span><b>{position.action.replace("_", " ")}</b><small>{locale === "zh-CN" ? "AI 操作" : "AI action"}</small></span>
+        <span><b>{position.selected_team?.name ?? position.action.replace("_", " ")}</b><small>{position.action.replace("_", " ")} · {locale === "zh-CN" ? "AI 操作" : "AI action"}</small></span>
         <span><b>{money(position.stake, locale)}</b><small>@ {position.odds?.toFixed(3) ?? "—"}</small></span>
         <span className={`position-status status-${position.status.toLowerCase()}`}>{position.status}</span>
         <span className={tone(position.realized_pnl)}><b>{position.realized_pnl == null ? "—" : signedMoney(position.realized_pnl, locale)}</b><small>{locale === "zh-CN" ? "已实现 PnL" : "Realized PnL"}</small></span>

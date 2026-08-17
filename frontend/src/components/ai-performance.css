@@ -310,8 +310,9 @@
   .performance-detail-heading { flex-direction: column; }
   .performance-gate-badge { text-align: left; }
   .performance-chart-wrap { height: 230px; }
-  .performance-position-main { grid-template-columns: 1fr 88px; }
-  .performance-position-main > :nth-child(2),
-  .performance-position-main > :nth-child(4) { display: none; }
+  .performance-position-main { grid-template-columns: 48px minmax(0, 1fr) 82px; }
+  .performance-position-main > :nth-child(3),
+  .performance-position-main > :nth-child(4),
+  .performance-position-main > :nth-child(6) { display: none; }
   .performance-position-detail { grid-template-columns: 1fr; }
 }

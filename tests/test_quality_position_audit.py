@@ -120,9 +120,17 @@ async def test_position_audit_is_event_scoped_and_preserves_execution_facts() ->
         }
         assert [row["map_number"] for row in payload["positions"]] == [2, 1]
         assert payload["positions"][0]["status"] == "REJECTED"
+        assert payload["positions"][0]["selected_team"] == {
+            "id": str(team_b.id),
+            "name": "Team B",
+        }
         assert payload["positions"][0]["rejection_reason"] == "MARKET_NOT_EXECUTABLE"
         assert payload["positions"][0]["cash_before"] == 10500.0
         assert payload["positions"][1]["status"] == "WON"
+        assert payload["positions"][1]["selected_team"] == {
+            "id": str(team_a.id),
+            "name": "Team A",
+        }
         assert payload["positions"][1]["odds"] == 2.0
         assert payload["positions"][1]["stake"] == 500.0
         assert payload["positions"][1]["payout"] == 1000.0

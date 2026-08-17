@@ -94,9 +94,7 @@ async def build_position_audit(
                 "rejection_reason": position.rejection_reason,
                 "payout": float(position.payout) if position.payout is not None else None,
                 "realized_pnl": (
-                    float(position.realized_pnl)
-                    if position.realized_pnl is not None
-                    else None
+                    float(position.realized_pnl) if position.realized_pnl is not None else None
                 ),
                 "opened_at": position.opened_at,
                 "settled_at": position.settled_at,
