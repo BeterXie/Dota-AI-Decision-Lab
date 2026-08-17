@@ -10,6 +10,62 @@
   background: transparent;
 }
 
+.premium-product-intro {
+  padding-top: 38px;
+  padding-bottom: 18px;
+}
+
+.premium-product-intro-billing,
+.premium-product-intro-notifications {
+  width: min(1180px, calc(100% - 48px));
+}
+
+.premium-product-intro h1 {
+  max-width: 900px;
+  margin: 8px 0 10px;
+  color: var(--product-text);
+  font-size: clamp(30px, 4vw, 46px);
+  line-height: 1.12;
+  letter-spacing: -0.045em;
+}
+
+.premium-product-intro p {
+  max-width: 850px;
+  margin: 0;
+  color: var(--product-text-2);
+  font-size: 13px;
+  line-height: 1.8;
+}
+
+.premium-product-notes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+  margin-top: 16px;
+}
+
+.premium-product-notes span {
+  padding: 6px 9px;
+  border: 1px solid var(--product-border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.025);
+  color: var(--product-text-3);
+  font-size: 10px;
+  font-weight: 650;
+}
+
+/* The 2.0 shell owns the first-screen product explanation. Keep the mature
+   analytics components below it, but remove their older engineering-heavy intro. */
+.premium-performance .performance-intro,
+.premium-review .review-intro {
+  display: none;
+}
+
+.premium-performance .performance-main,
+.premium-review .review-main {
+  padding-top: 18px;
+}
+
 /* Keep each mature business page's title and refresh affordance, but let the
    Product Shell own navigation and language. */
 .premium-performance .performance-header,
@@ -65,6 +121,22 @@
 .premium-notifications .notification-grid,
 .premium-notifications .notification-history {
   width: min(1180px, 100%);
+}
+
+.premium-billing .billing-page,
+.premium-notifications .notification-page {
+  padding-top: 12px;
+}
+
+.premium-billing .billing-hero > div:first-child,
+.premium-notifications .notification-hero > div:first-child {
+  display: none;
+}
+
+.premium-billing .billing-hero,
+.premium-notifications .notification-hero {
+  justify-content: flex-end;
+  margin-bottom: 22px;
 }
 
 .product-premium-loading {
@@ -231,6 +303,20 @@
 }
 
 @media (max-width: 760px) {
+  .premium-product-intro {
+    padding-top: 28px;
+    padding-bottom: 12px;
+  }
+
+  .premium-product-intro-billing,
+  .premium-product-intro-notifications {
+    width: min(100% - 36px, 1180px);
+  }
+
+  .premium-product-intro h1 {
+    font-size: clamp(28px, 10vw, 38px);
+  }
+
   .premium-performance .performance-header,
   .premium-review .review-header {
     padding: 12px 18px;
@@ -246,6 +332,11 @@
   .premium-review .review-header-actions button {
     padding: 7px 8px;
     font-size: 10px;
+  }
+
+  .premium-billing .billing-hero,
+  .premium-notifications .notification-hero {
+    justify-content: stretch;
   }
 
   .product-access-gate {
