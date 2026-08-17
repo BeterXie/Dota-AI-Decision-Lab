@@ -1,0 +1,417 @@
+from __future__ import annotations
+
+from collections import Counter
+from dataclasses import dataclass
+from typing import Any
+from uuid import UUID
+
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.domain.decision import AiDecision
+from app.evaluation.metrics import brier_score, log_loss
+from app.evaluation.portfolio import TournamentPortfolioService
+from app.evaluation.portfolio_models import (
+    TournamentPortfolioLedgerRecord,
+    TournamentPortfolioPositionRecord,
+)
+from app.models import (
+    AiDecisionRecord,
+    CanonicalMap,
+    CanonicalSeries,
+    DecisionEvaluationRecord,
+    DecisionSnapshotRecord,
+    MapResultRecord,
+)
+
+QUALITY_REPORT_VERSION = "tournament-quality-v1"
+QUALITY_GATE_MODE = "SHADOW_ONLY"
+
+
+@dataclass(frozen=True, slots=True)
+class QualityGatePolicy:
+    min_settled_maps: int = 20
+    min_settled_bets: int = 10
+    min_prediction_samples: int = 20
+    min_roi: float = 0.0
+    min_average_clv: float = 0.0
+    min_brier_improvement_vs_market: float = 0.0
+    max_drawdown_pct: float = 0.30
+
+
+class TournamentQualityService:
+    """Evaluate one event's AI experiments without controlling production yet."""
+
+    def __init__(
+        self,
+        portfolio: TournamentPortfolioService | None = None,
+        *,
+        policy: QualityGatePolicy | None = None,
+    ) -> None:
+        self._portfolio = portfolio or TournamentPortfolioService()
+        self._policy = policy or QualityGatePolicy()
+
+    async def build_report(
+        self,
+        session: AsyncSession,
+        *,
+        canonical_event_id: UUID,
+    ) -> dict[str, Any]:
+        portfolio_rows = await self._portfolio.leaderboard(
+            session,
+            canonical_event_id=canonical_event_id,
+        )
+        experiments = []
+        for portfolio_row in portfolio_rows:
+            experiments.append(
+                await self._experiment_report(
+                    session,
+                    canonical_event_id=canonical_event_id,
+                    portfolio_row=portfolio_row,
+                )
+            )
+        experiments.sort(
+            key=lambda item: (
+                item["gate"]["status"] != "PASS",
+                -float(item["portfolio"]["roi"] or 0.0),
+                float(item["portfolio"]["max_drawdown_pct"] or 0.0),
+            )
+        )
+        return {
+            "quality_report_version": QUALITY_REPORT_VERSION,
+            "gate_mode": QUALITY_GATE_MODE,
+            "canonical_event_id": str(canonical_event_id),
+            "policy": {
+                "min_settled_maps": self._policy.min_settled_maps,
+                "min_settled_bets": self._policy.min_settled_bets,
+                "min_prediction_samples": self._policy.min_prediction_samples,
+                "min_roi": self._policy.min_roi,
+                "min_average_clv": self._policy.min_average_clv,
+                "min_brier_improvement_vs_market": (
+                    self._policy.min_brier_improvement_vs_market
+                ),
+                "max_drawdown_pct": self._policy.max_drawdown_pct,
+            },
+            "experiments": experiments,
+        }
+
+    async def _experiment_report(
+        self,
+        session: AsyncSession,
+        *,
+        canonical_event_id: UUID,
+        portfolio_row: dict[str, Any],
+    ) -> dict[str, Any]:
+        account_id = UUID(portfolio_row["account_id"])
+        identity = portfolio_row["experiment"]
+        position_pairs = list(
+            (
+                await session.execute(
+                    select(TournamentPortfolioPositionRecord, AiDecisionRecord)
+                    .join(
+                        AiDecisionRecord,
+                        AiDecisionRecord.id
+                        == TournamentPortfolioPositionRecord.ai_decision_id,
+                    )
+                    .where(
+                        TournamentPortfolioPositionRecord.portfolio_account_id
+                        == account_id
+                    )
+                    .order_by(TournamentPortfolioPositionRecord.opened_at)
+                )
+            ).all()
+        )
+        stake_ratios = [
+            float(position.stake) / float(decision.bankroll_before)
+            for position, decision in position_pairs
+            if decision.bankroll_before is not None
+            and float(decision.bankroll_before) > 0
+            and position.status != "REJECTED"
+        ]
+        settled_positions = [
+            position
+            for position, _ in position_pairs
+            if position.status in {"WON", "LOST"}
+        ]
+        losing_streak = _longest_losing_streak(settled_positions)
+
+        decision_rows = list(
+            (
+                await session.execute(
+                    select(
+                        AiDecisionRecord,
+                        DecisionSnapshotRecord,
+                        CanonicalSeries,
+                        MapResultRecord,
+                        DecisionEvaluationRecord,
+                    )
+                    .join(
+                        DecisionSnapshotRecord,
+                        DecisionSnapshotRecord.id == AiDecisionRecord.snapshot_id,
+                    )
+                    .join(
+                        CanonicalMap,
+                        CanonicalMap.id == DecisionSnapshotRecord.canonical_map_id,
+                    )
+                    .join(CanonicalSeries, CanonicalSeries.id == CanonicalMap.series_id)
+                    .outerjoin(
+                        MapResultRecord,
+                        MapResultRecord.canonical_map_id == CanonicalMap.id,
+                    )
+                    .outerjoin(
+                        DecisionEvaluationRecord,
+                        DecisionEvaluationRecord.ai_decision_id == AiDecisionRecord.id,
+                    )
+                    .where(
+                        CanonicalSeries.event_id == canonical_event_id,
+                        AiDecisionRecord.provider == identity["provider"],
+                        AiDecisionRecord.model == identity["model"],
+                        AiDecisionRecord.prompt_version == identity["prompt_version"],
+                        AiDecisionRecord.decision_policy_version
+                        == identity["decision_policy_version"],
+                        AiDecisionRecord.ai_view_version == identity["ai_view_version"],
+                        AiDecisionRecord.parse_status == "SUCCESS",
+                        AiDecisionRecord.normalized_response.is_not(None),
+                    )
+                    .order_by(DecisionSnapshotRecord.decision_at)
+                )
+            ).all()
+        )
+
+        action_counts: Counter[str] = Counter()
+        settled_maps: set[UUID] = set()
+        briers: list[float] = []
+        losses: list[float] = []
+        clvs: list[float] = []
+        market_briers: list[float] = []
+        market_losses: list[float] = []
+        comparable_ai_briers: list[float] = []
+        comparable_ai_losses: list[float] = []
+        for decision_record, snapshot, series, result, evaluation in decision_rows:
+            try:
+                decision = AiDecision.model_validate(decision_record.normalized_response)
+            except Exception:
+                continue
+            action_counts[decision.action] += 1
+            if (
+                result is None
+                or result.provider_conflict
+                or result.winner_team_id is None
+                or snapshot.canonical_map_id is None
+            ):
+                continue
+            settled_maps.add(snapshot.canonical_map_id)
+            if evaluation is not None:
+                if evaluation.brier_score is not None:
+                    briers.append(float(evaluation.brier_score))
+                if evaluation.log_loss is not None:
+                    losses.append(float(evaluation.log_loss))
+                if evaluation.clv is not None:
+                    clvs.append(float(evaluation.clv))
+            team_a_won = result.winner_team_id == series.team_a_id
+            market_probability = _market_probability_a(
+                snapshot.canonical_payload,
+                team_a_id=series.team_a_id,
+                team_b_id=series.team_b_id,
+            )
+            market_brier = brier_score(market_probability, team_a_won)
+            market_loss = log_loss(market_probability, team_a_won)
+            if (
+                evaluation is not None
+                and evaluation.brier_score is not None
+                and evaluation.log_loss is not None
+                and market_brier is not None
+                and market_loss is not None
+            ):
+                comparable_ai_briers.append(float(evaluation.brier_score))
+                comparable_ai_losses.append(float(evaluation.log_loss))
+                market_briers.append(float(market_brier))
+                market_losses.append(float(market_loss))
+
+        avg_brier = _average(briers)
+        avg_loss = _average(losses)
+        avg_clv = _average(clvs)
+        ai_brier_comparable = _average(comparable_ai_briers)
+        ai_loss_comparable = _average(comparable_ai_losses)
+        market_brier = _average(market_briers)
+        market_loss = _average(market_losses)
+        brier_improvement = _difference(market_brier, ai_brier_comparable)
+        log_loss_improvement = _difference(market_loss, ai_loss_comparable)
+
+        risk_adjusted_return = None
+        if portfolio_row["max_drawdown_pct"] and portfolio_row["max_drawdown_pct"] > 0:
+            risk_adjusted_return = portfolio_row["roi"] / portfolio_row["max_drawdown_pct"]
+
+        metrics = {
+            "settled_maps": len(settled_maps),
+            "successful_decisions": len(decision_rows),
+            "action_counts": dict(sorted(action_counts.items())),
+            "prediction_sample_count": len(briers),
+            "average_brier_score": avg_brier,
+            "average_log_loss": avg_loss,
+            "average_clv": avg_clv,
+            "clv_sample_count": len(clvs),
+            "market_comparison": {
+                "sample_count": len(market_briers),
+                "market_average_brier_score": market_brier,
+                "ai_average_brier_score": ai_brier_comparable,
+                "brier_improvement_vs_market": brier_improvement,
+                "market_average_log_loss": market_loss,
+                "ai_average_log_loss": ai_loss_comparable,
+                "log_loss_improvement_vs_market": log_loss_improvement,
+            },
+            "average_stake_pct_of_available_cash": _average(stake_ratios),
+            "largest_stake_pct_of_available_cash": max(stake_ratios, default=None),
+            "longest_losing_streak": losing_streak,
+            "risk_adjusted_return_over_max_drawdown": risk_adjusted_return,
+        }
+        gate = self._gate(portfolio_row, metrics)
+        curve = await self._equity_curve(session, account_id=account_id)
+        return {
+            "experiment": identity,
+            "portfolio": portfolio_row,
+            "quality": metrics,
+            "gate": gate,
+            "equity_curve": curve,
+        }
+
+    def _gate(
+        self,
+        portfolio: dict[str, Any],
+        quality: dict[str, Any],
+    ) -> dict[str, Any]:
+        sample_failures = []
+        if quality["settled_maps"] < self._policy.min_settled_maps:
+            sample_failures.append("MIN_SETTLED_MAPS")
+        if portfolio["bet_count"] < self._policy.min_settled_bets:
+            sample_failures.append("MIN_SETTLED_BETS")
+        if quality["prediction_sample_count"] < self._policy.min_prediction_samples:
+            sample_failures.append("MIN_PREDICTION_SAMPLES")
+        if sample_failures:
+            return {
+                "mode": QUALITY_GATE_MODE,
+                "status": "INSUFFICIENT_SAMPLE",
+                "failures": sample_failures,
+            }
+
+        failures = []
+        if portfolio["roi"] is None or portfolio["roi"] < self._policy.min_roi:
+            failures.append("ROI")
+        if (
+            quality["average_clv"] is None
+            or quality["average_clv"] < self._policy.min_average_clv
+        ):
+            failures.append("CLV")
+        brier_improvement = quality["market_comparison"]["brier_improvement_vs_market"]
+        if (
+            brier_improvement is None
+            or brier_improvement < self._policy.min_brier_improvement_vs_market
+        ):
+            failures.append("BRIER_VS_MARKET")
+        if portfolio["max_drawdown_pct"] > self._policy.max_drawdown_pct:
+            failures.append("MAX_DRAWDOWN")
+        if portfolio["status"] == "BANKRUPT":
+            failures.append("BANKRUPTCY")
+        return {
+            "mode": QUALITY_GATE_MODE,
+            "status": "PASS" if not failures else "FAIL",
+            "failures": failures,
+        }
+
+    async def _equity_curve(
+        self,
+        session: AsyncSession,
+        *,
+        account_id: UUID,
+    ) -> list[dict[str, Any]]:
+        entries = list(
+            (
+                await session.scalars(
+                    select(TournamentPortfolioLedgerRecord)
+                    .where(
+                        TournamentPortfolioLedgerRecord.portfolio_account_id
+                        == account_id
+                    )
+                    .order_by(
+                        TournamentPortfolioLedgerRecord.occurred_at,
+                        TournamentPortfolioLedgerRecord.id,
+                    )
+                )
+            ).all()
+        )
+        return [
+            {
+                "occurred_at": entry.occurred_at,
+                "entry_type": entry.entry_type,
+                "equity": float(entry.equity_after),
+                "cash": float(entry.cash_after),
+                "locked": float(entry.locked_after),
+                "realized_pnl_delta": float(entry.realized_pnl_delta),
+            }
+            for entry in entries
+            if entry.entry_type != "BET_PLACED"
+        ]
+
+
+def _market_probability_a(
+    payload: dict[str, Any],
+    *,
+    team_a_id: UUID,
+    team_b_id: UUID,
+) -> float | None:
+    market = payload.get("market")
+    if not isinstance(market, dict):
+        return None
+    observations = market.get("observations")
+    if not isinstance(observations, list):
+        return None
+    odds_a = None
+    odds_b = None
+    fallback: list[float] = []
+    for item in observations:
+        if not isinstance(item, dict):
+            continue
+        try:
+            price = float(item.get("price"))
+        except (TypeError, ValueError):
+            continue
+        if price <= 1:
+            continue
+        fallback.append(price)
+        selection = item.get("selection_team_id")
+        if selection is not None and str(selection) == str(team_a_id):
+            odds_a = price
+        elif selection is not None and str(selection) == str(team_b_id):
+            odds_b = price
+    if odds_a is None or odds_b is None:
+        if len(fallback) < 2:
+            return None
+        odds_a, odds_b = fallback[0], fallback[1]
+    implied_a = 1.0 / odds_a
+    implied_b = 1.0 / odds_b
+    total = implied_a + implied_b
+    return implied_a / total if total > 0 else None
+
+
+def _longest_losing_streak(
+    positions: list[TournamentPortfolioPositionRecord],
+) -> int:
+    longest = 0
+    current = 0
+    for position in positions:
+        if position.status == "LOST":
+            current += 1
+            longest = max(longest, current)
+        else:
+            current = 0
+    return longest
+
+
+def _average(values: list[float]) -> float | None:
+    return sum(values) / len(values) if values else None
+
+
+def _difference(left: float | None, right: float | None) -> float | None:
+    if left is None or right is None:
+        return None
+    return left - right
