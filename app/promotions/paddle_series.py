@@ -4,12 +4,13 @@ import hashlib
 import json
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from uuid import UUID
+from uuid import UUID, uuid4
 
 import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.auth.models import UserAccountRecord
 from app.billing.models import BillingCheckoutRecord, BillingSubscriptionRecord
 from app.billing.paddle import (
     PADDLE_PROVIDER,
@@ -111,11 +112,13 @@ class PaddleSeriesPassService:
             canonical_series_id=canonical_series_id,
         ):
             raise SeriesPassCheckoutConflict("this account already has AI access to the series")
-        if await self._has_recent_pending_purchase(user_id, canonical_series_id):
-            raise SeriesPassCheckoutConflict(
-                "a recent checkout for this series is still pending; complete or abandon it first"
-            )
 
+        # Reserve a durable intent before any external Paddle call. Reservation
+        # locks the user row on PostgreSQL, so two app processes cannot both
+        # create a paid transaction for the same account/series after racing the
+        # pending check. The intent transaction_ref is replaced only after
+        # Paddle returns the real txn_* identifier.
+        intent_id = await self._reserve_purchase_intent(user_id, canonical_series_id)
         customer_ref = await self._known_customer_ref(user_id)
         api = PaddleApiClient(
             api_key=self._api_key,
@@ -126,18 +129,21 @@ class PaddleSeriesPassService:
         try:
             if customer_ref is None:
                 customer_ref = await api.create_customer(email=email, user_id=user_id)
+                await self._remember_intent_customer(intent_id, customer_ref)
             checkout = await api.create_checkout(
                 user_id=user_id,
                 customer_ref=customer_ref,
                 offer=self._offer,
                 checkout_url=self._checkout_url,
             )
-            await self._record_purchase(
-                user_id=user_id,
-                canonical_series_id=canonical_series_id,
+            await self._finalize_purchase_intent(
+                intent_id=intent_id,
                 checkout=checkout,
             )
             return checkout
+        except Exception:
+            await self._mark_intent_failed(intent_id)
+            raise
         finally:
             await api.close()
 
@@ -157,7 +163,7 @@ class PaddleSeriesPassService:
         )
         try:
             payload = json.loads(raw_body)
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        except UnicodeDecodeError, json.JSONDecodeError as exc:
             raise PaddleWebhookError("Paddle webhook body is not valid JSON") from exc
         if not isinstance(payload, dict):
             raise PaddleWebhookError("Paddle webhook body must be a JSON object")
@@ -314,34 +320,19 @@ class PaddleSeriesPassService:
                 revoked=revoked,
             )
 
-    async def _record_purchase(
-        self,
-        *,
-        user_id: UUID,
-        canonical_series_id: UUID,
-        checkout: PaddleCheckout,
-    ) -> None:
+    async def _reserve_purchase_intent(self, user_id: UUID, series_id: UUID) -> UUID:
+        threshold = datetime.now(UTC) - timedelta(hours=1)
         now = datetime.now(UTC)
         async with self._session_factory() as session, session.begin():
-            session.add(
-                SeriesPassPurchaseRecord(
-                    user_id=user_id,
-                    provider=PADDLE_PROVIDER,
-                    transaction_ref=checkout.transaction_ref,
-                    customer_ref=checkout.customer_ref,
-                    canonical_series_id=canonical_series_id,
-                    price_ref=self._price_id,
-                    status="PENDING",
-                    payment_blocked=False,
-                    created_at=now,
-                    updated_at=now,
-                )
+            account = await session.scalar(
+                select(UserAccountRecord)
+                .where(UserAccountRecord.id == user_id)
+                .limit(1)
+                .with_for_update()
             )
-
-    async def _has_recent_pending_purchase(self, user_id: UUID, series_id: UUID) -> bool:
-        threshold = datetime.now(UTC) - timedelta(hours=1)
-        async with self._session_factory() as session:
-            row = await session.scalar(
+            if account is None or account.disabled_at is not None:
+                raise SeriesPassCheckoutConflict("active account required")
+            pending = await session.scalar(
                 select(SeriesPassPurchaseRecord.id)
                 .where(
                     SeriesPassPurchaseRecord.user_id == user_id,
@@ -352,7 +343,64 @@ class PaddleSeriesPassService:
                 )
                 .limit(1)
             )
-        return row is not None
+            if pending is not None:
+                raise SeriesPassCheckoutConflict(
+                    "a recent checkout for this series is still pending; complete or abandon it first"
+                )
+            intent = SeriesPassPurchaseRecord(
+                user_id=user_id,
+                provider=PADDLE_PROVIDER,
+                transaction_ref=f"intent:{uuid4().hex}",
+                customer_ref=None,
+                canonical_series_id=series_id,
+                price_ref=self._price_id,
+                status="PENDING",
+                payment_blocked=False,
+                created_at=now,
+                updated_at=now,
+            )
+            session.add(intent)
+            await session.flush()
+            return intent.id
+
+    async def _remember_intent_customer(self, intent_id: UUID, customer_ref: str) -> None:
+        async with self._session_factory() as session, session.begin():
+            intent = await session.get(SeriesPassPurchaseRecord, intent_id, with_for_update=True)
+            if intent is not None and intent.status == "PENDING":
+                intent.customer_ref = customer_ref
+                intent.updated_at = datetime.now(UTC)
+
+    async def _finalize_purchase_intent(
+        self,
+        *,
+        intent_id: UUID,
+        checkout: PaddleCheckout,
+    ) -> None:
+        async with self._session_factory() as session, session.begin():
+            intent = await session.get(SeriesPassPurchaseRecord, intent_id, with_for_update=True)
+            if intent is None or intent.status != "PENDING":
+                raise RuntimeError("series pass checkout intent is no longer pending")
+            collision = await session.scalar(
+                select(SeriesPassPurchaseRecord.id)
+                .where(
+                    SeriesPassPurchaseRecord.provider == PADDLE_PROVIDER,
+                    SeriesPassPurchaseRecord.transaction_ref == checkout.transaction_ref,
+                    SeriesPassPurchaseRecord.id != intent.id,
+                )
+                .limit(1)
+            )
+            if collision is not None:
+                raise RuntimeError("Paddle series transaction id collided with another checkout")
+            intent.transaction_ref = checkout.transaction_ref
+            intent.customer_ref = checkout.customer_ref
+            intent.updated_at = datetime.now(UTC)
+
+    async def _mark_intent_failed(self, intent_id: UUID) -> None:
+        async with self._session_factory() as session, session.begin():
+            intent = await session.get(SeriesPassPurchaseRecord, intent_id, with_for_update=True)
+            if intent is not None and intent.status == "PENDING":
+                intent.status = "FAILED"
+                intent.updated_at = datetime.now(UTC)
 
     async def _known_customer_ref(self, user_id: UUID) -> str | None:
         async with self._session_factory() as session:
@@ -412,7 +460,10 @@ def _validate_completed_transaction(
     custom = data.get("custom_data")
     if not isinstance(custom, dict):
         raise PaddleWebhookError("series pass transaction is missing checkout metadata")
-    if custom.get("dota_user_id") != str(purchase.user_id) or custom.get("dota_offer") != "series_pass":
+    if (
+        custom.get("dota_user_id") != str(purchase.user_id)
+        or custom.get("dota_offer") != "series_pass"
+    ):
         raise PaddleWebhookError("series pass checkout metadata does not match server mapping")
 
 
