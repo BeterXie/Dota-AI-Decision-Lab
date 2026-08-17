@@ -13,7 +13,7 @@ The current HTTP policy is:
 - `PUBLIC`: `/health`, `/ready`, `/api/auth/*`, `/api/runtime`, `/api/matches`, ordinary `/api/maps/{id}` and other ordinary match-data APIs.
 - `AUTHENTICATED`: `/metrics`, `/api/jobs/summary`, and future `/api/account/*` routes.
 - `ENTITLED(ai_decisions)`: `/api/maps/{id}/ai-decisions`, `/api/snapshots/*`, and `/api/review/*`.
-- `ENTITLED(realtime_notifications)`: the Notification Center APIs under `/api/notifications/*`.
+- Notification Center endpoints under `/api/notifications/*` perform their own authenticated-user and `realtime_notifications` entitlement check before reading or mutating user settings.
 
 `/ws/status` remains public because it carries ordinary live-refresh events used by the public match experience. Any future private WebSocket path must require authentication and, where appropriate, an explicit entitlement.
 
