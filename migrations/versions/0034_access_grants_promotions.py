@@ -69,15 +69,9 @@ def upgrade() -> None:
         sa.Column("revoked_at", sa.DateTime(timezone=True)),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(
-            ["inviter_user_id"], ["user_accounts.id"], ondelete="CASCADE"
-        ),
-        sa.ForeignKeyConstraint(
-            ["invited_user_id"], ["user_accounts.id"], ondelete="CASCADE"
-        ),
-        sa.ForeignKeyConstraint(
-            ["referral_code_id"], ["referral_codes.id"], ondelete="RESTRICT"
-        ),
+        sa.ForeignKeyConstraint(["inviter_user_id"], ["user_accounts.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["invited_user_id"], ["user_accounts.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(["referral_code_id"], ["referral_codes.id"], ondelete="RESTRICT"),
         sa.UniqueConstraint("invited_user_id", name="uq_referral_attributions_invited_user"),
         sa.UniqueConstraint(
             "qualified_provider",
@@ -149,9 +143,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["canonical_series_id"], ["canonical_series.id"], ondelete="CASCADE"
         ),
-        sa.UniqueConstraint(
-            "provider", "event_ref", name="uq_series_pass_events_provider_ref"
-        ),
+        sa.UniqueConstraint("provider", "event_ref", name="uq_series_pass_events_provider_ref"),
     )
     op.create_index(
         "ix_series_pass_events_transaction",

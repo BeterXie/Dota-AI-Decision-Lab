@@ -51,10 +51,7 @@ async def test_series_grant_is_resource_scoped_without_becoming_global_pro() -> 
         )
 
         assert await service.active_entitlements(user_id, now=now) == ()
-        assert (
-            await service.has_entitlement(user_id, AI_DECISIONS_ENTITLEMENT, now=now)
-            is False
-        )
+        assert await service.has_entitlement(user_id, AI_DECISIONS_ENTITLEMENT, now=now) is False
         assert (
             await service.has_resource_entitlement(
                 user_id,
