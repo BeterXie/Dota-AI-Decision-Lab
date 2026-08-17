@@ -1,0 +1,23 @@
+E501 Line too long (120 > 100)
+   --> app/notifications/secure_center.py:263:101
+    |
+261 |             ):
+262 |                 delivery.status = "CANCELLED"
+263 |                 delivery.last_error = "binding, preference, account, or scoped realtime entitlement is no longer active"
+    |                                                                                                     ^^^^^^^^^^^^^^^^^^^^
+264 |                 return None
+265 |             delivery.status = "SENDING"
+    |
+
+E501 Line too long (102 > 100)
+   --> app/promotions/paddle_series.py:347:101
+    |
+345 |             if pending is not None:
+346 |                 raise SeriesPassCheckoutConflict(
+347 |                     "a recent checkout for this series is still pending; complete or abandon it first"
+    |                                                                                                     ^^
+348 |                 )
+349 |             intent = SeriesPassPurchaseRecord(
+    |
+
+Found 2 errors.
