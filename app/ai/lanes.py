@@ -17,7 +17,7 @@ class _LaneState:
 
 
 class AiExperimentLaneRegistry:
-    """Process-local ordering for one match/provider/model decision stream.
+    """Process-local ordering for one account-scope/provider/model decision stream.
 
     The production runtime is a single supervised process with a concurrent AI
     worker pool.  Different providers and different matches remain concurrent,
@@ -67,9 +67,10 @@ def ai_experiment_lane_key(
     *,
     provider: str,
     model: str,
+    account_scope: str | None = None,
 ) -> str:
     identity = snapshot.identity if isinstance(snapshot.identity, dict) else {}
-    match_scope = (
+    match_scope = account_scope or (
         identity.get("map_id")
         or identity.get("canonical_map_id")
         or identity.get("valve_match_id")

@@ -29,8 +29,12 @@ class EvaluationService:
         )
         if result is None or result.provider_conflict or result.winner_team_id is None:
             return 0
-        team_a_id = snapshot.canonical_payload.get("identity", {}).get("team_a", {}).get("id")
-        if not isinstance(team_a_id, str):
+        identity = snapshot.canonical_payload.get("identity", {})
+        team_a_id = identity.get("team_a", {}).get("id") if isinstance(identity, dict) else None
+        team_b_id = identity.get("team_b", {}).get("id") if isinstance(identity, dict) else None
+        if not isinstance(team_a_id, str) or not isinstance(team_b_id, str):
+            return 0
+        if str(result.winner_team_id) not in {team_a_id, team_b_id}:
             return 0
         team_a_won = str(result.winner_team_id) == team_a_id
         decisions = list(
@@ -244,16 +248,27 @@ def _future_direction(
 def _initial_prices(
     snapshot: DecisionSnapshotRecord,
 ) -> tuple[float | None, float | None]:
+    identity = snapshot.canonical_payload.get("identity", {})
+    if not isinstance(identity, dict):
+        return None, None
+    team_a_id = (identity.get("team_a") or {}).get("id")
+    team_b_id = (identity.get("team_b") or {}).get("id")
+    if team_a_id is None or team_b_id is None:
+        return None, None
     observations = snapshot.canonical_payload.get("market", {}).get("observations", [])
-    prices = [
-        float(item["price"])
-        for item in observations
-        if isinstance(item, dict) and item.get("price") is not None
-    ]
-    return (
-        prices[0] if len(prices) > 0 else None,
-        prices[1] if len(prices) > 1 else None,
-    )
+    prices: dict[str, float] = {}
+    for item in observations:
+        if not isinstance(item, dict) or item.get("price") is None:
+            continue
+        selection = item.get("selection_team_id")
+        if selection is None:
+            continue
+        try:
+            price = float(item["price"])
+        except TypeError, ValueError:
+            continue
+        prices[str(selection)] = price
+    return prices.get(str(team_a_id)), prices.get(str(team_b_id))
 
 
 def _same_market(

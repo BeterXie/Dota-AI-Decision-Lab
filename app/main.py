@@ -30,7 +30,12 @@ from app.draft.coordinator import DltvBootstrapCoordinator
 from app.draft.refresh import schedule_incomplete_draft_refreshes
 from app.draft.role_assignment import DraftRoleAssignmentService
 from app.draft.rosh_service import RoshService
-from app.evaluation import EvaluationService, FutureOddsService, SettlementService
+from app.evaluation import (
+    EvaluationService,
+    FutureOddsService,
+    SettlementService,
+    TournamentPortfolioService,
+)
 from app.events.dispatcher import DomainEventDispatcher, OutboxDispatcher
 from app.events.hub import EventHub
 from app.events.outbox import EventRepository
@@ -198,12 +203,14 @@ async def run() -> None:
         repository=snapshots,
     )
     ai_providers = _ai_providers(settings)
+    portfolio = TournamentPortfolioService(initial_bankroll=settings.ai_virtual_bankroll)
     ai = AiCoordinator(
         ai_providers,
         timeout_seconds=settings.ai_timeout_seconds,
         max_live_data_lag_seconds=settings.ai_max_live_data_lag_seconds,
         virtual_bankroll=settings.ai_virtual_bankroll,
         prior_decisions_limit=settings.ai_prior_decisions_limit,
+        portfolio=portfolio,
     )
     email_notifications = _email_notifications(
         settings,
@@ -307,6 +314,7 @@ async def run() -> None:
             future_odds=future_odds,
             settlement=SettlementService(),
             evaluation=EvaluationService(),
+            portfolio=portfolio,
             dltv_result=dltv_result,
             wechat_clawbot=wechat_clawbot,
             qq_bot=qq_bot,

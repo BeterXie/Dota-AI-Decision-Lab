@@ -30,35 +30,56 @@ async def test_future_odds_capture_uses_first_observation_after_due_time() -> No
     due_at = decision_at + timedelta(seconds=30)
 
     async with factory() as session, session.begin():
+        team_a = CanonicalTeam(name="Future A")
+        team_b = CanonicalTeam(name="Future B")
+        session.add_all([team_a, team_b])
+        await session.flush()
+        series = CanonicalSeries(team_a_id=team_a.id, team_b_id=team_b.id)
+        session.add(series)
+        await session.flush()
         snapshot = await SnapshotRepository().persist(
             session,
             canonical_map_id=None,
             decision_at=decision_at,
             mode="PREMATCH",
-            identity={},
+            identity={
+                "series_id": str(series.id),
+                "map_id": None,
+                "team_a": {"id": str(team_a.id)},
+                "team_b": {"id": str(team_b.id)},
+            },
             market={
+                "provider_match_id": 1,
+                "market_type": "match_winner",
+                "match_stage": "Map 1",
                 "observations": [
-                    {"odds_id": 10, "price": "2.00"},
-                    {"odds_id": 20, "price": "2.00"},
-                ]
+                    {"odds_id": 10, "selection_team_id": str(team_a.id), "price": "2.00"},
+                    {"odds_id": 20, "selection_team_id": str(team_b.id), "price": "2.00"},
+                ],
             },
             draft=None,
             history={},
             live=None,
             quality={"eligible": True},
         )
-        for odds_id, price, seconds in (
-            (10, "1.90", 31),
-            (20, "2.10", 32),
-            (10, "1.70", 50),
-            (20, "2.30", 50),
+        for odds_id, price, seconds, team_id in (
+            (10, "1.90", 31, team_a.id),
+            (20, "2.10", 32, team_b.id),
+            (10, "1.70", 50, team_a.id),
+            (20, "2.30", 50, team_b.id),
         ):
             session.add(
                 OddsObservationRecord(
                     provider_match_id=1,
                     odds_id=odds_id,
+                    canonical_series_id=series.id,
+                    market_type="match_winner",
+                    match_stage="Map 1",
+                    selection_team_id=team_id,
                     price=Decimal(price),
                     implied_probability=1 / float(price),
+                    normalized_status="OPEN_CONFIRMED",
+                    metadata_version="registry-v1",
                     received_at=decision_at + timedelta(seconds=seconds),
                     raw_event_id=uuid4(),
                 )
@@ -74,6 +95,7 @@ async def test_future_odds_capture_uses_first_observation_after_due_time() -> No
         assert captured.status == "CAPTURED"
         assert captured.odds_a == Decimal("1.90")
         assert captured.odds_b == Decimal("2.10")
+        assert captured.pair_quality["eligible"] is True
 
     await engine.dispose()
 
@@ -302,13 +324,33 @@ async def test_missing_future_odds_can_upgrade_to_captured() -> None:
     due_at = decision_at + timedelta(seconds=30)
     service = FutureOddsService(JobRepository())
     async with factory() as session, session.begin():
+        team_a = CanonicalTeam(name="Upgrade A")
+        team_b = CanonicalTeam(name="Upgrade B")
+        session.add_all([team_a, team_b])
+        await session.flush()
+        series = CanonicalSeries(team_a_id=team_a.id, team_b_id=team_b.id)
+        session.add(series)
+        await session.flush()
         snapshot = await SnapshotRepository().persist(
             session,
             canonical_map_id=None,
             decision_at=decision_at,
             mode="PREMATCH",
-            identity={},
-            market={"observations": [{"odds_id": 10}, {"odds_id": 20}]},
+            identity={
+                "series_id": str(series.id),
+                "map_id": None,
+                "team_a": {"id": str(team_a.id)},
+                "team_b": {"id": str(team_b.id)},
+            },
+            market={
+                "provider_match_id": 1,
+                "market_type": "match_winner",
+                "match_stage": "Map 1",
+                "observations": [
+                    {"odds_id": 10, "selection_team_id": str(team_a.id)},
+                    {"odds_id": 20, "selection_team_id": str(team_b.id)},
+                ],
+            },
             draft=None,
             history={},
             live=None,
@@ -323,13 +365,22 @@ async def test_missing_future_odds_can_upgrade_to_captured() -> None:
         )
         assert missing.status == "MISSING"
         missing_id = missing.id
-        for odds_id, price in ((10, "1.90"), (20, "2.10")):
+        for odds_id, price, team_id in (
+            (10, "1.90", team_a.id),
+            (20, "2.10", team_b.id),
+        ):
             session.add(
                 OddsObservationRecord(
                     provider_match_id=1,
                     odds_id=odds_id,
+                    canonical_series_id=series.id,
+                    market_type="match_winner",
+                    match_stage="Map 1",
+                    selection_team_id=team_id,
                     price=Decimal(price),
                     implied_probability=1 / float(price),
+                    normalized_status="OPEN_CONFIRMED",
+                    metadata_version="registry-v1",
                     received_at=due_at + timedelta(seconds=2),
                     raw_event_id=uuid4(),
                 )
@@ -345,4 +396,5 @@ async def test_missing_future_odds_can_upgrade_to_captured() -> None:
         assert captured.status == "CAPTURED"
         assert captured.odds_a == Decimal("1.90")
         assert captured.odds_b == Decimal("2.10")
+        assert captured.pair_quality["eligible"] is True
     await engine.dispose()

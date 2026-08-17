@@ -462,3 +462,54 @@ async def test_bankroll_accounting_uses_all_history_while_context_window_is_limi
     assert third_input["prior_decisions"][0]["bankroll_before"] == 9_600.0
     assert third_records[0].bankroll_before == 9_000.0
     await engine.dispose()
+
+
+def test_portfolio_prior_rejected_buy_does_not_fake_committed_cash() -> None:
+    from decimal import Decimal
+
+    from app.ai.coordinator import _PriorDecision
+    from app.evaluation.portfolio import (
+        PortfolioContext,
+        TournamentPortfolioService,
+    )
+
+    coordinator = AiCoordinator(
+        [],
+        timeout_seconds=1,
+        portfolio=TournamentPortfolioService(initial_bankroll=10_000),
+    )
+    prior = _PriorDecision(
+        decision_at=datetime(2026, 8, 17, 12, 0, tzinfo=UTC),
+        mode="LIVE_BASIC",
+        decision=AiDecision(
+            action="BUY_A",
+            fair_probability_a=0.6,
+            confidence=0.7,
+            market_assessment="UNDERPRICED",
+            minimum_acceptable_odds_a=1.7,
+            stake=4000,
+            primary_reasons=["fixture"],
+            blockers=[],
+        ),
+        bankroll_before=10_000.0,
+        execution_status="REJECTED",
+        rejection_reason="INSUFFICIENT_CASH",
+        execution_cash_before=3_000.0,
+    )
+    context = PortfolioContext(
+        account_id=uuid4(),
+        canonical_event_id=uuid4(),
+        initial_bankroll=Decimal("10000.00"),
+        cash_balance=Decimal("3000.00"),
+        locked_balance=Decimal("7000.00"),
+        realized_pnl=Decimal("0.00"),
+        peak_equity=Decimal("10000.00"),
+        max_drawdown=Decimal("0.00"),
+        max_drawdown_pct=0.0,
+    )
+    payload = coordinator._bankroll_context([prior], portfolio_context=context)
+    item = payload["prior_decisions"][0]
+    assert item["execution_status"] == "REJECTED"
+    assert item["rejection_reason"] == "INSUFFICIENT_CASH"
+    assert item["cash_before_execution"] == 3000.0
+    assert item["bankroll_after_commit"] == 3000.0

@@ -77,9 +77,9 @@ class Settings(BaseSettings):
     # Delayed DLTV broadcast data beyond this lag is excluded from the AI input
     # (the decision then uses only freeze-time consistent information).
     ai_max_live_data_lag_seconds: float = 120.0
-    # Each provider/model owns an independent virtual shadow bankroll per match.
-    # Models choose a virtual stake within the available bankroll; no real money
-    # and no automatic execution exist in V1.
+    # Each provider/model experiment owns one independent virtual shadow bankroll
+    # per canonical event. Settled map P&L carries into later maps and concurrent
+    # open positions share the same available cash. No real-money execution exists.
     ai_virtual_bankroll: float = Field(default=10_000.0, gt=0)
     # Number of recent prior rounds exposed in the prompt context. Every
     # canonical prior round still counts toward the virtual bankroll.
