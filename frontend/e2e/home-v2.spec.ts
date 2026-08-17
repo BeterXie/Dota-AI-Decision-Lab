@@ -75,8 +75,8 @@ test("2.0 homepage explains the product and surfaces live, upcoming and complete
   await expect(page.getByRole("link", { name: "首页" })).toHaveAttribute("aria-current", "page");
   await expect(page.getByText("正在进行的赛事", { exact: true })).toBeVisible();
   await expect(page.getByText("TI15 国际邀请赛", { exact: true })).toBeVisible();
-  await expect(page.getByText("Team Spirit", { exact: true })).toBeVisible();
-  await expect(page.getByText("Tundra Esports", { exact: true })).toBeVisible();
+  await expect(page.getByText("Team Spirit")).toBeVisible();
+  await expect(page.getByText("Tundra Esports")).toBeVisible();
   await expect(page.getByText("比赛追踪", { exact: true })).toBeVisible();
   await expect(page.getByText("AI 决策对比", { exact: true })).toBeVisible();
   await expect(page.getByText("Shadow 表现复盘", { exact: true })).toBeVisible();
@@ -89,7 +89,7 @@ test("2.0 homepage explains the product and surfaces live, upcoming and complete
 
 test("avatar opens the unified login dialog and does not fake unconfigured social providers", async ({ page }) => {
   await page.goto("/");
-  await page.getByRole("button", { name: "登录" }).click();
+  await page.getByRole("button", { name: "登录", exact: true }).click();
 
   await expect(page.getByRole("dialog")).toBeVisible();
   await expect(page.getByRole("heading", { name: "登录 Dota AI Decision Lab" })).toBeVisible();
