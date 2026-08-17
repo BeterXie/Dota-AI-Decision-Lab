@@ -33,11 +33,20 @@ def local_development_auth_from_environment() -> LocalDevelopmentAuth:
             f"{LOCAL_AUTH_ENABLED_ENV} must be one of 1/true/yes/on or 0/false/no/off"
         )
 
+    # A stale local-development email/path must never affect the normal Resend
+    # runtime when the explicit development switch is off.
+    if not enabled:
+        return LocalDevelopmentAuth(
+            enabled=False,
+            pro_email=_DEFAULT_PRO_EMAIL,
+            code_path=_DEFAULT_CODE_PATH,
+        )
+
     raw_email = os.environ.get(LOCAL_AUTH_EMAIL_ENV, _DEFAULT_PRO_EMAIL)
     pro_email = normalize_email(raw_email)
     raw_code_path = os.environ.get(LOCAL_AUTH_CODE_PATH_ENV, "").strip()
     code_path = Path(raw_code_path) if raw_code_path else _DEFAULT_CODE_PATH
-    return LocalDevelopmentAuth(enabled=enabled, pro_email=pro_email, code_path=code_path)
+    return LocalDevelopmentAuth(enabled=True, pro_email=pro_email, code_path=code_path)
 
 
 class LocalLoginCodeSender:
