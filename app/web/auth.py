@@ -1,5 +1,6 @@
 import json
 from datetime import UTC, datetime
+from urllib.parse import urlsplit
 
 from fastapi import APIRouter, FastAPI, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
@@ -19,6 +20,8 @@ from app.entitlements import (
     REALTIME_NOTIFICATIONS_ENTITLEMENT,
     EntitlementService,
 )
+
+_LOOPBACK_ORIGIN_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
 class RequestLoginCodePayload(BaseModel):
@@ -53,11 +56,15 @@ class AuthGuardMiddleware:
         if scope_type == "http":
             access, required_entitlement = _http_access_requirement(path)
             if not self._enabled:
-                if access == "ENTITLED":
+                if access != "PUBLIC":
                     await _json_error(
                         send,
                         status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
-                        detail="premium access requires email authentication to be enabled",
+                        detail=(
+                            "premium access requires email authentication to be enabled"
+                            if access == "ENTITLED"
+                            else "authentication is disabled for this protected endpoint"
+                        ),
                         required_entitlement=required_entitlement,
                     )
                     return
@@ -93,7 +100,25 @@ class AuthGuardMiddleware:
                 )
                 return
 
-        elif scope_type == "websocket" and self._enabled and path != "/ws/status":
+        elif scope_type == "websocket":
+            if not _websocket_origin_allowed(_scope_origin(scope)):
+                await send(
+                    {
+                        "type": "websocket.close",
+                        "code": 4403,
+                        "reason": "websocket origin is not allowed",
+                    }
+                )
+                return
+            if not self._enabled:
+                await send(
+                    {
+                        "type": "websocket.close",
+                        "code": 4403,
+                        "reason": "authentication is disabled",
+                    }
+                )
+                return
             user = await self._authenticated_scope_user(scope)
             if user is None:
                 await send(
@@ -276,6 +301,25 @@ def _is_public_map_path(path: str) -> bool:
         and segments[:2] == ["api", "maps"]
         and segments[3] == "draft-hero-recent"
     )
+
+
+def _scope_origin(scope: Scope) -> str | None:
+    for name, value in scope.get("headers", []):
+        if name.lower() == b"origin":
+            return value.decode("latin-1")
+    return None
+
+
+def _websocket_origin_allowed(origin: str | None) -> bool:
+    # Non-browser clients do not necessarily send Origin; authentication still
+    # applies to them, so absence is not an origin-policy bypass.
+    if origin is None:
+        return True
+    try:
+        parsed = urlsplit(origin)
+    except ValueError:
+        return False
+    return parsed.scheme in {"http", "https"} and parsed.hostname in _LOOPBACK_ORIGIN_HOSTS
 
 
 async def _json_error(
