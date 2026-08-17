@@ -175,6 +175,7 @@ async def test_auth_api_keeps_matches_public_and_requires_entitlement_for_ai(tmp
                 "user": None,
                 "entitlements": [],
                 "grants": [],
+                "providers": {"email": True, "google": False, "steam": False},
             }
 
             requested = await client.post(
@@ -317,6 +318,7 @@ async def test_auth_disabled_preserves_public_access_but_closes_protected_apis(t
                 "user": None,
                 "entitlements": [],
                 "grants": [],
+                "providers": {"email": False, "google": False, "steam": False},
             }
             assert (await client.get("/api/matches")).status_code == 200
             assert (await client.get("/metrics")).status_code == 503
