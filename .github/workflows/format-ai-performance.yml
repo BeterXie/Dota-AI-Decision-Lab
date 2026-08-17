@@ -1,0 +1,31 @@
+name: Format AI Performance
+
+on:
+  push:
+    branches:
+      - feature/ai-performance-dashboard
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: feature/ai-performance-dashboard
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+      - run: uv sync --frozen --extra dev
+      - run: uv run ruff format app/web/performance.py app/web/premium.py tests/test_ai_performance_dashboard.py
+      - name: Commit formatter output
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app/web/performance.py app/web/premium.py tests/test_ai_performance_dashboard.py
+          git commit -m "style: apply ruff formatting"
+          git push origin HEAD:feature/ai-performance-dashboard
