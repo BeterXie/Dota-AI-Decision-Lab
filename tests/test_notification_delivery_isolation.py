@@ -85,7 +85,9 @@ async def test_qq_failed_recipient_does_not_block_later_recipient(monkeypatch) -
     )
     service._notification_center = center
     monkeypatch.setattr(service, "_decision_notification_block_reason", _allow_notification)
-    monkeypatch.setattr(qq_user_service, "render_decision_notification", lambda *args, **kwargs: "BUY")
+    monkeypatch.setattr(
+        qq_user_service, "render_decision_notification", lambda *args, **kwargs: "BUY"
+    )
     snapshot = SimpleNamespace(snapshot_id=uuid4(), decision_at=datetime.now(UTC))
     decisions = [SimpleNamespace(id=uuid4())]
 
