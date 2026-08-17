@@ -53,6 +53,22 @@
   cursor: default;
 }
 
+.auth-account-error {
+  position: absolute;
+  right: 8px;
+  bottom: calc(100% + 7px);
+  width: max-content;
+  max-width: 220px;
+  padding: 7px 10px;
+  border: 1px solid color-mix(in srgb, var(--dire) 45%, transparent);
+  border-radius: 8px;
+  background: var(--surface-2);
+  color: var(--dire);
+  font-size: 11px;
+  line-height: 1.35;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.28);
+}
+
 .topbar-subscription-btn,
 .topbar-account-btn,
 .topbar-logout-btn {
