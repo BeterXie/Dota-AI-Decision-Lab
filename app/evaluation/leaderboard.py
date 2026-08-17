@@ -27,8 +27,7 @@ class TournamentLeaderboardService:
                     select(TournamentPortfolioAccountRecord, CanonicalEvent)
                     .join(
                         CanonicalEvent,
-                        CanonicalEvent.id
-                        == TournamentPortfolioAccountRecord.canonical_event_id,
+                        CanonicalEvent.id == TournamentPortfolioAccountRecord.canonical_event_id,
                     )
                     .order_by(
                         TournamentPortfolioAccountRecord.provider,
@@ -61,15 +60,14 @@ class TournamentLeaderboardService:
         for position in positions:
             positions_by_account[position.portfolio_account_id].append(position)
 
-        grouped: dict[ExperimentKey, list[tuple[TournamentPortfolioAccountRecord, CanonicalEvent]]] = (
-            defaultdict(list)
-        )
+        grouped: dict[
+            ExperimentKey, list[tuple[TournamentPortfolioAccountRecord, CanonicalEvent]]
+        ] = defaultdict(list)
         for account, event in account_rows:
             grouped[_experiment_key(account)].append((account, event))
 
         experiments = [
-            _aggregate_experiment(rows, positions_by_account)
-            for rows in grouped.values()
+            _aggregate_experiment(rows, positions_by_account) for rows in grouped.values()
         ]
         experiments.sort(
             key=lambda row: (
@@ -104,9 +102,7 @@ def _aggregate_experiment(
     bankrupt_events = sum(account.status == "BANKRUPT" for account, _ in rows)
 
     all_positions = [
-        position
-        for account, _ in rows
-        for position in positions_by_account.get(account.id, ())
+        position for account, _ in rows for position in positions_by_account.get(account.id, ())
     ]
     settled = [position for position in all_positions if position.status in {"WON", "LOST"}]
     wins = [position for position in settled if position.status == "WON"]
@@ -116,9 +112,7 @@ def _aggregate_experiment(
         (Decimal(position.realized_pnl or 0) for position in wins),
         _ZERO,
     )
-    gross_loss = abs(
-        sum((Decimal(position.realized_pnl or 0) for position in losses), _ZERO)
-    )
+    gross_loss = abs(sum((Decimal(position.realized_pnl or 0) for position in losses), _ZERO))
 
     event_breakdown = []
     for account, event in sorted(
