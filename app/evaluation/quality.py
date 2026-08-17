@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.decision import AiDecision
+from app.evaluation.latency import LatencyExecutionService
 from app.evaluation.metrics import brier_score, log_loss
 from app.evaluation.portfolio import TournamentPortfolioService
 from app.evaluation.portfolio_models import (
@@ -51,6 +52,7 @@ class TournamentQualityService:
     ) -> None:
         self._portfolio = portfolio or TournamentPortfolioService()
         self._policy = policy or QualityGatePolicy()
+        self._latency = LatencyExecutionService()
 
     async def build_report(
         self,
@@ -306,10 +308,15 @@ class TournamentQualityService:
         }
         gate = self._gate(portfolio_row, metrics)
         curve = await self._equity_curve(session, account_id=account_id)
+        execution_latency = await self._latency.build_experiment_report(
+            session,
+            account_id=account_id,
+        )
         return {
             "experiment": identity,
             "portfolio": portfolio_row,
             "quality": metrics,
+            "execution_latency": execution_latency,
             "gate": gate,
             "equity_curve": curve,
         }

@@ -1,5 +1,6 @@
 from app.evaluation.backtest import BacktestService
 from app.evaluation.future_odds import FutureOddsCaptureType, FutureOddsService
+from app.evaluation.latency import LatencyExecutionService
 from app.evaluation.metrics import EvaluationService
 from app.evaluation.portfolio import PortfolioContext, PortfolioScope, TournamentPortfolioService
 from app.evaluation.quality import QualityGatePolicy, TournamentQualityService
@@ -10,6 +11,7 @@ __all__ = [
     "EvaluationService",
     "FutureOddsCaptureType",
     "FutureOddsService",
+    "LatencyExecutionService",
     "PortfolioContext",
     "PortfolioScope",
     "QualityGatePolicy",

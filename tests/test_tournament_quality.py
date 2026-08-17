@@ -16,6 +16,7 @@ from app.models import (
     CanonicalSeries,
     CanonicalTeam,
     DecisionEvaluationRecord,
+    DecisionFutureOdds,
     DecisionSnapshotRecord,
 )
 
@@ -132,6 +133,25 @@ async def test_quality_report_combines_portfolio_calibration_and_market_baseline
             )
             assert evaluation is not None
             evaluation.clv = 0.02
+            session.add(
+                DecisionFutureOdds(
+                    decision_snapshot_id=snapshot.id,
+                    capture_type="TIME_HORIZON",
+                    horizon_seconds=30,
+                    triggered_at=snapshot.decision_at,
+                    due_at=snapshot.decision_at + timedelta(seconds=30),
+                    observed_at=decision.response_received_at + timedelta(seconds=30),
+                    odds_a=Decimal("1.80"),
+                    odds_b=Decimal("2.20"),
+                    market_type="match_winner",
+                    match_stage=f"Map {index}",
+                    market_status="READY",
+                    capture_policy_version="quality-test-v1",
+                    pair_quality={"eligible": True},
+                    pair_skew_seconds=0.0,
+                    status="CAPTURED",
+                )
+            )
             if index == 1:
                 extra_snapshot = DecisionSnapshotRecord(
                     id=uuid4(),
@@ -176,6 +196,14 @@ async def test_quality_report_combines_portfolio_calibration_and_market_baseline
             "status": "PASS",
             "failures": [],
         }
+        latency = experiment["execution_latency"]
+        assert latency["position_policy"] == "FIRST_SETTLED_POSITION_PER_MAP"
+        horizon = latency["horizons"]["30"]
+        assert horizon["sample_count"] == 2
+        assert horizon["actionable_rate"] == 1.0
+        assert horizon["average_model_edge_vs_break_even"] == pytest.approx(0.60 - (1.0 / 1.80))
+        assert horizon["average_odds_slippage_pct"] == pytest.approx((1.80 / 1.90) - 1.0)
+        assert horizon["average_observed_after_ai_seconds"] == pytest.approx(30.0)
         assert experiment["equity_curve"][0]["entry_type"] == "EVENT_FUNDED"
         assert experiment["equity_curve"][-1]["equity"] == 11800.0
 
