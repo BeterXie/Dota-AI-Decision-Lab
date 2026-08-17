@@ -279,6 +279,12 @@ def _require_service(service: EmailAuthService | None, enabled: bool) -> EmailAu
 
 
 def _http_access_requirement(path: str) -> tuple[str, str | None]:
+    # Catalog discovery and provider callbacks do not carry a browser session.
+    # The Paddle callback is authenticated cryptographically inside its route.
+    if path == "/api/billing/offers" or path == "/api/billing/webhooks/paddle":
+        return "PUBLIC", None
+    if path == "/api/billing" or path.startswith("/api/billing/"):
+        return "AUTHENTICATED", None
     if path == "/api/notifications" or path.startswith("/api/notifications/"):
         return "ENTITLED", REALTIME_NOTIFICATIONS_ENTITLEMENT
     if (
