@@ -40,8 +40,7 @@ def main() -> None:
             ".",
         ],
         check=True,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
+        capture_output=True,
     )
     findings = _scan_patch_stream(result.stdout)
     if findings:
