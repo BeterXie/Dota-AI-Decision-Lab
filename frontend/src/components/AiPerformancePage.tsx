@@ -43,14 +43,12 @@ export function AiPerformancePage() {
   }, [leaderboard.data?.experiments, search]);
 
   const selectedExperiment = useMemo(() => {
-    const rows = leaderboard.data?.experiments ?? [];
-    if (rows.length === 0) return null;
+    if (filtered.length === 0) return null;
     return (
-      rows.find((row) => identityKey(row.experiment) === selectedExperimentKey) ??
-      filtered[0] ??
-      rows[0]
+      filtered.find((row) => identityKey(row.experiment) === selectedExperimentKey) ??
+      filtered[0]
     );
-  }, [leaderboard.data?.experiments, filtered, selectedExperimentKey]);
+  }, [filtered, selectedExperimentKey]);
 
   useEffect(() => {
     if (!selectedExperiment) return;
@@ -131,16 +129,16 @@ export function AiPerformancePage() {
       <main className="performance-main">
         <section className="performance-intro">
           <div>
-            <span className="performance-kicker">SAME STARTING BANKROLL · REAL SETTLEMENT</span>
+            <span className="performance-kicker">SAME STARTING BANKROLL · SHADOW SETTLEMENT</span>
             <h2>
               {locale === "zh-CN"
-                ? "同样的赛事本金，谁真正把钱赚到了？"
-                : "Same tournament bankroll. Who actually grew it?"}
+                ? "同样的赛事模拟本金，谁的 Shadow 组合表现更好？"
+                : "Same shadow bankroll. Which AI portfolio performed best?"}
             </h2>
             <p>
               {locale === "zh-CN"
-                ? "每个 AI experiment 在每个赛事独立获得固定启动资金，所有 Map 共用同一资金池。这里优先看真实 shadow PnL 与风险，再下钻到预测质量、赔率延迟和逐笔仓位。"
-                : "Each AI experiment receives one fixed bankroll per event and shares it across every map. Start with realized shadow P&L and risk, then drill into prediction quality, market latency, and every position."}
+                ? "每个 AI experiment 在每个赛事独立获得固定 Shadow 启动资金，所有 Map 共用同一资金池。这里展示的是按已记录赔率进行模拟结算后的 Shadow PnL，不代表真实账户下注、真实资金收益或博彩公司实际成交。先看收益与风险，再下钻到预测质量、赔率变化和逐笔仓位。"
+                : "Each AI experiment receives a fixed shadow bankroll per event and shares it across every map. Shadow P&L is simulated from recorded odds; it is not a live account return, real-money betting result, or bookmaker execution confirmation. Start with return and risk, then drill into prediction quality, odds movement, and every position."}
             </p>
           </div>
           <span className="performance-shadow-badge">SHADOW ONLY</span>
@@ -151,7 +149,7 @@ export function AiPerformancePage() {
         ) : leaderboard.error ? (
           <StateBlock error text={locale === "zh-CN" ? "AI 排行榜加载失败。" : "Failed to load AI leaderboard."} onRetry={() => void leaderboard.refetch()} />
         ) : filtered.length === 0 ? (
-          <StateBlock text={locale === "zh-CN" ? "暂无可展示的 AI 赛事账户。" : "No AI event portfolios yet."} />
+          <StateBlock text={locale === "zh-CN" ? "没有匹配的 AI experiment。" : "No matching AI experiments."} />
         ) : (
           <>
             <section className="performance-overview-grid">
@@ -159,7 +157,7 @@ export function AiPerformancePage() {
                 <div className="performance-section-heading">
                   <div>
                     <span className="performance-kicker">LONG-RUN LEADERBOARD</span>
-                    <h3>{locale === "zh-CN" ? "长期盈利排行" : "Long-run leaderboard"}</h3>
+                    <h3>{locale === "zh-CN" ? "跨赛事 Shadow 排行" : "Cross-event shadow leaderboard"}</h3>
                   </div>
                   <input
                     aria-label={locale === "zh-CN" ? "搜索 AI" : "Search AI"}
@@ -167,6 +165,17 @@ export function AiPerformancePage() {
                     onChange={(event) => setSearch(event.target.value)}
                     placeholder={locale === "zh-CN" ? "搜索模型 / Provider" : "Search model / provider"}
                   />
+                </div>
+                <p className="performance-ranking-note">
+                  {rankingLabel(leaderboard.data?.ranking, locale)}
+                </p>
+                <div className="performance-leader-header" aria-hidden="true">
+                  <span>{locale === "zh-CN" ? "排名" : "Rank"}</span>
+                  <span>{locale === "zh-CN" ? "模型" : "Model"}</span>
+                  <span className="performance-col-roi">ROI</span>
+                  <span className="performance-col-pnl">Shadow PnL</span>
+                  <span className="performance-col-dd">{locale === "zh-CN" ? "最差回撤" : "Worst DD"}</span>
+                  <span className="performance-col-events">{locale === "zh-CN" ? "赛事" : "Events"}</span>
                 </div>
                 <div className="performance-leaderboard" role="list">
                   {filtered.map((row) => (
@@ -196,12 +205,12 @@ export function AiPerformancePage() {
                     <PnlBadge value={selectedExperiment.realized_pnl} locale={locale} />
                   </div>
                   <div className="performance-summary-metrics">
-                    <Metric label={locale === "zh-CN" ? "累计本金" : "Starting capital"} value={money(selectedExperiment.total_initial_bankroll, locale)} />
-                    <Metric label={locale === "zh-CN" ? "当前权益" : "Equity"} value={money(selectedExperiment.equity, locale)} />
+                    <Metric label={locale === "zh-CN" ? "累计 Shadow 本金" : "Total shadow capital"} value={money(selectedExperiment.total_initial_bankroll, locale)} />
+                    <Metric label={locale === "zh-CN" ? "当前 Shadow 权益" : "Shadow equity"} value={money(selectedExperiment.equity, locale)} />
                     <Metric label="ROI" value={rate(selectedExperiment.realized_roi, locale)} tone={tone(selectedExperiment.realized_roi)} />
-                    <Metric label={locale === "zh-CN" ? "最差回撤" : "Worst drawdown"} value={rate(-selectedExperiment.worst_event_drawdown_pct, locale)} tone="negative" />
+                    <Metric label={locale === "zh-CN" ? "最差赛事回撤" : "Worst event drawdown"} value={rate(-selectedExperiment.worst_event_drawdown_pct, locale)} tone="negative" />
                     <Metric label={locale === "zh-CN" ? "盈利赛事" : "Profitable events"} value={`${selectedExperiment.profitable_events}/${selectedExperiment.event_count}`} sub={rate(selectedExperiment.profitable_event_rate, locale)} />
-                    <Metric label={locale === "zh-CN" ? "投注 / 命中" : "Bets / hit rate"} value={`${selectedExperiment.bet_count}`} sub={rate(selectedExperiment.hit_rate, locale)} />
+                    <Metric label={locale === "zh-CN" ? "已结算投注 / 命中率" : "Settled bets / hit rate"} value={`${selectedExperiment.bet_count}`} sub={rate(selectedExperiment.hit_rate, locale)} />
                   </div>
                   <div className="performance-version-line">
                     <span>{selectedExperiment.experiment.prompt_version}</span>
@@ -217,7 +226,7 @@ export function AiPerformancePage() {
                 <div className="performance-section-heading">
                   <div>
                     <span className="performance-kicker">EVENT BREAKDOWN</span>
-                    <h3>{locale === "zh-CN" ? "按赛事追踪资金" : "Trace performance by event"}</h3>
+                    <h3>{locale === "zh-CN" ? "按赛事追踪 Shadow 资金" : "Trace shadow performance by event"}</h3>
                   </div>
                   <span>{locale === "zh-CN" ? "点击赛事查看资金曲线、质量与逐笔仓位" : "Select an event for equity, quality and position audit"}</span>
                 </div>
@@ -280,10 +289,10 @@ function LeaderboardRow({
         <strong>{providerLabel(row.experiment.provider)}</strong>
         <small>{row.experiment.model}</small>
       </span>
-      <span className={`performance-table-number ${tone(row.realized_pnl)}`}>{signedMoney(row.realized_pnl, locale)}</span>
-      <span className={`performance-table-number ${tone(row.realized_roi)}`}>{rate(row.realized_roi, locale)}</span>
-      <span className="performance-table-number negative">{rate(-row.worst_event_drawdown_pct, locale)}</span>
-      <span className="performance-table-number">{row.event_count}</span>
+      <span className={`performance-table-number performance-col-roi ${tone(row.realized_roi)}`}>{rate(row.realized_roi, locale)}</span>
+      <span className={`performance-table-number performance-col-pnl ${tone(row.realized_pnl)}`}>{signedMoney(row.realized_pnl, locale)}</span>
+      <span className="performance-table-number performance-col-dd negative">{rate(-row.worst_event_drawdown_pct, locale)}</span>
+      <span className="performance-table-number performance-col-events">{row.event_count}</span>
     </button>
   );
 }
@@ -303,8 +312,8 @@ function EventButton({
     <button className={`performance-event-btn ${active ? "active" : ""}`} type="button" onClick={onSelect}>
       <span className="performance-event-name">{event.event_name || shortId(event.canonical_event_id)}</span>
       <span>{formatDateRange(event.started_at, event.ended_at, locale)}</span>
-      <strong className={tone(event.realized_pnl)}>{signedMoney(event.realized_pnl, locale)}</strong>
-      <span className={tone(event.realized_roi)}>{rate(event.realized_roi, locale)}</span>
+      <strong className={tone(event.realized_pnl)}>Shadow PnL {signedMoney(event.realized_pnl, locale)}</strong>
+      <span className={tone(event.realized_roi)}>ROI {rate(event.realized_roi, locale)}</span>
       <small>{locale === "zh-CN" ? "最大回撤" : "Max DD"} {rate(-event.max_drawdown_pct, locale)}</small>
     </button>
   );
@@ -357,12 +366,12 @@ function EventDetail({
       </div>
 
       <div className="performance-detail-metrics">
-        <Metric label={locale === "zh-CN" ? "启动资金" : "Start"} value={money(portfolio.initial_bankroll, locale)} />
-        <Metric label={locale === "zh-CN" ? "当前权益" : "Equity"} value={money(portfolio.equity, locale)} />
-        <Metric label={locale === "zh-CN" ? "已实现盈亏" : "Realized PnL"} value={signedMoney(portfolio.realized_pnl, locale)} tone={tone(portfolio.realized_pnl)} />
+        <Metric label={locale === "zh-CN" ? "Shadow 启动资金" : "Shadow start"} value={money(portfolio.initial_bankroll, locale)} />
+        <Metric label={locale === "zh-CN" ? "当前 Shadow 权益" : "Shadow equity"} value={money(portfolio.equity, locale)} />
+        <Metric label={locale === "zh-CN" ? "已实现 Shadow PnL" : "Realized shadow PnL"} value={signedMoney(portfolio.realized_pnl, locale)} tone={tone(portfolio.realized_pnl)} />
         <Metric label="ROI" value={rate(portfolio.roi, locale)} tone={tone(portfolio.roi)} />
         <Metric label={locale === "zh-CN" ? "最大回撤" : "Max drawdown"} value={rate(-portfolio.max_drawdown_pct, locale)} tone="negative" />
-        <Metric label={locale === "zh-CN" ? "Profit Factor" : "Profit factor"} value={decimal(portfolio.profit_factor, 2)} />
+        <Metric label={locale === "zh-CN" ? "盈亏比" : "Profit factor"} value={decimal(portfolio.profit_factor, 2)} />
       </div>
 
       <div className="performance-two-column">
@@ -370,7 +379,7 @@ function EventDetail({
           <div className="performance-panel-heading">
             <div>
               <span className="performance-kicker">EQUITY CURVE</span>
-              <h4>{locale === "zh-CN" ? "赛事资金曲线" : "Tournament equity"}</h4>
+              <h4>{locale === "zh-CN" ? "赛事 Shadow 资金曲线" : "Event shadow equity"}</h4>
             </div>
             <span>{portfolio.wins}W · {portfolio.losses}L · {portfolio.rejected_bet_count} rejected</span>
           </div>
@@ -412,44 +421,50 @@ function EventDetail({
         <section className="performance-panel compact">
           <span className="performance-kicker">PREDICTION QUALITY</span>
           <h4>{locale === "zh-CN" ? "预测质量" : "Prediction quality"}</h4>
-          <MetricLine label="Brier" value={decimal(quality.average_brier_score, 3)} />
+          <MetricLine label="AI Brier" value={decimal(quality.market_comparison.ai_average_brier_score ?? quality.average_brier_score, 3)} />
+          <MetricLine label={locale === "zh-CN" ? "市场 Brier" : "Market Brier"} value={decimal(quality.market_comparison.market_average_brier_score, 3)} />
+          <MetricLine label={locale === "zh-CN" ? "Brier 改善 vs 市场" : "Brier improvement vs market"} value={signedDecimal(quality.market_comparison.brier_improvement_vs_market, 3)} tone={tone(quality.market_comparison.brier_improvement_vs_market)} />
           <MetricLine label="Log Loss" value={decimal(quality.average_log_loss, 3)} />
           <MetricLine label="CLV" value={rate(quality.average_clv, locale)} tone={tone(quality.average_clv)} />
-          <MetricLine label={locale === "zh-CN" ? "Brier vs 市场" : "Brier vs market"} value={decimal(quality.market_comparison.brier_improvement_vs_market, 3)} tone={tone(quality.market_comparison.brier_improvement_vs_market)} />
-          <MetricLine label={locale === "zh-CN" ? "平均仓位 / 现金" : "Avg stake / cash"} value={rate(quality.average_stake_pct_of_available_cash, locale)} />
+          <MetricLine label={locale === "zh-CN" ? "平均仓位 / 可用现金" : "Avg stake / available cash"} value={rate(quality.average_stake_pct_of_available_cash, locale)} />
           <MetricLine label={locale === "zh-CN" ? "最长连败" : "Longest losing streak"} value={`${quality.longest_losing_streak}`} />
+          <p className="performance-method-note">
+            {locale === "zh-CN"
+              ? "Brier 越低越好；“改善 vs 市场” = 市场 Brier − AI Brier，正数表示 AI 更好。"
+              : "Lower Brier is better. Improvement vs market = market Brier − AI Brier, so positive values favor the AI."}
+          </p>
         </section>
 
         <section className="performance-panel compact performance-latency-panel">
-          <span className="performance-kicker">ACTIONABLE AFTER RESPONSE</span>
-          <h4>{locale === "zh-CN" ? "AI 给答案后，edge 还在吗？" : "Does the edge survive after the AI answers?"}</h4>
+          <span className="performance-kicker">EDGE AFTER AI RESPONSE</span>
+          <h4>{locale === "zh-CN" ? "AI 给出答案后，纸面优势还剩多少？" : "How much paper edge remains after the AI responds?"}</h4>
           <div className="performance-latency-grid">
             {Object.entries(experiment.execution_latency.horizons).map(([horizon, row]) => (
               <div key={horizon} className="performance-latency-cell">
                 <strong>T+{horizon}s</strong>
-                <span>{locale === "zh-CN" ? "可执行率" : "Actionable"} {rate(row.actionable_rate, locale)}</span>
+                <span>{locale === "zh-CN" ? "纸面 Edge 保留率" : "Paper edge retained"} {rate(row.actionable_rate, locale)}</span>
                 <span>{locale === "zh-CN" ? "赔率变化" : "Odds move"} {rate(row.average_odds_slippage_pct, locale)}</span>
                 <small>n={row.sample_count}</small>
               </div>
             ))}
             {Object.keys(experiment.execution_latency.horizons).length === 0 && (
-              <div className="performance-empty-inline">{locale === "zh-CN" ? "暂无 response 后赔率样本。" : "No post-response market samples yet."}</div>
+              <div className="performance-empty-inline">{locale === "zh-CN" ? "暂无 AI 响应后的赔率样本。" : "No post-response market samples yet."}</div>
             )}
           </div>
           <p className="performance-method-note">
             {locale === "zh-CN"
-              ? "纸面市场观测，不代表博彩公司实际接受了订单。AI response 之前的赔率不会进入 actionable rate。"
-              : "Paper market observation, not bookmaker execution confirmation. Captures before the AI response are excluded."}
+              ? "只衡量 AI 响应后的市场赔率观测中，仍满足模型 edge 条件的比例；不是实际下单成功率，也不代表博彩公司接受了订单。AI 响应前的赔率不计入。"
+              : "Measures the share of post-response market observations where the model edge still qualifies. It is not an order fill rate or bookmaker execution confirmation; pre-response odds are excluded."}
           </p>
         </section>
 
         <section className="performance-panel compact">
           <span className="performance-kicker">RISK / ACTIVITY</span>
           <h4>{locale === "zh-CN" ? "风险与交易行为" : "Risk and activity"}</h4>
-          <MetricLine label={locale === "zh-CN" ? "投注次数" : "Settled bets"} value={`${portfolio.bet_count}`} />
+          <MetricLine label={locale === "zh-CN" ? "已结算投注" : "Settled bets"} value={`${portfolio.bet_count}`} />
           <MetricLine label={locale === "zh-CN" ? "命中率" : "Hit rate"} value={rate(portfolio.hit_rate, locale)} />
           <MetricLine label={locale === "zh-CN" ? "总投注额" : "Turnover"} value={money(portfolio.turnover, locale)} />
-          <MetricLine label={locale === "zh-CN" ? "最大单笔 / 现金" : "Largest stake / cash"} value={rate(quality.largest_stake_pct_of_available_cash, locale)} />
+          <MetricLine label={locale === "zh-CN" ? "最大单笔 / 可用现金" : "Largest stake / available cash"} value={rate(quality.largest_stake_pct_of_available_cash, locale)} />
           <MetricLine label={locale === "zh-CN" ? "锁定资金" : "Locked capital"} value={money(portfolio.locked_balance, locale)} />
           <MetricLine label={locale === "zh-CN" ? "账户状态" : "Account status"} value={portfolio.status} />
         </section>
@@ -459,7 +474,7 @@ function EventDetail({
         <div className="performance-panel-heading">
           <div>
             <span className="performance-kicker">POSITION AUDIT</span>
-            <h4>{locale === "zh-CN" ? "逐笔追溯：这些钱是怎么赚 / 亏的" : "Position audit: where the P&L came from"}</h4>
+            <h4>{locale === "zh-CN" ? "逐笔追溯：Shadow PnL 是怎么产生的" : "Position audit: where the shadow P&L came from"}</h4>
           </div>
           <span>{positions.length} positions</span>
         </div>
@@ -501,17 +516,17 @@ function PositionRow({
   return (
     <div className={`performance-position ${expanded ? "expanded" : ""}`}>
       <button type="button" className="performance-position-main" onClick={onToggle} aria-expanded={expanded}>
-        <span><b>MAP {position.map_number ?? "?"}</b><small>{formatDateTime(position.opened_at, locale)}</small></span>
-        <span><b>{position.selected_team?.name ?? position.action.replace("_", " ")}</b><small>{position.action.replace("_", " ")} · {locale === "zh-CN" ? "AI 操作" : "AI action"}</small></span>
-        <span><b>{money(position.stake, locale)}</b><small>@ {position.odds?.toFixed(3) ?? "—"}</small></span>
+        <span className="performance-position-map"><b>MAP {position.map_number ?? "?"}</b><small>{formatDateTime(position.opened_at, locale)}</small></span>
+        <span className="performance-position-choice"><b>{position.selected_team?.name ?? position.action.replace("_", " ")}</b><small>{position.action.replace("_", " ")} · {locale === "zh-CN" ? "AI 操作" : "AI action"}</small></span>
+        <span className="performance-position-stake"><b>{money(position.stake, locale)}</b><small>@ {position.odds?.toFixed(3) ?? "—"}</small></span>
         <span className={`position-status status-${position.status.toLowerCase()}`}>{position.status}</span>
-        <span className={tone(position.realized_pnl)}><b>{position.realized_pnl == null ? "—" : signedMoney(position.realized_pnl, locale)}</b><small>{locale === "zh-CN" ? "已实现 PnL" : "Realized PnL"}</small></span>
-        <span className="performance-chevron">{expanded ? "−" : "+"}</span>
+        <span className={`performance-position-pnl ${tone(position.realized_pnl)}`}><b>{position.realized_pnl == null ? "—" : signedMoney(position.realized_pnl, locale)}</b><small>Shadow PnL</small></span>
+        <span className="performance-position-action">{locale === "zh-CN" ? (expanded ? "收起" : "详情") : (expanded ? "Less" : "Details")} <b>{expanded ? "−" : "›"}</b></span>
       </button>
       {expanded && (
         <div className="performance-position-detail">
-          <DetailDatum label={locale === "zh-CN" ? "成交前现金" : "Cash before"} value={money(position.cash_before, locale)} />
-          <DetailDatum label={locale === "zh-CN" ? "返还" : "Payout"} value={position.payout == null ? "—" : money(position.payout, locale)} />
+          <DetailDatum label={locale === "zh-CN" ? "模拟成交前现金" : "Shadow cash before"} value={money(position.cash_before, locale)} />
+          <DetailDatum label={locale === "zh-CN" ? "模拟返还" : "Shadow payout"} value={position.payout == null ? "—" : money(position.payout, locale)} />
           <DetailDatum label={locale === "zh-CN" ? "拒绝原因" : "Rejection"} value={position.rejection_reason ?? "—"} />
           <DetailDatum label={locale === "zh-CN" ? "结算时间" : "Settled"} value={position.settled_at ? formatDateTime(position.settled_at, locale) : "—"} />
           <DetailDatum label="Map ID" value={shortId(position.canonical_map_id)} title={position.canonical_map_id} />
@@ -538,7 +553,7 @@ function GateBadge({ status, mode }: { status: string; mode: string }) {
 }
 
 function PnlBadge({ value, locale }: { value: number; locale: string }) {
-  return <div className={`performance-pnl-badge ${tone(value)}`}><span>{locale === "zh-CN" ? "累计 PnL" : "Total PnL"}</span><strong>{signedMoney(value, locale)}</strong></div>;
+  return <div className={`performance-pnl-badge ${tone(value)}`}><span>{locale === "zh-CN" ? "累计 Shadow PnL" : "Total shadow PnL"}</span><strong>{signedMoney(value, locale)}</strong></div>;
 }
 
 function Metric({ label, value, sub, tone: toneClass }: { label: string; value: string; sub?: string; tone?: string }) {
@@ -565,6 +580,15 @@ function sameIdentity(left: AiExperimentIdentity, right: AiExperimentIdentity): 
   return identityKey(left) === identityKey(right);
 }
 
+function rankingLabel(ranking: string | undefined, locale: string): string {
+  if (ranking === "REALIZED_ROI_THEN_PNL") {
+    return locale === "zh-CN"
+      ? "排序规则：已实现 ROI 从高到低；ROI 相同时，再按累计 Shadow PnL 从高到低。"
+      : "Ranking: realized ROI descending; ties are broken by total shadow P&L descending.";
+  }
+  return locale === "zh-CN" ? "排序规则由服务端排行榜定义。" : "Ranking follows the server leaderboard policy.";
+}
+
 function equityChartOption(experiment: AiEventQualityExperiment, locale: string): object {
   const points = experiment.equity_curve;
   return {
@@ -589,7 +613,7 @@ function equityChartOption(experiment: AiEventQualityExperiment, locale: string)
     },
     series: [
       {
-        name: locale === "zh-CN" ? "权益" : "Equity",
+        name: locale === "zh-CN" ? "Shadow 权益" : "Shadow equity",
         type: "line",
         smooth: 0.22,
         showSymbol: points.length <= 18,
@@ -644,6 +668,11 @@ function rate(value: number | null, locale: string): string {
 
 function decimal(value: number | null, digits: number): string {
   return value == null ? "—" : value.toFixed(digits);
+}
+
+function signedDecimal(value: number | null, digits: number): string {
+  if (value == null) return "—";
+  return `${value > 0 ? "+" : value < 0 ? "−" : ""}${Math.abs(value).toFixed(digits)}`;
 }
 
 function tone(value: number | null): string {
