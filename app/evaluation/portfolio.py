@@ -241,7 +241,7 @@ class TournamentPortfolioService:
             odds=odds,
             status=status,
             rejection_reason=rejection_reason,
-            opened_at=record.request_started_at,
+            opened_at=decision_available_at,
         )
         session.add(position)
         await session.flush()
@@ -260,7 +260,7 @@ class TournamentPortfolioService:
             locked_delta=stake,
             realized_pnl_delta=_ZERO,
             dedupe_key=f"place:{record.id}",
-            occurred_at=record.request_started_at,
+            occurred_at=decision_available_at,
         )
         if result is not None:
             await self.settle_map(

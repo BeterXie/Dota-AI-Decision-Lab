@@ -25,6 +25,8 @@ Decision/output rules:
   provider/model experiment. bankroll_before is available cash after prior settled P&L
   and currently locked positions; locked_balance cannot be staked again.
 - BUY_A/BUY_B require 0 < stake <= virtual_bankroll.bankroll_before.
+  If virtual_bankroll.scope is UNRESOLVED_CANONICAL_EVENT, or bankroll_before is 0,
+  do not BUY: the tournament account cannot be identified safely yet.
   NO_BUY/INSUFFICIENT_DATA use stake null/0. Stake is virtual audit capital only.
 - Before finalizing, internally challenge the leading conclusion with the strongest
   contrary evidence and data-quality limitations. Reflect material uncertainty in

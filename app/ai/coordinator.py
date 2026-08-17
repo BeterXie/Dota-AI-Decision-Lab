@@ -463,8 +463,37 @@ class AiCoordinator:
         portfolio_context: PortfolioContext | None = None,
     ) -> dict:
         if portfolio_context is None:
+            if self._portfolio is not None:
+                prior_decisions: list[dict] = []
+                for item in prior:
+                    stake = round(float(item.decision.stake or 0.0), 2)
+                    frozen_before = (
+                        item.bankroll_before if item.bankroll_before is not None else 0.0
+                    )
+                    prior_decisions.append(
+                        self._prior_payload(
+                            item,
+                            bankroll_before=frozen_before,
+                            stake=stake,
+                        )
+                    )
+                return {
+                    "scope": "UNRESOLVED_CANONICAL_EVENT",
+                    "canonical_event_id": None,
+                    "initial": 0.0,
+                    "bankroll_before": 0.0,
+                    "cash_balance": 0.0,
+                    "locked_balance": 0.0,
+                    "equity": 0.0,
+                    "realized_pnl": 0.0,
+                    "unsettled_stakes": 0.0,
+                    "units": "virtual-units",
+                    "reason": "EVENT_IDENTITY_UNRESOLVED",
+                    "prior_decisions": prior_decisions[-self._prior_decisions_limit :],
+                }
+
             bankroll_before = self._virtual_bankroll
-            prior_decisions: list[dict] = []
+            prior_decisions = []
             for item in prior:
                 stake = round(float(item.decision.stake or 0.0), 2)
                 prior_decisions.append(

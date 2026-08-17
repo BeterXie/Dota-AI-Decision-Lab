@@ -133,6 +133,28 @@ async def test_quality_report_combines_portfolio_calibration_and_market_baseline
             )
             assert evaluation is not None
             evaluation.clv = 0.02
+            if index == 1:
+                insufficient_snapshot = DecisionSnapshotRecord(
+                    id=uuid4(),
+                    canonical_map_id=canonical_map.id,
+                    decision_at=snapshot.decision_at - timedelta(minutes=1),
+                    created_at=snapshot.decision_at - timedelta(minutes=1),
+                    mode="LIVE_BASIC",
+                    canonical_payload=snapshot.canonical_payload,
+                    snapshot_hash=f"quality-insufficient-{uuid4()}",
+                )
+                session.add(insufficient_snapshot)
+                await session.flush()
+                insufficient = _insufficient_decision(insufficient_snapshot)
+                session.add(insufficient)
+                await session.flush()
+                assert (
+                    await EvaluationService().evaluate_snapshot(
+                        session,
+                        snapshot_id=insufficient_snapshot.id,
+                    )
+                    == 1
+                )
             session.add(
                 DecisionFutureOdds(
                     decision_snapshot_id=snapshot.id,
@@ -183,9 +205,13 @@ async def test_quality_report_combines_portfolio_calibration_and_market_baseline
         assert experiment["portfolio"]["cash_balance"] == 11800.0
         assert experiment["portfolio"]["roi"] == pytest.approx(0.18)
         assert experiment["quality"]["settled_maps"] == 2
-        assert experiment["quality"]["successful_decisions"] == 3
+        assert experiment["quality"]["successful_decisions"] == 4
         assert experiment["quality"]["prediction_sample_count"] == 2
         assert experiment["quality"]["decision_level"]["prediction_sample_count"] == 3
+        assert (
+            experiment["quality"]["sample_policy"]["prediction"]
+            == "FIRST_EVALUABLE_FORECAST_PER_MAP"
+        )
         assert experiment["quality"]["sample_policy"]["portfolio"] == "ALL_EXECUTED_POSITIONS"
         assert experiment["quality"]["average_clv"] == pytest.approx(0.02)
         comparison = experiment["quality"]["market_comparison"]
@@ -273,6 +299,38 @@ def _no_buy_decision(snapshot: DecisionSnapshotRecord) -> AiDecisionRecord:
             "stake": None,
             "primary_reasons": ["repeated checkpoint fixture"],
             "blockers": [],
+        },
+        raw_response={"fixture": True},
+        parse_status="SUCCESS",
+    )
+
+
+def _insufficient_decision(snapshot: DecisionSnapshotRecord) -> AiDecisionRecord:
+    provider, model, prompt, policy, view = EXPERIMENT
+    return AiDecisionRecord(
+        snapshot_id=snapshot.id,
+        snapshot_hash=snapshot.snapshot_hash,
+        provider=provider,
+        model=model,
+        model_version=model,
+        prompt_version=prompt,
+        decision_policy_version=policy,
+        ai_view_version=view,
+        ai_input_hash=f"quality-insufficient-{uuid4()}",
+        bankroll_before=Decimal("10000.00"),
+        stake=None,
+        request_started_at=snapshot.decision_at,
+        response_received_at=snapshot.decision_at + timedelta(seconds=1),
+        latency_seconds=1.0,
+        normalized_response={
+            "action": "INSUFFICIENT_DATA",
+            "fair_probability_a": None,
+            "confidence": 0.2,
+            "market_assessment": "UNKNOWN",
+            "minimum_acceptable_odds_a": None,
+            "stake": None,
+            "primary_reasons": ["not enough evidence yet"],
+            "blockers": ["WAIT_FOR_LIVE_DATA"],
         },
         raw_response={"fixture": True},
         parse_status="SUCCESS",

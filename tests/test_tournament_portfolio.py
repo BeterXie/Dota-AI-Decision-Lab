@@ -187,6 +187,14 @@ async def test_open_positions_share_one_event_cash_pool() -> None:
         await session.flush()
         position1 = await service.record_decision_position(session, first)
         assert position1 is not None and position1.status == "OPEN"
+        assert position1.opened_at == first.response_received_at
+        placed_at = await session.scalar(
+            select(TournamentPortfolioLedgerRecord.occurred_at).where(
+                TournamentPortfolioLedgerRecord.position_id == position1.id,
+                TournamentPortfolioLedgerRecord.entry_type == "BET_PLACED",
+            )
+        )
+        assert placed_at.replace(tzinfo=UTC) == first.response_received_at
 
         second = _decision(snapshot2, action="BUY_B", stake=4000)
         session.add(second)

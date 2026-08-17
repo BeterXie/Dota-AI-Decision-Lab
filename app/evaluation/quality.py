@@ -218,18 +218,20 @@ class TournamentQualityService:
             )
             market_brier = brier_score(market_probability, team_a_won)
             market_loss = log_loss(market_probability, team_a_won)
-            if map_id not in map_forecasts:
+            ai_brier = (
+                float(evaluation.brier_score)
+                if evaluation is not None and evaluation.brier_score is not None
+                else None
+            )
+            ai_log_loss = (
+                float(evaluation.log_loss)
+                if evaluation is not None and evaluation.log_loss is not None
+                else None
+            )
+            if map_id not in map_forecasts and ai_brier is not None and ai_log_loss is not None:
                 map_forecasts[map_id] = {
-                    "ai_brier": (
-                        float(evaluation.brier_score)
-                        if evaluation is not None and evaluation.brier_score is not None
-                        else None
-                    ),
-                    "ai_log_loss": (
-                        float(evaluation.log_loss)
-                        if evaluation is not None and evaluation.log_loss is not None
-                        else None
-                    ),
+                    "ai_brier": ai_brier,
+                    "ai_log_loss": ai_log_loss,
                     "market_brier": float(market_brier) if market_brier is not None else None,
                     "market_log_loss": (float(market_loss) if market_loss is not None else None),
                 }
@@ -271,7 +273,7 @@ class TournamentQualityService:
 
         metrics = {
             "sample_policy": {
-                "prediction": "FIRST_SUCCESSFUL_DECISION_PER_MAP",
+                "prediction": "FIRST_EVALUABLE_FORECAST_PER_MAP",
                 "clv": "FIRST_SETTLED_POSITION_PER_MAP",
                 "portfolio": "ALL_EXECUTED_POSITIONS",
             },
