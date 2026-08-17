@@ -6,7 +6,9 @@ services:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres
     ports:
-      - "${POSTGRES_PORT:-5432}:5432"
+      # The application is intentionally loopback-only; keep the database on the
+      # same trust boundary instead of publishing the development password to LAN.
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
     volumes:
       - dota_lab_postgres18:/var/lib/postgresql
     healthcheck:
