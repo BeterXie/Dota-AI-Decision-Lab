@@ -2,13 +2,17 @@ from app.domain.jobs import JobType
 from app.notifications.center import (
     CHANNEL_QQ,
     NotificationBindingConflict,
-    NotificationCenterService,
     NotificationPairingError,
     qq_destination_key,
 )
+from app.notifications.pairing_limiter import PairingAttemptLimiter
+from app.notifications.secure_center import NotificationCenterService
 from app.providers.chat_commands import render_decision_notification
 from app.providers.qq_bot.models import QQInboundMessage
 from app.providers.qq_bot.service import QQBotService as LegacyQQBotService
+
+_SUBSCRIBE_COMMANDS = {"订阅通知", "订阅决策", "订阅"}
+_UNSUBSCRIBE_COMMANDS = {"退订通知", "退订", "取消订阅"}
 
 
 class UserScopedQQBotService(LegacyQQBotService):
@@ -17,6 +21,7 @@ class UserScopedQQBotService(LegacyQQBotService):
     def __init__(self, *args, session_factory, **kwargs) -> None:
         super().__init__(*args, session_factory=session_factory, **kwargs)
         self._notification_center = NotificationCenterService(session_factory)
+        self._pairing_attempts = PairingAttemptLimiter()
 
     async def prepare_decision_notification(self, session, *, snapshot, decisions) -> None:
         reason = await self._decision_notification_block_reason(session, snapshot)
@@ -68,16 +73,19 @@ class UserScopedQQBotService(LegacyQQBotService):
 
         text = render_decision_notification(snapshot, decisions, channel_label="QQ")
         sent = 0
+        failures: list[Exception] = []
         for delivery_id in delivery_ids:
             target = await self._notification_center.start_delivery(delivery_id)
             if target is None:
                 continue
             scope = target.destination.get("scope")
             target_id = target.destination.get("target_id")
-            if scope not in {"c2c", "group"} or not isinstance(target_id, str) or not target_id:
-                exc = ValueError("QQ notification binding is invalid")
-                await self._notification_center.mark_failed(delivery_id, exc)
-                raise exc
+            if scope != "c2c" or not isinstance(target_id, str) or not target_id:
+                await self._notification_center.mark_expired(
+                    delivery_id,
+                    "QQ paid notifications only support verified C2C bindings",
+                )
+                continue
             try:
                 provider_message_id = await self._client.send_text(
                     scope=scope,
@@ -87,9 +95,16 @@ class UserScopedQQBotService(LegacyQQBotService):
                 )
             except Exception as exc:
                 await self._notification_center.mark_failed(delivery_id, exc)
-                raise
+                failures.append(exc)
+                continue
             await self._notification_center.mark_sent(delivery_id, provider_message_id)
             sent += 1
+        if failures:
+            first = failures[0]
+            raise RuntimeError(
+                f"{len(failures)} QQ notification delivery target(s) failed; "
+                f"first={type(first).__name__}: {first}"
+            ) from first
         return sent
 
     async def _handle_message(self, session, message: QQInboundMessage) -> None:
@@ -98,30 +113,50 @@ class UserScopedQQBotService(LegacyQQBotService):
         normalized = message.text.strip().casefold()
         destination_key = qq_destination_key(message.scope, message.target_id)
         pairing_code = _pairing_code_from_text(message.text)
-        if pairing_code is not None:
-            contact = self._record_contact(message)
-            try:
-                await self._notification_center.consume_pairing_code(
-                    channel=CHANNEL_QQ,
-                    code=pairing_code,
-                    destination_key=destination_key,
-                    destination={"scope": message.scope, "target_id": message.target_id},
-                    label=message.sender_name or contact.label,
-                )
-                reply = "✅ QQ 已绑定到你的 Notification Center，AI 决策实时通知已开启。"
-            except NotificationBindingConflict:
-                reply = "⚠️ 这个 QQ 会话已经绑定到另一个账号。请先在原账号里解除绑定。"
-            except NotificationPairingError:
-                reply = "⚠️ 配对码无效或已过期。请回到 Notification Center 重新生成。"
+        account_command = (
+            pairing_code is not None
+            or normalized in _SUBSCRIBE_COMMANDS
+            or normalized in _UNSUBSCRIBE_COMMANDS
+        )
+        if message.scope != "c2c" and account_command:
             await self._client.send_text(
                 scope=message.scope,
+                target_id=message.target_id,
+                text=(
+                    "⚠️ 为避免群成员代绑或替别人修改订阅，付费账号绑定仅支持 QQ 私聊。"
+                    "请私聊机器人发送「绑定 <配对码>」。"
+                ),
+                msg_id=message.message_id,
+            )
+            return
+
+        if pairing_code is not None:
+            contact = self._record_contact(message)
+            if not self._pairing_attempts.allow(destination_key):
+                reply = "⚠️ 配对尝试过于频繁，请稍后重新生成配对码再试。"
+            else:
+                try:
+                    await self._notification_center.consume_pairing_code(
+                        channel=CHANNEL_QQ,
+                        code=pairing_code,
+                        destination_key=destination_key,
+                        destination={"scope": "c2c", "target_id": message.target_id},
+                        label=message.sender_name or contact.label,
+                    )
+                    reply = "✅ QQ 已绑定到你的 Notification Center，AI 决策实时通知已开启。"
+                except NotificationBindingConflict:
+                    reply = "⚠️ 这个 QQ 私聊已经绑定到另一个账号。请先在原账号里解除绑定。"
+                except NotificationPairingError:
+                    reply = "⚠️ 配对码无效或已过期。请回到 Notification Center 重新生成。"
+            await self._client.send_text(
+                scope="c2c",
                 target_id=message.target_id,
                 text=reply,
                 msg_id=message.message_id,
             )
             return
 
-        if normalized in {"订阅通知", "订阅决策", "订阅"}:
+        if normalized in _SUBSCRIBE_COMMANDS:
             updated = await self._notification_center.set_preference_for_destination(
                 channel=CHANNEL_QQ,
                 destination_key=destination_key,
@@ -130,24 +165,24 @@ class UserScopedQQBotService(LegacyQQBotService):
             reply = (
                 "✅ 已开启 AI 决策 QQ 通知。"
                 if updated
-                else "请先在网页 Notification Center 生成配对码，再发送「绑定 <配对码>」。"
+                else "请先在网页 Notification Center 生成配对码，再私聊发送「绑定 <配对码>」。"
             )
             await self._client.send_text(
-                scope=message.scope,
+                scope="c2c",
                 target_id=message.target_id,
                 text=reply,
                 msg_id=message.message_id,
             )
             return
-        if normalized in {"退订通知", "退订", "取消订阅"}:
+        if normalized in _UNSUBSCRIBE_COMMANDS:
             updated = await self._notification_center.set_preference_for_destination(
                 channel=CHANNEL_QQ,
                 destination_key=destination_key,
                 enabled=False,
             )
-            reply = "✅ 已关闭 AI 决策 QQ 通知。" if updated else "当前 QQ 会话尚未绑定账号。"
+            reply = "✅ 已关闭 AI 决策 QQ 通知。" if updated else "当前 QQ 私聊尚未绑定账号。"
             await self._client.send_text(
-                scope=message.scope,
+                scope="c2c",
                 target_id=message.target_id,
                 text=reply,
                 msg_id=message.message_id,
