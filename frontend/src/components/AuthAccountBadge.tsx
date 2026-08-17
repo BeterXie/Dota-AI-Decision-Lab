@@ -25,6 +25,7 @@ export const AuthAccountBadge: React.FC<AuthAccountBadgeProps> = ({ user, onLogo
     <div className="auth-account-badge" aria-label={t("authCurrentAccount")}>
       <span className="auth-account-dot" aria-hidden="true" />
       <span className="auth-account-email" title={user.email}>{user.email}</span>
+      <a href="/billing">{locale === "zh-CN" ? "Pro" : "Pro"}</a>
       <a href="/notifications">{locale === "zh-CN" ? "通知" : "Notifications"}</a>
       <button type="button" disabled={busy} onClick={() => void handleLogout()}>
         {busy ? "…" : t("authSignOut")}
