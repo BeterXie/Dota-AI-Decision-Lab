@@ -52,6 +52,7 @@ def upgrade() -> None:
         sa.Column("user_id", sa.Uuid(), nullable=False),
         sa.Column("occurred_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("payload_digest", sa.String(64), nullable=False),
+        sa.Column("applied", sa.Boolean(), nullable=False),
         sa.Column("processed_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["user_id"], ["user_accounts.id"], ondelete="CASCADE"),
         sa.UniqueConstraint("provider", "event_ref", name="uq_billing_events_provider_ref"),
