@@ -45,6 +45,8 @@ jobs:
           uv run ruff format app/evaluation tests/test_tournament_quality.py
           uv run ruff check app/evaluation tests/test_tournament_quality.py
           uv run ruff check --select S app/evaluation
+          uv run alembic upgrade head
+          uv run alembic check
           uv run pytest -W error -q \
             tests/test_tournament_quality.py \
             tests/test_tournament_portfolio.py \
