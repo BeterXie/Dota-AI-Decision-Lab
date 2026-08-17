@@ -1,0 +1,74 @@
+name: Temporary PR18 review hardening
+
+on:
+  push:
+    branches:
+      - feat/ai-tournament-portfolio-quality-gate
+
+permissions:
+  contents: write
+
+jobs:
+  harden:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    services:
+      postgres:
+        image: postgres:18-alpine@sha256:d3e1620b530c944afa6e887d22eb899824da68e19c52024bf98f5220c88a65b2
+        env:
+          POSTGRES_DB: dota_ai_decision_lab
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres -d dota_ai_decision_lab"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 12
+    env:
+      DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/dota_ai_decision_lab
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: feat/ai-tournament-portfolio-quality-gate
+          fetch-depth: 1
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+        with:
+          version: "0.12.0"
+          python-version: "3.14"
+      - run: uv sync --frozen --extra dev
+      - name: Apply review fixes
+        run: |
+          uv run python tools/apply_pr18_review_fixes.py
+          uv run python tools/apply_pr18_review_followup.py
+      - name: Format and lint
+        run: |
+          uv run ruff format app tests
+          uv run ruff check app tests
+          uv run ruff check --select S app
+      - name: Migration gate
+        run: |
+          uv run alembic upgrade head
+          uv run alembic check
+      - name: Targeted regressions
+        run: |
+          uv run pytest -W error -q \
+            tests/test_tournament_portfolio.py \
+            tests/test_tournament_portfolio_late_result.py \
+            tests/test_tournament_portfolio_postgres.py \
+            tests/test_tournament_portfolio_unresolved_event.py \
+            tests/test_tournament_quality.py \
+            tests/test_tournament_global_leaderboard.py \
+            tests/test_ai_coordinator.py \
+            tests/test_ai_scheduling.py \
+            tests/test_job_handlers.py \
+            tests/test_production_lifecycle_replay.py
+      - name: Commit verified fixes
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add app tests
+          git diff --cached --quiet && exit 0
+          git commit -m "Harden tournament portfolio review semantics"
+          git push origin HEAD:feat/ai-tournament-portfolio-quality-gate
