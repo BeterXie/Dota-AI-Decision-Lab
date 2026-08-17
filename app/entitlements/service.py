@@ -241,7 +241,9 @@ class EntitlementService:
             raise ValueError("entitlement source is required")
         if starts_at is not None and expires_at is not None and expires_at <= starts_at:
             raise ValueError("entitlement expiry must be after its start")
-        normalized_campaign = campaign_key.strip() if campaign_key and campaign_key.strip() else None
+        normalized_campaign = (
+            campaign_key.strip() if campaign_key and campaign_key.strip() else None
+        )
         now = datetime.now(UTC)
         async with self._session_factory() as session, session.begin():
             row = await session.scalar(
