@@ -51,7 +51,10 @@ async def test_series_grant_is_resource_scoped_without_becoming_global_pro() -> 
         )
 
         assert await service.active_entitlements(user_id, now=now) == ()
-        assert await service.has_entitlement(user_id, AI_DECISIONS_ENTITLEMENT, now=now) is False
+        assert (
+            await service.has_entitlement(user_id, AI_DECISIONS_ENTITLEMENT, now=now)
+            is False
+        )
         assert (
             await service.has_resource_entitlement(
                 user_id,
@@ -128,7 +131,7 @@ async def test_global_grant_covers_every_resource_and_map_grant_only_exact_map()
 
 @pytest.mark.asyncio
 async def test_same_source_cannot_be_moved_to_another_access_scope() -> None:
-    engine, factory, user_id, _, = await _fixture()
+    engine, factory, user_id, _ = await _fixture()
     service = EntitlementService(factory)
     try:
         await service.grant(
