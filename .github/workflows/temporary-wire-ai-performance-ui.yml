@@ -1,0 +1,103 @@
+name: Temporary wire AI performance UI
+
+on:
+  push:
+    branches:
+      - feat/ai-performance-dashboard
+
+permissions:
+  contents: write
+
+jobs:
+  wire:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: feat/ai-performance-dashboard
+          fetch-depth: 1
+      - uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38
+        with:
+          node-version-file: frontend/.node-version
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Wire route and access gate
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path("frontend/src/App.tsx")
+          text = path.read_text(encoding="utf-8")
+
+          old = '''const ReviewPage = lazy(() =>\n  import("./components/ReviewPage").then((module) => ({ default: module.ReviewPage }))\n);\n'''
+          new = old + '''const AiPerformancePage = lazy(() =>\n  import("./components/AiPerformancePage").then((module) => ({ default: module.AiPerformancePage }))\n);\n'''
+          if old not in text:
+              raise SystemExit("ReviewPage lazy import block not found")
+          text = text.replace(old, new, 1)
+
+          old = '''  const reviewRoute = isReviewRoute(pathname);\n  const notificationRoute = isNotificationRoute(pathname);\n  const billingRoute = isBillingRoute(pathname);\n'''
+          new = '''  const reviewRoute = isReviewRoute(pathname);\n  const performanceRoute = isPerformanceRoute(pathname);\n  const notificationRoute = isNotificationRoute(pathname);\n  const billingRoute = isBillingRoute(pathname);\n'''
+          if old not in text:
+              raise SystemExit("route variable block not found")
+          text = text.replace(old, new, 1)
+
+          old = '''  } else if (reviewRoute) {\n    content = hasAiAccess ? (\n      <Suspense fallback={<div className="auth-bootstrap">Dota AI Decision Lab</div>}>\n        <ReviewPage />\n      </Suspense>\n    ) : (\n      <PremiumReviewGate\n        authenticated={isSignedIn}\n        authEnabled={session?.enabled !== false}\n        onLogin={() => setLoginOpen(true)}\n      />\n    );\n  } else {\n'''
+          new = '''  } else if (performanceRoute) {\n    content = hasAiAccess ? (\n      <Suspense fallback={<div className="auth-bootstrap">AI Performance</div>}>\n        <AiPerformancePage />\n      </Suspense>\n    ) : (\n      <PremiumReviewGate\n        authenticated={isSignedIn}\n        authEnabled={session?.enabled !== false}\n        onLogin={() => setLoginOpen(true)}\n      />\n    );\n  } else if (reviewRoute) {\n    content = hasAiAccess ? (\n      <Suspense fallback={<div className="auth-bootstrap">Dota AI Decision Lab</div>}>\n        <ReviewPage />\n      </Suspense>\n    ) : (\n      <PremiumReviewGate\n        authenticated={isSignedIn}\n        authEnabled={session?.enabled !== false}\n        onLogin={() => setLoginOpen(true)}\n      />\n    );\n  } else {\n'''
+          if old not in text:
+              raise SystemExit("review route block not found")
+          text = text.replace(old, new, 1)
+
+          old = '''export function isNotificationRoute(pathname: string): boolean {\n'''
+          new = '''export function isPerformanceRoute(pathname: string): boolean {\n  return pathname === "/performance" || pathname.startsWith("/performance/");\n}\n\nexport function isNotificationRoute(pathname: string): boolean {\n'''
+          if old not in text:
+              raise SystemExit("route export anchor not found")
+          text = text.replace(old, new, 1)
+
+          text = text.replace(
+              'AI 复盘属于 Pro 权限',
+              'AI 复盘与盈利榜属于 Pro 权限',
+              1,
+          )
+          text = text.replace(
+              'AI Review is a Pro feature',
+              'AI Review & Performance require Pro',
+              1,
+          )
+          text = text.replace(
+              '普通比赛数据保持公开；跨比赛 AI 历史复盘属于全局 Pro。单个系列赛通行证只解锁所购买比赛的 AI 与实时通知。',
+              '普通比赛数据保持公开；跨比赛 AI 历史复盘和长期盈利榜属于全局 Pro。单个系列赛通行证只解锁所购买比赛的 AI 与实时通知。',
+              1,
+          )
+          text = text.replace(
+              'Match data stays public. Cross-match AI review requires global Pro; a series pass unlocks only the purchased series AI and alerts.',
+              'Match data stays public. Cross-match AI review and the long-run performance leaderboard require global Pro; a series pass unlocks only the purchased series AI and alerts.',
+              1,
+          )
+          text = text.replace(
+              '当前账号尚未拥有全局 AI Review 权限。',
+              '当前账号尚未拥有全局 AI Review / Performance 权限。',
+              1,
+          )
+          text = text.replace(
+              'This account does not have global AI Review access.',
+              'This account does not have global AI Review / Performance access.',
+              1,
+          )
+          path.write_text(text, encoding="utf-8")
+          PY
+      - name: Verify frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm test -- --run
+          npm run build
+      - name: Commit route wiring
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add frontend/src/App.tsx
+          git commit -m "Wire AI performance route and Pro gate"
+          git push origin HEAD:feat/ai-performance-dashboard
