@@ -18,6 +18,7 @@ logger = structlog.get_logger()
 
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_BRIDGE_SCRIPT = PROJECT_ROOT / "tools" / "qq_bot_bridge.mjs"
+_LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 
 
 class QQBotBridgeSetupError(RuntimeError):
@@ -28,9 +29,9 @@ class QQBotBridgeRunner:
     """Keep one Node bridge process alive for the bound QQ Bot account.
 
     The bridge uses the official SDK installed by the harness profile
-    (``~/.dsh/profiles/qqbot``).  The runner is intentionally dumb: it starts
-    the bridge, drains its stdout to the runtime log, and restarts it with
-    backoff.  ``QQBotService`` polls the bridge for inbound events.
+    (``~/.dsh/profiles/qqbot``). The control API is deliberately restricted to
+    loopback and authenticated with an owner-only bearer token shared with the
+    Python runtime.
     """
 
     def __init__(
@@ -43,12 +44,15 @@ class QQBotBridgeRunner:
         node_bin: str | None = None,
         sdk_index: Path | None = None,
     ) -> None:
+        if settings.qq_bot_bridge_host not in _LOOPBACK_HOSTS:
+            raise QQBotBridgeSetupError("QQ_BOT_BRIDGE_HOST must remain loopback")
         self._settings = settings
         self._store = store
         self._health = health
         self._script = (script or DEFAULT_BRIDGE_SCRIPT).resolve()
         self._node_bin = node_bin or shutil.which("node")
         self._sdk_index = sdk_index or resolve_qq_sdk_index(settings)
+        self._bridge_token = store.bridge_token()
         self._stop = asyncio.Event()
         self._process: asyncio.subprocess.Process | None = None
         self._drain_task: asyncio.Task | None = None
@@ -156,6 +160,7 @@ class QQBotBridgeRunner:
             base_url=f"http://{self._settings.qq_bot_bridge_host}:"
             f"{self._settings.qq_bot_bridge_port}",
             timeout_seconds=2.0,
+            token=self._bridge_token,
         )
         try:
             while not self._stop.is_set():
@@ -214,6 +219,7 @@ class QQBotBridgeRunner:
                 "QQ_BOT_SDK_INDEX": str(self._sdk_index),
                 "QQ_BOT_BRIDGE_HOST": self._settings.qq_bot_bridge_host,
                 "QQ_BOT_BRIDGE_PORT": str(self._settings.qq_bot_bridge_port),
+                "QQ_BOT_BRIDGE_TOKEN": self._bridge_token,
                 "QQ_BOT_ACCOUNT_ID": account_id,
                 "QQ_BOT_GROUP_REQUIRE_MENTION": (
                     "1" if self._settings.qq_bot_group_require_mention else "0"
