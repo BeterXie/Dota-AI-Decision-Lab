@@ -26,23 +26,20 @@ jobs:
           enable-cache: true
       - name: Install locked development environment
         run: uv sync --frozen --extra dev
-      - name: Apply safe Ruff fixes
+      - name: Capture residual Ruff diagnostics
         shell: bash
         run: |
-          uv run ruff check --fix app migrations tests tools || true
-          uv run ruff format app migrations tests tools
-      - name: Commit safe fixer output
+          set +e
+          uv run ruff check app migrations tests tools > ruff-residual-access-grants.txt 2>&1
+          code=$?
+          cat ruff-residual-access-grants.txt
+          echo "$code" > ruff-residual-access-grants.exit
+          exit 0
+      - name: Commit temporary diagnostics
         shell: bash
         run: |
-          if git diff --quiet; then
-            echo "No safe Ruff changes"
-            exit 0
-          fi
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app migrations tests tools
-          git commit -m "Apply safe Ruff fixes to access grants"
+          git add ruff-residual-access-grants.txt ruff-residual-access-grants.exit
+          git commit -m "Capture residual Ruff diagnostics"
           git push origin HEAD:feat/access-grants-promotions
-      - name: Report remaining lint
-        if: always()
-        run: uv run ruff check app migrations tests tools
