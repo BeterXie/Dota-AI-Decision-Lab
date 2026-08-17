@@ -157,9 +157,7 @@ def test_anonymous_runtime_projection_hides_operational_diagnostics() -> None:
             "workers": {
                 "AIWorker": {"last_error": "provider secret failure", "metadata": {"jobs": 4}}
             },
-            "dependencies": {
-                "GPT": {"status": "FAILED", "last_error": "private provider error"}
-            },
+            "dependencies": {"GPT": {"status": "FAILED", "last_error": "private provider error"}},
             "new_internal_runtime_field": "secret",
         }
     )
