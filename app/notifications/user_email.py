@@ -80,7 +80,10 @@ class UserDecisionEmailNotificationService(DecisionEmailNotificationService):
             if age > self._max_decision_age_seconds:
                 await self._notification_center.mark_expired(
                     notification_id,
-                    f"Decision snapshot is stale ({age:.0f}s > {self._max_decision_age_seconds:.0f}s)",
+                    (
+                        f"Decision snapshot is stale "
+                        f"({age:.0f}s > {self._max_decision_age_seconds:.0f}s)"
+                    ),
                 )
                 return UserEmailDeliveryReceipt(notification_id, (email,), None)
             decisions = list(
