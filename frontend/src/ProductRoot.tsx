@@ -6,8 +6,10 @@ import { fetchAuthSession, logout, type AuthSessionState } from "./authApi";
 import { EventsPage } from "./components/EventsPage";
 import { HomePage } from "./components/HomePage";
 import { LoginDialog } from "./components/LoginDialog";
+import { MatchPage } from "./components/MatchPage";
 import { ProductShell } from "./components/ProductShell";
 import { I18nProvider } from "./i18n";
+import { matchIdFromPath } from "./matches";
 
 const authSessionKey = ["auth", "session"] as const;
 
@@ -40,6 +42,7 @@ function ProductExperience({ pathname }: { pathname: string }) {
       session?.entitlements.includes("realtime_notifications")
   );
   const isHome = pathname === "/";
+  const matchRouteId = matchIdFromPath(pathname);
 
   const handleAuthenticated = (next: AuthSessionState) => {
     queryClient.setQueryData(authSessionKey, next);
@@ -58,6 +61,38 @@ function ProductExperience({ pathname }: { pathname: string }) {
     });
   };
 
+  let page: React.ReactNode;
+  if (isHome) {
+    page = (
+      <HomePage
+        matches={matches.data ?? []}
+        loading={matches.isLoading}
+        signedIn={signedIn}
+        hasPro={hasPro}
+        onLogin={() => setLoginOpen(true)}
+      />
+    );
+  } else if (matchRouteId) {
+    page = (
+      <MatchPage
+        matches={matches.data ?? []}
+        matchesLoading={matches.isLoading}
+        routeId={matchRouteId}
+        session={session}
+        onLogin={() => setLoginOpen(true)}
+      />
+    );
+  } else {
+    page = (
+      <EventsPage
+        matches={matches.data ?? []}
+        loading={matches.isLoading}
+        pathname={pathname}
+        hasPro={hasPro}
+      />
+    );
+  }
+
   return (
     <ProductShell
       active={isHome ? "home" : "events"}
@@ -65,22 +100,7 @@ function ProductExperience({ pathname }: { pathname: string }) {
       onLogin={() => setLoginOpen(true)}
       onLogout={handleLogout}
     >
-      {isHome ? (
-        <HomePage
-          matches={matches.data ?? []}
-          loading={matches.isLoading}
-          signedIn={signedIn}
-          hasPro={hasPro}
-          onLogin={() => setLoginOpen(true)}
-        />
-      ) : (
-        <EventsPage
-          matches={matches.data ?? []}
-          loading={matches.isLoading}
-          pathname={pathname}
-          hasPro={hasPro}
-        />
-      )}
+      {page}
       {loginOpen && session?.enabled !== false && (
         <LoginDialog
           session={session}
@@ -93,5 +113,10 @@ function ProductExperience({ pathname }: { pathname: string }) {
 }
 
 function isProductRoute(pathname: string): boolean {
-  return pathname === "/" || pathname === "/events" || pathname.startsWith("/events/");
+  return (
+    pathname === "/" ||
+    pathname === "/events" ||
+    pathname.startsWith("/events/") ||
+    pathname.startsWith("/matches/")
+  );
 }

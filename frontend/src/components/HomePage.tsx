@@ -1,7 +1,8 @@
 import React from "react";
 import type { MapSummary } from "../api";
-import { buildEventSummaries, eventHref, eventName, type EventStatus, type EventSummary } from "../events";
+import { buildEventSummaries, eventHref, type EventStatus, type EventSummary } from "../events";
 import { useI18n } from "../i18n";
+import { matchHref } from "../matches";
 
 interface HomePageProps {
   matches: MapSummary[];
@@ -83,7 +84,7 @@ export const HomePage: React.FC<HomePageProps> = ({
       </section>
 
       <section className="product-container product-section home-capabilities">
-        <article><span className="capability-icon radar-icon">◎</span><div><h3>{locale === "zh-CN" ? "比赛追踪" : "Match tracking"}</h3><p>{locale === "zh-CN" ? "赛程、比分、Draft、Live 数据和赛果都放在同一条比赛线上。" : "Schedule, score, Draft, live data and results in one match flow."}</p></div><a href="/match-console" aria-label={locale === "zh-CN" ? "进入比赛追踪" : "Open match tracking"}>›</a></article>
+        <article><span className="capability-icon radar-icon">◎</span><div><h3>{locale === "zh-CN" ? "比赛追踪" : "Match tracking"}</h3><p>{locale === "zh-CN" ? "赛程、比分、Draft、Live 数据和赛果都放在同一条比赛线上。" : "Schedule, score, Draft, live data and results in one match flow."}</p></div><a href="/events" aria-label={locale === "zh-CN" ? "进入比赛追踪" : "Open match tracking"}>›</a></article>
         <article><span className="capability-icon ai-icon">◇</span><div><h3>{locale === "zh-CN" ? "AI 决策对比" : "AI decision comparison"}</h3><p>{locale === "zh-CN" ? "查看不同模型在关键节点怎么判断，以及它们为什么做出不同选择。" : "Compare what models called at key moments and why they disagreed."}</p></div><a href="/review" aria-label={locale === "zh-CN" ? "查看 AI 决策" : "See AI decisions"}>›</a></article>
         <article><span className="capability-icon shadow-icon">▥</span><div><h3>{locale === "zh-CN" ? "Shadow 表现复盘" : "Shadow performance"}</h3><p>{locale === "zh-CN" ? "用相同模拟规则回看长期表现，不把模拟结果包装成真实收益。" : "Review long-run results under the same simulation rules without presenting them as real returns."}</p></div><a href="/performance" aria-label={locale === "zh-CN" ? "查看 AI 表现" : "See AI performance"}>›</a></article>
       </section>
@@ -111,7 +112,7 @@ const MatchRow: React.FC<{ match: MapSummary; mode: "upcoming" | "completed"; lo
   const a = match.team_a?.name || (locale === "zh-CN" ? "待定" : "TBD");
   const b = match.team_b?.name || (locale === "zh-CN" ? "待定" : "TBD");
   const score = match.series_score ? `${match.series_score.team_a} - ${match.series_score.team_b}` : mode === "completed" ? (locale === "zh-CN" ? "已结束" : "Final") : "vs";
-  return <div className="home-match-row"><time>{match.scheduled_at ? formatTime(match.scheduled_at, locale) : "—"}</time><div className="match-teams"><span><i>{teamInitial(a)}</i>{a}</span><b>{score}</b><span><i>{teamInitial(b)}</i>{b}</span></div><small>{match.best_of ? `BO${match.best_of}` : match.round || "—"}</small><a href={eventHref(eventName(match))}>{mode === "completed" ? (locale === "zh-CN" ? "赛事结果" : "Event") : (locale === "zh-CN" ? "查看赛事" : "Event")}</a></div>;
+  return <div className="home-match-row"><time>{match.scheduled_at ? formatTime(match.scheduled_at, locale) : "—"}</time><div className="match-teams"><span><i>{teamInitial(a)}</i>{a}</span><b>{score}</b><span><i>{teamInitial(b)}</i>{b}</span></div><small>{match.best_of ? `BO${match.best_of}` : match.round || "—"}</small><a href={matchHref(match)}>{locale === "zh-CN" ? "查看比赛" : "View match"}</a></div>;
 };
 
 const StatusPill: React.FC<{ status: EventStatus; locale: string }> = ({ status, locale }) => <span className={`event-status status-${status.toLowerCase()}`}>{status === "LIVE" ? (locale === "zh-CN" ? "进行中" : "Live") : status === "UPCOMING" ? (locale === "zh-CN" ? "即将开始" : "Upcoming") : status === "SETTLING" ? (locale === "zh-CN" ? "赛果确认中" : "Confirming") : (locale === "zh-CN" ? "已结束" : "Finished")}</span>;
