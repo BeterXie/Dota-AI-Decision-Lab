@@ -314,7 +314,9 @@ class EmailAuthService:
             if user is None:
                 user = UserAccountRecord(
                     email=normalized_email if email_verified else None,
-                    email_verified_at=now if normalized_email is not None and email_verified else None,
+                    email_verified_at=now
+                    if normalized_email is not None and email_verified
+                    else None,
                     display_name=_clean_profile_text(display_name, 160),
                     avatar_url=_clean_profile_url(avatar_url),
                     last_login_at=now,
