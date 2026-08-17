@@ -14,6 +14,7 @@ from app.billing.paddle import (
     PaddleBillingGateway,
     PaddleOffer,
     PaddleWebhookError,
+    PaddleWebhookSignatureError,
 )
 from app.config import Settings
 from app.entitlements import EntitlementService
@@ -36,8 +37,14 @@ def create_billing_router(
             "environment": settings.paddle_environment,
             "offers": [offer.public_payload() for offer in offers],
             "local_payment_notes": {
-                "alipay": "Paddle checkout supports Alipay for eligible China checkouts; recurring support depends on Paddle approval and catalog currency.",
-                "wechat_pay": "Paddle checkout supports WeChat Pay for eligible China one-time purchases; recurring subscriptions are not supported.",
+                "alipay": (
+                    "Available for eligible China checkouts; recurring support depends on "
+                    "Paddle approval and catalog currency."
+                ),
+                "wechat_pay": (
+                    "Available for eligible China one-time purchases; recurring subscriptions "
+                    "are not supported."
+                ),
             },
             "crypto": {
                 "enabled": False,
@@ -116,8 +123,13 @@ def create_billing_router(
                 raw_body=raw_body,
                 signature_header=request.headers.get("paddle-signature"),
             )
-        except PaddleWebhookError as exc:
+        except PaddleWebhookSignatureError as exc:
             raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=str(exc)) from exc
+        except PaddleWebhookError as exc:
+            # The event is authentically from Paddle but conflicts with the
+            # server-owned checkout/catalog mapping. Fail closed and let Paddle's
+            # retry policy surface transient ordering or configuration problems.
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=409, detail="billing event conflict") from exc
         return {
