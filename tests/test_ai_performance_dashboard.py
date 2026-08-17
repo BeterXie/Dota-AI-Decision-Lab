@@ -7,7 +7,6 @@ import pytest
 from app.models import AiDecisionRecord, DecisionEvaluationRecord, DecisionSnapshotRecord
 from app.web.performance import _build_experiment_groups, _decision_trace_payload
 
-
 NOW = datetime(2026, 8, 17, 12, 0, tzinfo=UTC)
 
 
