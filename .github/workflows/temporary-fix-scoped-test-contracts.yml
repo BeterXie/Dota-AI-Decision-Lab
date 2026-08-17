@@ -22,42 +22,54 @@ jobs:
           version: 0.12.0
           python-version: '3.14'
       - run: uv sync --frozen --extra dev
-      - name: Apply compatibility and contract fixes
+      - name: Apply fixes
         shell: bash
         run: |
           python - <<'PY'
           from pathlib import Path
 
-          path = Path('app/notifications/secure_center.py')
+          path = Path('app/promotions/service.py')
           text = path.read_text(encoding='utf-8')
-          old = '''        bindings = await self.eligible_bindings(\n            session,\n            normalized_channel,\n            event_type=event_type,\n            canonical_series_id=canonical_series_id,\n            canonical_map_id=canonical_map_id,\n        )\n'''
-          new = '''        if canonical_series_id is None and canonical_map_id is None:\n            # Preserve the legacy/global call shape when a synthetic or old\n            # snapshot has no resource identity. This keeps existing helpers and\n            # mocks compatible without weakening resource-aware production paths.\n            bindings = await self.eligible_bindings(\n                session,\n                normalized_channel,\n                event_type=event_type,\n            )\n        else:\n            bindings = await self.eligible_bindings(\n                session,\n                normalized_channel,\n                event_type=event_type,\n                canonical_series_id=canonical_series_id,\n                canonical_map_id=canonical_map_id,\n            )\n'''
+          old = 'from sqlalchemy import func, or_, select\nfrom sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker\n'
+          new = 'from sqlalchemy import func, or_, select\nfrom sqlalchemy.exc import IntegrityError\nfrom sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker\n'
           if old not in text:
-              raise SystemExit('secure_center target block not found')
+              raise SystemExit('promotion import target not found')
+          text = text.replace(old, new, 1)
+          old = '''                if collision is None:\n                    session.add(\n                        ReferralCodeRecord(\n                            user_id=user_id,\n                            code=code,\n                            status="ACTIVE",\n                        )\n                    )\n                    await session.flush()\n                    return code\n'''
+          new = '''                if collision is not None:\n                    continue\n                candidate = ReferralCodeRecord(\n                    user_id=user_id,\n                    code=code,\n                    status="ACTIVE",\n                )\n                try:\n                    async with session.begin_nested():\n                        session.add(candidate)\n                        await session.flush()\n                    return code\n                except IntegrityError:\n                    # PostgreSQL serializes this path via the locked account row.\n                    # The savepoint also makes code creation idempotent on engines\n                    # without row-level FOR UPDATE semantics (notably SQLite tests).\n                    existing = await session.scalar(\n                        select(ReferralCodeRecord)\n                        .where(ReferralCodeRecord.user_id == user_id)\n                        .limit(1)\n                    )\n                    if existing is not None:\n                        if existing.status != "ACTIVE":\n                            existing.status = "ACTIVE"\n                            existing.updated_at = datetime.now(UTC)\n                        return existing.code\n                    continue\n'''
+          if old not in text:
+              raise SystemExit('promotion referral allocation block not found')
           path.write_text(text.replace(old, new, 1), encoding='utf-8')
 
           path = Path('tests/test_access_hardening.py')
           text = path.read_text(encoding='utf-8')
-          old = '''    assert _http_access_requirement("/api/maps/abc/ai-decisions") == (\n        "ENTITLED",\n        AI_DECISIONS_ENTITLEMENT,\n    )\n'''
-          new = '''    # Map AI is resource-aware: middleware authenticates identity and the\n    # route checks GLOBAL / SERIES / MAP access against the canonical map.\n    assert _http_access_requirement("/api/maps/abc/ai-decisions") == (\n        "AUTHENTICATED",\n        None,\n    )\n'''
+          old = '''    assert _http_access_requirement(\n        "/api/maps/00000000-0000-0000-0000-000000000000/ai-decisions"\n    ) == ("ENTITLED", AI_DECISIONS_ENTITLEMENT)\n'''
+          new = '''    # Map AI is resource-aware: middleware authenticates identity, then the\n    # route checks GLOBAL / SERIES / MAP access against the canonical map.\n    assert _http_access_requirement(\n        "/api/maps/00000000-0000-0000-0000-000000000000/ai-decisions"\n    ) == ("AUTHENTICATED", None)\n'''
           if old not in text:
               raise SystemExit('access hardening target block not found')
           path.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          path = Path('tests/test_email_auth.py')
+          text = path.read_text(encoding='utf-8')
+          enabled_old = '''            assert initial.json() == {\n                "enabled": True,\n                "authenticated": False,\n                "user": None,\n                "entitlements": [],\n            }\n'''
+          enabled_new = '''            assert initial.json() == {\n                "enabled": True,\n                "authenticated": False,\n                "user": None,\n                "entitlements": [],\n                "grants": [],\n            }\n'''
+          disabled_old = '''            assert session.json() == {\n                "enabled": False,\n                "authenticated": True,\n                "user": None,\n                "entitlements": [],\n            }\n'''
+          disabled_new = '''            assert session.json() == {\n                "enabled": False,\n                "authenticated": True,\n                "user": None,\n                "entitlements": [],\n                "grants": [],\n            }\n'''
+          if enabled_old not in text or disabled_old not in text:
+              raise SystemExit('email auth contract target not found')
+          text = text.replace(enabled_old, enabled_new, 1)
+          text = text.replace(disabled_old, disabled_new, 1)
+          path.write_text(text, encoding='utf-8')
           PY
-          uv run ruff format app/notifications/secure_center.py tests/test_access_hardening.py
-          uv run ruff check app/notifications/secure_center.py tests/test_access_hardening.py
-      - name: Commit fixes
+          uv run ruff format app/promotions/service.py tests/test_access_hardening.py tests/test_email_auth.py
+          uv run ruff check app/promotions/service.py tests/test_access_hardening.py tests/test_email_auth.py
+      - name: Run targeted regression tests
+        run: uv run pytest -q tests/test_access_hardening.py tests/test_email_auth.py tests/test_promotions.py
+      - name: Commit verified fixes
         shell: bash
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app/notifications/secure_center.py tests/test_access_hardening.py
-          git commit -m "Align scoped access test contracts"
+          git add app/promotions/service.py tests/test_access_hardening.py tests/test_email_auth.py
+          git commit -m "Fix referral code race and scoped access contracts"
           git push origin HEAD:feat/access-grants-promotions
-      - name: Run prior failing tests
-        run: |
-          uv run pytest -q \
-            tests/test_access_hardening.py \
-            tests/test_notification_center.py \
-            tests/test_user_email_notifications.py \
-            tests/test_job_handlers.py
