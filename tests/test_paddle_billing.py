@@ -1,0 +1,361 @@
+import json
+from datetime import UTC, datetime, timedelta
+
+import httpx
+import pytest
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
+from app.auth.models import UserAccountRecord
+from app.billing.paddle import (
+    PaddleBillingGateway,
+    PaddleOffer,
+    PaddleWebhookError,
+    paddle_signature_for_test,
+)
+from app.db import Base
+from app.entitlements import PREMIUM_ENTITLEMENTS, EntitlementService
+
+_WEBHOOK_SECRET = "pdl_ntfset_test_secret_that_is_long_enough"
+_PRICE_30D = "pri_test_pro_30d"
+_PRICE_MONTHLY = "pri_test_pro_monthly"
+
+
+def _offer_30d() -> PaddleOffer:
+    return PaddleOffer(
+        key="pro_30d",
+        label="Pro 30-day Pass",
+        price_id=_PRICE_30D,
+        recurring=False,
+        grant_days=30,
+        supports_alipay=True,
+        supports_wechat_pay=True,
+    )
+
+
+def _offer_monthly() -> PaddleOffer:
+    return PaddleOffer(
+        key="pro_monthly",
+        label="Pro Monthly",
+        price_id=_PRICE_MONTHLY,
+        recurring=True,
+        grant_days=None,
+        supports_alipay=True,
+        supports_wechat_pay=False,
+    )
+
+
+async def _fixture(*offers: PaddleOffer):
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    now = datetime.now(UTC).replace(microsecond=0)
+    async with factory.begin() as session:
+        user = UserAccountRecord(
+            email="buyer@example.com",
+            email_verified_at=now,
+            last_login_at=now,
+            created_at=now,
+        )
+        session.add(user)
+        await session.flush()
+        user_id = user.id
+    gateway = PaddleBillingGateway(
+        session_factory=factory,
+        api_key="pdl_sdbx_apikey_test",
+        webhook_secret=_WEBHOOK_SECRET,
+        api_base_url="https://sandbox-api.paddle.com",
+        offers=offers or (_offer_30d(),),
+        webhook_tolerance_seconds=5,
+    )
+    return engine, factory, user_id, now, gateway
+
+
+def _event(
+    *,
+    event_id: str,
+    event_type: str,
+    occurred_at: datetime,
+    user_id,
+    data: dict,
+) -> bytes:
+    payload = {
+        "event_id": event_id,
+        "event_type": event_type,
+        "occurred_at": occurred_at.isoformat().replace("+00:00", "Z"),
+        "data": {
+            **data,
+            "custom_data": {
+                "dota_ai_billing": "dota-ai-billing-v1",
+                "dota_user_id": str(user_id),
+                "dota_plan": "PRO",
+            },
+        },
+    }
+    return json.dumps(payload, separators=(",", ":")).encode()
+
+
+async def _deliver(gateway: PaddleBillingGateway, body: bytes, *, now: datetime):
+    signature = paddle_signature_for_test(
+        body,
+        secret=_WEBHOOK_SECRET,
+        timestamp=int(now.timestamp()),
+    )
+    return await gateway.process_webhook(
+        raw_body=body,
+        signature_header=signature,
+        now=now,
+    )
+
+
+@pytest.mark.asyncio
+async def test_one_time_completed_transaction_grants_fixed_term_pro_idempotently() -> None:
+    engine, factory, user_id, now, gateway = await _fixture(_offer_30d())
+    try:
+        body = _event(
+            event_id="evt_one_time",
+            event_type="transaction.completed",
+            occurred_at=now,
+            user_id=user_id,
+            data={
+                "id": "txn_one_time",
+                "customer_id": "ctm_buyer",
+                "subscription_id": None,
+                "status": "completed",
+                "items": [{"price": {"id": _PRICE_30D}}],
+            },
+        )
+        first = await _deliver(gateway, body, now=now)
+        duplicate = await _deliver(gateway, body, now=now)
+
+        assert first.ignored is False
+        assert first.duplicate is False
+        assert set(first.active_entitlements) == set(PREMIUM_ENTITLEMENTS)
+        assert duplicate.duplicate is True
+        assert set(await EntitlementService(factory).active_entitlements(user_id, now=now)) == set(
+            PREMIUM_ENTITLEMENTS
+        )
+        assert await EntitlementService(factory).active_entitlements(
+            user_id,
+            now=now + timedelta(days=30, seconds=1),
+        ) == ()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_subscription_cancel_revokes_and_delayed_activation_cannot_restore_access() -> None:
+    engine, factory, user_id, now, gateway = await _fixture(_offer_monthly())
+    try:
+        activated_at = now
+        period_end = now + timedelta(days=30)
+        active_body = _event(
+            event_id="evt_active",
+            event_type="subscription.activated",
+            occurred_at=activated_at,
+            user_id=user_id,
+            data={
+                "id": "sub_monthly",
+                "customer_id": "ctm_buyer",
+                "status": "active",
+                "items": [{"price": {"id": _PRICE_MONTHLY}}],
+                "current_billing_period": {
+                    "starts_at": activated_at.isoformat(),
+                    "ends_at": period_end.isoformat(),
+                },
+            },
+        )
+        await _deliver(gateway, active_body, now=activated_at)
+        assert set(await EntitlementService(factory).active_entitlements(user_id)) == set(
+            PREMIUM_ENTITLEMENTS
+        )
+
+        canceled_at = now + timedelta(minutes=2)
+        canceled_body = _event(
+            event_id="evt_canceled",
+            event_type="subscription.canceled",
+            occurred_at=canceled_at,
+            user_id=user_id,
+            data={
+                "id": "sub_monthly",
+                "customer_id": "ctm_buyer",
+                "status": "canceled",
+                "items": [{"price": {"id": _PRICE_MONTHLY}}],
+                "current_billing_period": {
+                    "starts_at": activated_at.isoformat(),
+                    "ends_at": period_end.isoformat(),
+                },
+            },
+        )
+        await _deliver(gateway, canceled_body, now=canceled_at)
+        assert await EntitlementService(factory).active_entitlements(user_id) == ()
+
+        delayed_body = _event(
+            event_id="evt_delayed_active",
+            event_type="subscription.activated",
+            occurred_at=now + timedelta(minutes=1),
+            user_id=user_id,
+            data={
+                "id": "sub_monthly",
+                "customer_id": "ctm_buyer",
+                "status": "active",
+                "items": [{"price": {"id": _PRICE_MONTHLY}}],
+                "current_billing_period": {
+                    "starts_at": activated_at.isoformat(),
+                    "ends_at": period_end.isoformat(),
+                },
+            },
+        )
+        delayed = await _deliver(gateway, delayed_body, now=canceled_at)
+        assert delayed.stale is True
+        assert await EntitlementService(factory).active_entitlements(user_id) == ()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_full_approved_refund_revokes_one_time_pass_but_partial_refund_does_not() -> None:
+    engine, factory, user_id, now, gateway = await _fixture(_offer_30d())
+    try:
+        purchase = _event(
+            event_id="evt_purchase",
+            event_type="transaction.completed",
+            occurred_at=now,
+            user_id=user_id,
+            data={
+                "id": "txn_refundable",
+                "customer_id": "ctm_buyer",
+                "status": "completed",
+                "items": [{"price": {"id": _PRICE_30D}}],
+            },
+        )
+        await _deliver(gateway, purchase, now=now)
+
+        partial_at = now + timedelta(minutes=1)
+        partial = _event(
+            event_id="evt_partial_refund",
+            event_type="adjustment.updated",
+            occurred_at=partial_at,
+            user_id=user_id,
+            data={
+                "id": "adj_partial",
+                "action": "refund",
+                "type": "partial",
+                "status": "approved",
+                "transaction_id": "txn_refundable",
+                "subscription_id": None,
+            },
+        )
+        partial_result = await _deliver(gateway, partial, now=partial_at)
+        assert partial_result.ignored is True
+        assert set(await EntitlementService(factory).active_entitlements(user_id)) == set(
+            PREMIUM_ENTITLEMENTS
+        )
+
+        refund_at = now + timedelta(minutes=2)
+        refund = _event(
+            event_id="evt_full_refund",
+            event_type="adjustment.updated",
+            occurred_at=refund_at,
+            user_id=user_id,
+            data={
+                "id": "adj_full",
+                "action": "refund",
+                "type": "full",
+                "status": "approved",
+                "transaction_id": "txn_refundable",
+                "subscription_id": None,
+            },
+        )
+        result = await _deliver(gateway, refund, now=refund_at)
+        assert result.ignored is False
+        assert await EntitlementService(factory).active_entitlements(user_id) == ()
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_signature_replay_and_unknown_configured_price_fail_closed() -> None:
+    engine, _, user_id, now, gateway = await _fixture(_offer_30d())
+    try:
+        body = _event(
+            event_id="evt_unknown_price",
+            event_type="transaction.completed",
+            occurred_at=now,
+            user_id=user_id,
+            data={
+                "id": "txn_unknown",
+                "status": "completed",
+                "items": [{"price": {"id": "pri_not_ours"}}],
+            },
+        )
+        with pytest.raises(PaddleWebhookError, match="unknown price"):
+            await _deliver(gateway, body, now=now)
+
+        stale_signature = paddle_signature_for_test(
+            body,
+            secret=_WEBHOOK_SECRET,
+            timestamp=int((now - timedelta(minutes=1)).timestamp()),
+        )
+        with pytest.raises(PaddleWebhookError, match="outside tolerance"):
+            await gateway.process_webhook(
+                raw_body=body,
+                signature_header=stale_signature,
+                now=now,
+            )
+        with pytest.raises(PaddleWebhookError, match="invalid"):
+            await gateway.process_webhook(
+                raw_body=body,
+                signature_header=f"ts={int(now.timestamp())};h1={'0' * 64}",
+                now=now,
+            )
+    finally:
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_checkout_uses_server_owned_user_and_catalog_price_metadata() -> None:
+    engine, _, user_id, _, gateway = await _fixture(_offer_30d())
+    requests: list[dict] = []
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        requests.append({"path": request.url.path, "body": body})
+        if request.url.path == "/customers":
+            return httpx.Response(201, json={"data": {"id": "ctm_created"}})
+        if request.url.path == "/transactions":
+            return httpx.Response(
+                201,
+                json={
+                    "data": {
+                        "id": "txn_checkout",
+                        "checkout": {"url": "https://pay.paddle.test/checkout"},
+                    }
+                },
+            )
+        return httpx.Response(404)
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://sandbox-api.paddle.com",
+    )
+    try:
+        checkout = await gateway.create_checkout(
+            user_id=user_id,
+            email="buyer@example.com",
+            offer_key="pro_30d",
+            client=client,
+        )
+        assert checkout.checkout_url == "https://pay.paddle.test/checkout"
+        assert [item["path"] for item in requests] == ["/customers", "/transactions"]
+        transaction = requests[-1]["body"]
+        assert transaction["items"] == [{"price_id": _PRICE_30D, "quantity": 1}]
+        assert transaction["custom_data"] == {
+            "dota_ai_billing": "dota-ai-billing-v1",
+            "dota_user_id": str(user_id),
+            "dota_plan": "PRO",
+            "dota_offer": "pro_30d",
+        }
+    finally:
+        await client.aclose()
+        await engine.dispose()
