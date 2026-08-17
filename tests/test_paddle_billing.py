@@ -7,9 +7,10 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.auth.models import UserAccountRecord
-from app.billing.models import BillingCheckoutRecord
+from app.billing.models import BillingCheckoutRecord, BillingSubscriptionRecord
 from app.billing.paddle import (
     PaddleBillingGateway,
+    PaddleCheckoutConflict,
     PaddleOffer,
     PaddleWebhookError,
     PaddleWebhookSignatureError,
@@ -176,10 +177,13 @@ async def test_one_time_completed_transaction_grants_fixed_term_pro_idempotently
         assert set(await EntitlementService(factory).active_entitlements(user_id, now=now)) == set(
             PREMIUM_ENTITLEMENTS
         )
-        assert await EntitlementService(factory).active_entitlements(
-            user_id,
-            now=now + timedelta(days=30, seconds=1),
-        ) == ()
+        assert (
+            await EntitlementService(factory).active_entitlements(
+                user_id,
+                now=now + timedelta(days=30, seconds=1),
+            )
+            == ()
+        )
         async with factory() as session:
             checkout = await session.scalar(select(BillingCheckoutRecord))
             assert checkout is not None
@@ -463,6 +467,51 @@ async def test_checkout_uses_server_owned_user_and_catalog_price_metadata() -> N
             assert stored.checkout_ref == "txn_checkout"
             assert stored.price_ref == _PRICE_30D
             assert stored.status == "PENDING"
+    finally:
+        await client.aclose()
+        await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_active_paddle_purchase_blocks_a_second_checkout_before_provider_api_call() -> None:
+    offer = _offer_30d()
+    engine, factory, user_id, now, gateway = await _fixture(offer)
+    api_called = False
+
+    async def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal api_called
+        api_called = True
+        return httpx.Response(500)
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://sandbox-api.paddle.com",
+    )
+    try:
+        async with factory.begin() as session:
+            session.add(
+                BillingSubscriptionRecord(
+                    user_id=user_id,
+                    provider="paddle",
+                    subscription_ref="txn_existing",
+                    customer_ref="ctm_existing",
+                    plan_key="PRO",
+                    access_state="ACTIVE",
+                    provider_status="completed",
+                    current_period_end=now + timedelta(days=10),
+                    last_event_occurred_at=now,
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+        with pytest.raises(PaddleCheckoutConflict, match="already exists"):
+            await gateway.create_checkout(
+                user_id=user_id,
+                email="buyer@example.com",
+                offer_key="pro_30d",
+                client=client,
+            )
+        assert api_called is False
     finally:
         await client.aclose()
         await engine.dispose()
