@@ -10,8 +10,8 @@ from starlette.types import ASGIApp, Receive, Scope, Send
 from app.auth import (
     SESSION_COOKIE_NAME,
     AuthDeliveryError,
-    AuthRateLimitError,
     AuthenticatedUser,
+    AuthRateLimitError,
     EmailAuthService,
     InvalidEmailError,
     InvalidLoginCodeError,
