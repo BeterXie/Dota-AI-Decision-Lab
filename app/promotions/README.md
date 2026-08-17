@@ -1,1 +1,0 @@
-Promotion services issue and revoke access grants; provider adapters remain responsible for authenticating payment callbacks.
