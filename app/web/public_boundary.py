@@ -158,8 +158,7 @@ class PublicMatchDataBoundaryMiddleware(BaseHTTPMiddleware):
 
         sanitize_match = _is_public_match_endpoint(request.url.path)
         sanitize_runtime = (
-            request.url.path == "/api/runtime"
-            and getattr(request.state, "auth_user", None) is None
+            request.url.path == "/api/runtime" and getattr(request.state, "auth_user", None) is None
         )
         if not sanitize_match and not sanitize_runtime:
             return response
@@ -331,9 +330,7 @@ def _copy_projected_list(target: dict, source: dict, key: str, fields: frozenset
     if value is None:
         target[key] = None
     elif isinstance(value, list):
-        target[key] = [
-            _project_dict(item, fields) for item in value if isinstance(item, dict)
-        ]
+        target[key] = [_project_dict(item, fields) for item in value if isinstance(item, dict)]
 
 
 def _project_dict(value: dict, fields: frozenset[str]) -> dict:
