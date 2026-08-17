@@ -7,7 +7,8 @@ import { EventsPage } from "./components/EventsPage";
 import { HomePage } from "./components/HomePage";
 import { LoginDialog } from "./components/LoginDialog";
 import { MatchPage } from "./components/MatchPage";
-import { ProductShell } from "./components/ProductShell";
+import { PremiumSurface, type PremiumSurfaceKey } from "./components/PremiumSurface";
+import { ProductShell, type ProductNavKey } from "./components/ProductShell";
 import { I18nProvider } from "./i18n";
 import { matchIdFromPath } from "./matches";
 
@@ -22,6 +23,7 @@ export function ProductRoot() {
 function ProductExperience({ pathname }: { pathname: string }) {
   const queryClient = useQueryClient();
   const [loginOpen, setLoginOpen] = React.useState(false);
+  const premiumSurface = premiumSurfaceForPath(pathname);
   const auth = useQuery({
     queryKey: authSessionKey,
     queryFn: fetchAuthSession,
@@ -32,6 +34,7 @@ function ProductExperience({ pathname }: { pathname: string }) {
   const matches = useQuery({
     queryKey: ["product", "matches"],
     queryFn: fetchMaps,
+    enabled: premiumSurface === null,
     refetchInterval: 15_000,
     retry: 1
   });
@@ -62,7 +65,16 @@ function ProductExperience({ pathname }: { pathname: string }) {
   };
 
   let page: React.ReactNode;
-  if (isHome) {
+  if (premiumSurface) {
+    page = (
+      <PremiumSurface
+        surface={premiumSurface}
+        session={session}
+        authLoading={auth.isLoading}
+        onLogin={() => setLoginOpen(true)}
+      />
+    );
+  } else if (isHome) {
     page = (
       <HomePage
         matches={matches.data ?? []}
@@ -95,7 +107,7 @@ function ProductExperience({ pathname }: { pathname: string }) {
 
   return (
     <ProductShell
-      active={isHome ? "home" : "events"}
+      active={activeNavForPath(pathname, premiumSurface)}
       session={session}
       onLogin={() => setLoginOpen(true)}
       onLogout={handleLogout}
@@ -112,11 +124,32 @@ function ProductExperience({ pathname }: { pathname: string }) {
   );
 }
 
+function premiumSurfaceForPath(pathname: string): PremiumSurfaceKey | null {
+  if (pathname === "/performance" || pathname.startsWith("/performance/")) return "performance";
+  if (pathname === "/review" || pathname.startsWith("/review/")) return "review";
+  if (pathname === "/billing" || pathname.startsWith("/billing/")) return "billing";
+  if (pathname === "/notifications" || pathname.startsWith("/notifications/")) return "notifications";
+  return null;
+}
+
+function activeNavForPath(
+  pathname: string,
+  premiumSurface: PremiumSurfaceKey | null
+): ProductNavKey | null {
+  if (premiumSurface === "performance") return "performance";
+  if (premiumSurface === "review") return "review";
+  if (premiumSurface === "billing") return "billing";
+  if (premiumSurface === "notifications") return null;
+  if (pathname === "/") return "home";
+  return "events";
+}
+
 function isProductRoute(pathname: string): boolean {
   return (
     pathname === "/" ||
     pathname === "/events" ||
     pathname.startsWith("/events/") ||
-    pathname.startsWith("/matches/")
+    pathname.startsWith("/matches/") ||
+    premiumSurfaceForPath(pathname) !== null
   );
 }
