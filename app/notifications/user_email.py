@@ -6,8 +6,9 @@ from sqlalchemy import select
 
 from app.domain.jobs import JobType
 from app.models import AiDecisionRecord
-from app.notifications.center import CHANNEL_EMAIL, NotificationCenterService
+from app.notifications.center import CHANNEL_EMAIL
 from app.notifications.email import DecisionEmailNotificationService, render_decision_email
+from app.notifications.secure_center import NotificationCenterService
 from app.snapshots.repository import SnapshotRepository
 
 
