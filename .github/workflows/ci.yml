@@ -28,12 +28,15 @@ jobs:
       DATABASE_URL: postgresql+asyncpg://postgres:postgres@127.0.0.1:5432/dota_ai_decision_lab
     steps:
       - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          fetch-depth: 0
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
         with:
           version: "0.12.0"
           python-version: "3.14"
           enable-cache: true
       - run: uv sync --frozen --extra dev
+      - run: uv run python tools/scan_git_history_secrets.py
       - run: uv run alembic upgrade head
       - run: uv run alembic check
       - run: uv run ruff format --check app migrations tests tools
