@@ -69,6 +69,7 @@ async def test_quality_report_combines_portfolio_calibration_and_market_baseline
             session.add(canonical_map)
             await session.flush()
             snapshot = DecisionSnapshotRecord(
+                id=uuid4(),
                 canonical_map_id=canonical_map.id,
                 decision_at=NOW + timedelta(minutes=index * 30 + 1),
                 created_at=NOW + timedelta(minutes=index * 30 + 1),
