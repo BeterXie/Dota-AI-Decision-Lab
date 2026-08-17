@@ -1,0 +1,57 @@
+name: Temporary access-grants formatter
+
+on:
+  push:
+    branches:
+      - feat/access-grants-promotions
+
+permissions:
+  contents: write
+
+jobs:
+  format:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Check out feature branch
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803
+        with:
+          ref: feat/access-grants-promotions
+          fetch-depth: 1
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9
+        with:
+          version: 0.12.0
+          python-version: '3.14'
+          enable-cache: true
+
+      - name: Install locked development environment
+        run: uv sync --frozen --extra dev
+
+      - name: Format scoped-access files with repository Ruff
+        run: |
+          uv run ruff format \
+            app/promotions/paddle_series.py \
+            app/promotions/service.py \
+            tests/test_notification_center.py \
+            tests/test_promotions.py \
+            tests/test_series_pass.py
+
+      - name: Commit formatter output
+        shell: bash
+        run: |
+          if git diff --quiet; then
+            echo "No formatter changes"
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add \
+            app/promotions/paddle_series.py \
+            app/promotions/service.py \
+            tests/test_notification_center.py \
+            tests/test_promotions.py \
+            tests/test_series_pass.py
+          git commit -m "Format access grants with Ruff"
+          git push origin HEAD:feat/access-grants-promotions
