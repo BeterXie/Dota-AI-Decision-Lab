@@ -51,14 +51,26 @@ const offers = {
     }
   ],
   local_payment_notes: { alipay: "eligible", wechat_pay: "one time" },
-  crypto: { enabled: false, architecture: "separate_provider_adapter", status: "disabled_by_default" }
+  crypto: {
+    enabled: false,
+    architecture: "separate_provider_adapter",
+    status: "disabled_by_default"
+  }
 };
 
+const account = { entitlements: [], subscriptions: [] };
+
 test("shows WeChat Pay only on fixed-term offers and asks anonymous users to sign in", async () => {
-  vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify(offers), {
-    status: 200,
-    headers: { "Content-Type": "application/json" }
-  })));
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(
+      async () =>
+        new Response(JSON.stringify(offers), {
+          status: 200,
+          headers: { "Content-Type": "application/json" }
+        })
+    )
+  );
   const props = renderPage();
 
   const monthly = (await screen.findByText("Pro Monthly")).closest("article");
@@ -74,10 +86,14 @@ test("shows WeChat Pay only on fixed-term offers and asks anonymous users to sig
 
 test("does not call checkout while Paddle is disabled", async () => {
   const disabled = { ...offers, enabled: false, offers: [] };
-  const fetchMock = vi.fn(async () => new Response(JSON.stringify(disabled), {
-    status: 200,
-    headers: { "Content-Type": "application/json" }
-  }));
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const path = new URL(String(input), "http://localhost").pathname;
+    const payload = path === "/api/billing/account" ? account : disabled;
+    return new Response(JSON.stringify(payload), {
+      status: 200,
+      headers: { "Content-Type": "application/json" }
+    });
+  });
   vi.stubGlobal("fetch", fetchMock);
   renderPage({ authenticated: true });
 
