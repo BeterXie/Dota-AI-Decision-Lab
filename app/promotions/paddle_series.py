@@ -163,7 +163,7 @@ class PaddleSeriesPassService:
         )
         try:
             payload = json.loads(raw_body)
-        except UnicodeDecodeError, json.JSONDecodeError as exc:
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise PaddleWebhookError("Paddle webhook body is not valid JSON") from exc
         if not isinstance(payload, dict):
             raise PaddleWebhookError("Paddle webhook body must be a JSON object")
@@ -365,7 +365,11 @@ class PaddleSeriesPassService:
 
     async def _remember_intent_customer(self, intent_id: UUID, customer_ref: str) -> None:
         async with self._session_factory() as session, session.begin():
-            intent = await session.get(SeriesPassPurchaseRecord, intent_id, with_for_update=True)
+            intent = await session.get(
+                SeriesPassPurchaseRecord,
+                intent_id,
+                with_for_update=True,
+            )
             if intent is not None and intent.status == "PENDING":
                 intent.customer_ref = customer_ref
                 intent.updated_at = datetime.now(UTC)
@@ -377,7 +381,11 @@ class PaddleSeriesPassService:
         checkout: PaddleCheckout,
     ) -> None:
         async with self._session_factory() as session, session.begin():
-            intent = await session.get(SeriesPassPurchaseRecord, intent_id, with_for_update=True)
+            intent = await session.get(
+                SeriesPassPurchaseRecord,
+                intent_id,
+                with_for_update=True,
+            )
             if intent is None or intent.status != "PENDING":
                 raise RuntimeError("series pass checkout intent is no longer pending")
             collision = await session.scalar(
@@ -397,7 +405,11 @@ class PaddleSeriesPassService:
 
     async def _mark_intent_failed(self, intent_id: UUID) -> None:
         async with self._session_factory() as session, session.begin():
-            intent = await session.get(SeriesPassPurchaseRecord, intent_id, with_for_update=True)
+            intent = await session.get(
+                SeriesPassPurchaseRecord,
+                intent_id,
+                with_for_update=True,
+            )
             if intent is not None and intent.status == "PENDING":
                 intent.status = "FAILED"
                 intent.updated_at = datetime.now(UTC)
@@ -524,7 +536,10 @@ async def _upsert_series_grants(
                 )
             )
             continue
-        if row.scope_type != ACCESS_SCOPE_SERIES or row.scope_ref != purchase.canonical_series_id:
+        if (
+            row.scope_type != ACCESS_SCOPE_SERIES
+            or row.scope_ref != purchase.canonical_series_id
+        ):
             raise PaddleWebhookError("series pass source collided with another access scope")
         row.status = "ACTIVE" if active else "REVOKED"
         if active:
