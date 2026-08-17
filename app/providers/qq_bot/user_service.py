@@ -1,4 +1,5 @@
 from app.domain.jobs import JobType
+from app.entitlements import AI_DECISIONS_ENTITLEMENT, EntitlementService
 from app.notifications.center import (
     CHANNEL_QQ,
     NotificationBindingConflict,
@@ -7,7 +8,12 @@ from app.notifications.center import (
 )
 from app.notifications.pairing_limiter import PairingAttemptLimiter
 from app.notifications.secure_center import NotificationCenterService
-from app.providers.chat_commands import render_decision_notification
+from app.providers.chat_access import (
+    is_ai_decision_query,
+    is_notification_pause_command,
+    is_notification_resume_command,
+)
+from app.providers.chat_commands import command_reply, render_decision_notification
 from app.providers.qq_bot.models import QQInboundMessage
 from app.providers.qq_bot.service import QQBotService as LegacyQQBotService
 
@@ -21,6 +27,7 @@ class UserScopedQQBotService(LegacyQQBotService):
     def __init__(self, *args, session_factory, **kwargs) -> None:
         super().__init__(*args, session_factory=session_factory, **kwargs)
         self._notification_center = NotificationCenterService(session_factory)
+        self._entitlements = EntitlementService(session_factory)
         self._pairing_attempts = PairingAttemptLimiter()
 
     async def prepare_decision_notification(self, session, *, snapshot, decisions) -> None:
@@ -113,17 +120,20 @@ class UserScopedQQBotService(LegacyQQBotService):
         normalized = message.text.strip().casefold()
         destination_key = qq_destination_key(message.scope, message.target_id)
         pairing_code = _pairing_code_from_text(message.text)
-        account_command = (
-            pairing_code is not None
-            or normalized in _SUBSCRIBE_COMMANDS
+        preference_command = (
+            normalized in _SUBSCRIBE_COMMANDS
             or normalized in _UNSUBSCRIBE_COMMANDS
+            or is_notification_pause_command(message.text)
+            or is_notification_resume_command(message.text)
         )
+        premium_query = is_ai_decision_query(message.text)
+        account_command = pairing_code is not None or preference_command or premium_query
         if message.scope != "c2c" and account_command:
             await self._client.send_text(
                 scope=message.scope,
                 target_id=message.target_id,
                 text=(
-                    "⚠️ 为避免群成员代绑或替别人修改订阅，付费账号绑定仅支持 QQ 私聊。"
+                    "⚠️ AI 决策查询、账号绑定和订阅管理仅支持已绑定的 QQ 私聊。"
                     "请私聊机器人发送「绑定 <配对码>」。"
                 ),
                 msg_id=message.message_id,
@@ -143,7 +153,10 @@ class UserScopedQQBotService(LegacyQQBotService):
                         destination={"scope": "c2c", "target_id": message.target_id},
                         label=message.sender_name or contact.label,
                     )
-                    reply = "✅ QQ 已绑定到你的 Notification Center，AI 决策实时通知已开启。"
+                    reply = (
+                        "✅ QQ 已绑定到你的 Notification Center，AI 决策通知偏好已开启。"
+                        "实际推送仍取决于实时通知权限。"
+                    )
                 except NotificationBindingConflict:
                     reply = "⚠️ 这个 QQ 私聊已经绑定到另一个账号。请先在原账号里解除绑定。"
                 except NotificationPairingError:
@@ -156,7 +169,7 @@ class UserScopedQQBotService(LegacyQQBotService):
             )
             return
 
-        if normalized in _SUBSCRIBE_COMMANDS:
+        if normalized in _SUBSCRIBE_COMMANDS or is_notification_resume_command(message.text):
             updated = await self._notification_center.set_preference_for_destination(
                 channel=CHANNEL_QQ,
                 destination_key=destination_key,
@@ -174,13 +187,45 @@ class UserScopedQQBotService(LegacyQQBotService):
                 msg_id=message.message_id,
             )
             return
-        if normalized in _UNSUBSCRIBE_COMMANDS:
+        if normalized in _UNSUBSCRIBE_COMMANDS or is_notification_pause_command(message.text):
             updated = await self._notification_center.set_preference_for_destination(
                 channel=CHANNEL_QQ,
                 destination_key=destination_key,
                 enabled=False,
             )
             reply = "✅ 已关闭 AI 决策 QQ 通知。" if updated else "当前 QQ 私聊尚未绑定账号。"
+            await self._client.send_text(
+                scope="c2c",
+                target_id=message.target_id,
+                text=reply,
+                msg_id=message.message_id,
+            )
+            return
+        if premium_query:
+            user_id = await self._notification_center.bound_active_user_id(
+                channel=CHANNEL_QQ,
+                destination_key=destination_key,
+            )
+            if user_id is None:
+                reply = (
+                    "🔒 AI 决策查询需要先绑定登录账号。请在网页 Notification Center "
+                    "生成配对码，再私聊发送「绑定 <配对码>」。"
+                )
+            elif not await self._entitlements.has_entitlement(
+                user_id,
+                AI_DECISIONS_ENTITLEMENT,
+            ):
+                reply = "🔒 当前账号没有 AI 决策权限。请先开通相应权限后再查询。"
+            else:
+                reply = await command_reply(
+                    session,
+                    self._store,
+                    message.text,
+                    channel_label="QQ",
+                    live_state_max_age_seconds=self._live_state_max_age_seconds,
+                    live_market_max_age_seconds=self._live_market_max_age_seconds,
+                    market_max_pair_skew_seconds=self._market_max_pair_skew_seconds,
+                )
             await self._client.send_text(
                 scope="c2c",
                 target_id=message.target_id,
