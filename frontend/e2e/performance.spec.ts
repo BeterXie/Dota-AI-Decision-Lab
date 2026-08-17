@@ -328,7 +328,7 @@ test("compares AI portfolios and drills into an auditable event position", async
   const deepseekRow = page.getByRole("button", { name: /#2 DeepSeek deepseek-reasoner/ });
   await expect(gptRow).toContainText("13%");
   await expect(gptRow).toContainText("+2,600");
-  await expect(deepseekRow).toContainText("−4%");
+  await expect(deepseekRow).toContainText("-4%");
   await expect(deepseekRow).toContainText("−400");
   await expect(page.getByText("The International", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("PASS", { exact: true })).toBeVisible();
@@ -367,6 +367,7 @@ test("keeps ranking semantics and position audit discoverable at tablet width", 
   const gptRow = page.getByRole("button", { name: /#1 GPT gpt-5\.6/ });
   await expect(gptRow).toContainText("13%");
   await expect(page.getByText("赛事", { exact: true })).toBeVisible();
+  await expect(page.getByText("PASS", { exact: true })).toBeVisible();
 
   const positionButton = page.getByRole("button", { name: /MAP 2 Team Spirit/ });
   await expect(positionButton).toContainText("WON");
