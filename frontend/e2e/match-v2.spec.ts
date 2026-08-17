@@ -147,8 +147,8 @@ test("public match page exposes match intelligence without requesting premium AI
   const aiRequestCount = await installRoutes(page, anonymousSession);
   await page.goto("/matches/map-live");
 
-  await expect(page.getByRole("heading", { name: "Team Liquid" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Team Spirit" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Team Liquid", level: 1 })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Team Spirit", level: 1 })).toBeVisible();
   await expect(page.getByText("21:15", { exact: true })).toBeVisible();
   await expect(page.getByText("14", { exact: true })).toBeVisible();
   await expect(page.getByText("Juggernaut", { exact: true })).toBeVisible();
