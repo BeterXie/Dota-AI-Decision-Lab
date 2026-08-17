@@ -6,7 +6,7 @@ import secrets
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.auth.models import UserAccountRecord
@@ -105,7 +105,15 @@ class PromotionService:
         if not self.enabled:
             raise PromotionDisabledError("referral campaign is disabled")
         async with self._session_factory() as session, session.begin():
-            account = await session.get(UserAccountRecord, user_id)
+            # Serialize first-code creation per account. The unique constraints
+            # remain the final guard, but this prevents ordinary double-clicks or
+            # concurrent workers from racing to create two stable referral codes.
+            account = await session.scalar(
+                select(UserAccountRecord)
+                .where(UserAccountRecord.id == user_id)
+                .limit(1)
+                .with_for_update()
+            )
             if account is None or account.disabled_at is not None:
                 raise ReferralClaimError("active account required")
             existing = await session.scalar(
@@ -122,7 +130,9 @@ class PromotionService:
             for _ in range(5):
                 code = _new_referral_code()
                 collision = await session.scalar(
-                    select(ReferralCodeRecord.id).where(ReferralCodeRecord.code == code).limit(1)
+                    select(ReferralCodeRecord.id)
+                    .where(ReferralCodeRecord.code == code)
+                    .limit(1)
                 )
                 if collision is None:
                     session.add(
@@ -160,6 +170,10 @@ class PromotionService:
                 raise ReferralClaimError("active invited account required")
             if _as_utc(invited.created_at) < current - timedelta(days=self.claim_window_days):
                 raise ReferralClaimError("referral claim window has expired")
+            if await _has_prior_paid_purchase(session, invited_user_id):
+                raise ReferralClaimError(
+                    "referral must be claimed before the invited account's first paid purchase"
+                )
 
             existing = await session.scalar(
                 select(ReferralAttributionRecord)
@@ -218,7 +232,7 @@ class PromotionService:
             return False
         try:
             payload = json.loads(raw_body)
-        except (UnicodeDecodeError, json.JSONDecodeError):
+        except UnicodeDecodeError, json.JSONDecodeError:
             return False
         if not isinstance(payload, dict):
             return False
@@ -226,7 +240,9 @@ class PromotionService:
         data = payload.get("data")
         if not isinstance(event_type, str) or not isinstance(data, dict):
             return False
-        occurred_at = _parse_provider_time(payload.get("occurred_at")) or now or datetime.now(UTC)
+        occurred_at = (
+            _parse_provider_time(payload.get("occurred_at")) or now or datetime.now(UTC)
+        )
 
         if event_type == "transaction.completed":
             transaction_ref = data.get("id")
@@ -287,8 +303,23 @@ class PromotionService:
             )
             if attribution is None or attribution.status != REFERRAL_STATUS_CLAIMED:
                 return False
-            inviter = await session.get(UserAccountRecord, attribution.inviter_user_id)
-            invited = await session.get(UserAccountRecord, attribution.invited_user_id)
+
+            # The inviter row is the serialization point for reward-cap and
+            # stacking decisions. Two different invited users can complete
+            # payment concurrently, but only one transaction at a time computes
+            # the inviter's rewarded-count and next reward window.
+            inviter = await session.scalar(
+                select(UserAccountRecord)
+                .where(UserAccountRecord.id == attribution.inviter_user_id)
+                .limit(1)
+                .with_for_update()
+            )
+            invited = await session.scalar(
+                select(UserAccountRecord)
+                .where(UserAccountRecord.id == attribution.invited_user_id)
+                .limit(1)
+                .with_for_update()
+            )
             if (
                 inviter is None
                 or inviter.disabled_at is not None
@@ -414,6 +445,33 @@ class PromotionService:
             "max_rewards_per_inviter": self.max_rewards_per_inviter,
             "claim_window_days": self.claim_window_days,
         }
+
+
+async def _has_prior_paid_purchase(session: AsyncSession, user_id: UUID) -> bool:
+    global_purchase = await session.scalar(
+        select(BillingCheckoutRecord.id)
+        .where(
+            BillingCheckoutRecord.user_id == user_id,
+            BillingCheckoutRecord.provider == "paddle",
+            BillingCheckoutRecord.status == "COMPLETED",
+        )
+        .limit(1)
+    )
+    if global_purchase is not None:
+        return True
+    series_purchase = await session.scalar(
+        select(SeriesPassPurchaseRecord.id)
+        .where(
+            SeriesPassPurchaseRecord.user_id == user_id,
+            SeriesPassPurchaseRecord.provider == "paddle",
+            or_(
+                SeriesPassPurchaseRecord.completed_at.is_not(None),
+                SeriesPassPurchaseRecord.status.in_({"ACTIVE", "BLOCKED"}),
+            ),
+        )
+        .limit(1)
+    )
+    return series_purchase is not None
 
 
 async def _grant_stacked_reward(
