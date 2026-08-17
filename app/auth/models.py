@@ -19,7 +19,9 @@ class UserAccountRecord(Base):
     # Steam OpenID does not expose an email address. Keep the account usable
     # without inventing a fake inbox; users can later attach a verified email.
     email: Mapped[str | None] = mapped_column(String(320), nullable=True)
-    email_verified_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    email_verified_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
     display_name: Mapped[str | None] = mapped_column(String(160), nullable=True)
     avatar_url: Mapped[str | None] = mapped_column(Text, nullable=True)
     last_login_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
