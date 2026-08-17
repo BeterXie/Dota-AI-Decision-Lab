@@ -87,9 +87,7 @@ class TournamentQualityService:
                 "min_prediction_samples": self._policy.min_prediction_samples,
                 "min_roi": self._policy.min_roi,
                 "min_average_clv": self._policy.min_average_clv,
-                "min_brier_improvement_vs_market": (
-                    self._policy.min_brier_improvement_vs_market
-                ),
+                "min_brier_improvement_vs_market": (self._policy.min_brier_improvement_vs_market),
                 "max_drawdown_pct": self._policy.max_drawdown_pct,
             },
             "experiments": experiments,
@@ -110,13 +108,9 @@ class TournamentQualityService:
                     select(TournamentPortfolioPositionRecord, AiDecisionRecord)
                     .join(
                         AiDecisionRecord,
-                        AiDecisionRecord.id
-                        == TournamentPortfolioPositionRecord.ai_decision_id,
+                        AiDecisionRecord.id == TournamentPortfolioPositionRecord.ai_decision_id,
                     )
-                    .where(
-                        TournamentPortfolioPositionRecord.portfolio_account_id
-                        == account_id
-                    )
+                    .where(TournamentPortfolioPositionRecord.portfolio_account_id == account_id)
                     .order_by(TournamentPortfolioPositionRecord.opened_at)
                 )
             ).all()
@@ -129,9 +123,7 @@ class TournamentQualityService:
             and position.status != "REJECTED"
         ]
         settled_positions = [
-            position
-            for position, _ in position_pairs
-            if position.status in {"WON", "LOST"}
+            position for position, _ in position_pairs if position.status in {"WON", "LOST"}
         ]
         losing_streak = _longest_losing_streak(settled_positions)
 
@@ -297,10 +289,7 @@ class TournamentQualityService:
         failures = []
         if portfolio["roi"] is None or portfolio["roi"] < self._policy.min_roi:
             failures.append("ROI")
-        if (
-            quality["average_clv"] is None
-            or quality["average_clv"] < self._policy.min_average_clv
-        ):
+        if quality["average_clv"] is None or quality["average_clv"] < self._policy.min_average_clv:
             failures.append("CLV")
         brier_improvement = quality["market_comparison"]["brier_improvement_vs_market"]
         if (
@@ -328,10 +317,7 @@ class TournamentQualityService:
             (
                 await session.scalars(
                     select(TournamentPortfolioLedgerRecord)
-                    .where(
-                        TournamentPortfolioLedgerRecord.portfolio_account_id
-                        == account_id
-                    )
+                    .where(TournamentPortfolioLedgerRecord.portfolio_account_id == account_id)
                     .order_by(
                         TournamentPortfolioLedgerRecord.occurred_at,
                         TournamentPortfolioLedgerRecord.id,
@@ -373,7 +359,7 @@ def _market_probability_a(
             continue
         try:
             price = float(item.get("price"))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         if price <= 1:
             continue

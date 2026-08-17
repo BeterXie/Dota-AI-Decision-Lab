@@ -118,10 +118,13 @@ async def test_quality_report_combines_portfolio_calibration_and_market_baseline
                 provider_conflict=result.provider_conflict,
                 settled_at=result.settled_at,
             )
-            assert await EvaluationService().evaluate_snapshot(
-                session,
-                snapshot_id=snapshot.id,
-            ) == 1
+            assert (
+                await EvaluationService().evaluate_snapshot(
+                    session,
+                    snapshot_id=snapshot.id,
+                )
+                == 1
+            )
             evaluation = await session.scalar(
                 select(DecisionEvaluationRecord).where(
                     DecisionEvaluationRecord.ai_decision_id == decision.id

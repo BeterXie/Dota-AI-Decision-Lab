@@ -22,7 +22,9 @@ from app.models import (
     CanonicalMap,
     CanonicalSeries,
     DecisionSnapshotRecord,
+    MapResultRecord,
 )
+from app.time import ensure_utc
 
 _MONEY = Decimal("0.01")
 _ZERO = Decimal("0.00")
@@ -199,9 +201,20 @@ class TournamentPortfolioService:
             team_a_id=scope.team_a_id,
             team_b_id=scope.team_b_id,
         )
+        result = await session.scalar(
+            select(MapResultRecord).where(
+                MapResultRecord.canonical_map_id == scope.canonical_map_id
+            )
+        )
+        decision_available_at = ensure_utc(
+            record.response_received_at or record.decision_persisted_at or record.request_started_at
+        )
         rejection_reason = None
         status = "OPEN"
-        if odds is None:
+        if result is not None and ensure_utc(result.settled_at) <= decision_available_at:
+            status = "REJECTED"
+            rejection_reason = "MAP_ALREADY_SETTLED"
+        elif odds is None:
             status = "REJECTED"
             rejection_reason = "MISSING_DECISION_ODDS"
         elif stake > _money(account.cash_balance):
@@ -240,6 +253,14 @@ class TournamentPortfolioService:
             dedupe_key=f"place:{record.id}",
             occurred_at=record.request_started_at,
         )
+        if result is not None:
+            await self.settle_map(
+                session,
+                canonical_map_id=scope.canonical_map_id,
+                winner_team_id=result.winner_team_id,
+                provider_conflict=bool(result.provider_conflict),
+                settled_at=result.settled_at,
+            )
         return position
 
     async def settle_map(
