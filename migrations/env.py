@@ -11,6 +11,7 @@ from app.auth import models as auth_models  # noqa: F401
 from app.config import get_settings
 from app.db import Base
 from app.entitlements import models as entitlement_models  # noqa: F401
+from app.notifications import models as notification_models  # noqa: F401
 
 config = context.config
 if config.config_file_name is not None:

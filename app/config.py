@@ -91,6 +91,9 @@ class Settings(BaseSettings):
     deepseek_pro_decisions_enabled: bool = True
     email_translation_reasoning_effort: str = "low"
 
+    # Channel-level provider switch. Recipients now come from verified user
+    # Notification Center bindings; EMAIL_RECIPIENTS remains only as a legacy
+    # compatibility setting and is no longer required for product delivery.
     email_notifications_enabled: bool = False
     email_recipients: str = ""
     email_subject_prefix: str = "[Dota AI Decision Lab]"
@@ -121,11 +124,11 @@ class Settings(BaseSettings):
     # discarded even if durable jobs are recovered much later.
     wechat_clawbot_decision_max_age_seconds: float = Field(default=600.0, gt=0)
 
-    # Official QQ Bot channel.  The gateway/bridge process uses the
+    # Official QQ Bot channel. The gateway/bridge process uses the
     # harness-installed ``@tencent-connect/qqbot-nodejs`` SDK; run
     # ``python -m tools.qq_bot login`` once to bind a QQ robot by QR code.
     qq_bot_enabled: bool = False
-    # Optional pre-bound credentials.  Normally use the QR login CLI;
+    # Optional pre-bound credentials. Normally use the QR login CLI;
     # these env overrides are for non-interactive installs.
     qq_bot_app_id: SecretStr | None = None
     qq_bot_app_secret: SecretStr | None = None
@@ -139,7 +142,8 @@ class Settings(BaseSettings):
     qq_bot_bridge_startup_timeout_seconds: float = Field(default=20.0, gt=0)
     # Decision alerts are live signals, not a backlog feed.
     qq_bot_decision_max_age_seconds: float = Field(default=600.0, gt=0)
-    # Comma separated explicit push targets: c2c:<openid> or group:<group_openid>.
+    # Legacy operator targets retained for compatibility. Product delivery no
+    # longer broadcasts to them; verified Notification Center bindings drive it.
     qq_bot_decision_targets: str = ""
     # In groups only react when the bot is @mentioned.
     qq_bot_group_require_mention: bool = True
@@ -255,8 +259,6 @@ class Settings(BaseSettings):
             missing.append("RESEND_API_KEY")
         if not self.resend_from:
             missing.append("RESEND_FROM")
-        if not self.decision_email_recipients:
-            missing.append("EMAIL_RECIPIENTS")
         return tuple(missing)
 
     @property

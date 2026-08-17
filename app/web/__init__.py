@@ -11,6 +11,7 @@ from app.entitlements import EntitlementService
 from app.runtime.health import HealthRegistry
 from app.web.api import create_app as create_api_app
 from app.web.auth import register_auth
+from app.web.notifications import create_notification_router
 from app.web.player_hero_recent import register_player_hero_recent_routes
 from app.web.premium import create_premium_router
 from app.web.public_boundary import PublicMatchDataBoundaryMiddleware
@@ -67,6 +68,7 @@ def create_app(
             market_max_pair_skew_seconds=market_max_pair_skew_seconds,
         )
     )
+    app.include_router(create_notification_router(session_factory))
     register_auth(
         app,
         service=auth_service,
