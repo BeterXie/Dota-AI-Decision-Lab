@@ -38,7 +38,9 @@ jobs:
           python-version: '3.14'
       - run: uv sync --frozen --extra dev
       - name: Apply final semantics
-        run: uv run python tools/temporary_finalize_tournament_portfolio.py
+        run: |
+          uv run python tools/temporary_prepare_finalize_helper.py
+          uv run python tools/temporary_finalize_tournament_portfolio.py
       - name: Validate final semantics
         run: |
           uv run ruff check --fix app/ai app/evaluation tests/test_tournament_portfolio.py tests/test_tournament_quality.py tests/test_tournament_portfolio_unresolved_event.py
