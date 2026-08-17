@@ -5,7 +5,7 @@ import { useI18n } from "../i18n";
 export type ProductNavKey = "home" | "events" | "performance" | "review" | "billing";
 
 interface ProductShellProps {
-  active: ProductNavKey;
+  active: ProductNavKey | null;
   session: AuthSessionState | undefined;
   onLogin: () => void;
   onLogout: () => Promise<void>;
