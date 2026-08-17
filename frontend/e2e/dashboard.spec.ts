@@ -91,7 +91,7 @@ async function mockApi(page: Page, { entitled }: { entitled: boolean }) {
 
 test("keeps ordinary match data public while premium AI remains locked", async ({ page }) => {
   await mockApi(page, { entitled: false });
-  await page.goto("/?e2e=public-match");
+  await page.goto("/match-console?e2e=public-match");
 
   await expect(page.getByText("Team Spirit", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Tundra", { exact: true }).first()).toBeVisible();
@@ -105,7 +105,7 @@ test("keeps ordinary match data public while premium AI remains locked", async (
 
 test("renders player-first premium AI decision workspace for entitled users", async ({ page }) => {
   await mockApi(page, { entitled: true });
-  await page.goto("/?e2e=player-first");
+  await page.goto("/match-console?e2e=player-first");
 
   await expect(page.getByText("Team Spirit", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Tundra", { exact: true }).first()).toBeVisible();
