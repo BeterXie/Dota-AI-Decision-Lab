@@ -2,10 +2,11 @@ from app.domain.jobs import JobType
 from app.notifications.center import (
     CHANNEL_WECHAT,
     NotificationBindingConflict,
-    NotificationCenterService,
     NotificationPairingError,
     wechat_destination_key,
 )
+from app.notifications.pairing_limiter import PairingAttemptLimiter
+from app.notifications.secure_center import NotificationCenterService
 from app.providers.chat_commands import command_reply, render_decision_notification
 from app.providers.wechat_clawbot.models import MESSAGE_TYPE_USER, WeChatInboundMessage
 from app.providers.wechat_clawbot.service import WeChatClawBotService as LegacyWeChatClawBotService
@@ -17,6 +18,7 @@ class UserScopedWeChatClawBotService(LegacyWeChatClawBotService):
     def __init__(self, *args, session_factory, **kwargs) -> None:
         super().__init__(*args, session_factory=session_factory, **kwargs)
         self._notification_center = NotificationCenterService(session_factory)
+        self._pairing_attempts = PairingAttemptLimiter()
 
     async def prepare_decision_notification(self, session, *, snapshot, decisions) -> None:
         reason = await self._decision_notification_block_reason(session, snapshot)
@@ -68,6 +70,7 @@ class UserScopedWeChatClawBotService(LegacyWeChatClawBotService):
 
         text = render_decision_notification(snapshot, decisions, channel_label="微信")
         sent = 0
+        failures: list[Exception] = []
         accounts = {item.account_id: item for item in self._store.accounts()}
         for delivery_id in delivery_ids:
             target = await self._notification_center.start_delivery(delivery_id)
@@ -77,9 +80,11 @@ class UserScopedWeChatClawBotService(LegacyWeChatClawBotService):
             user_id = target.destination.get("user_id")
             account = accounts.get(account_id) if isinstance(account_id, str) else None
             if account is None or not isinstance(user_id, str) or not user_id:
-                exc = ValueError("WeChat notification binding is no longer backed by a bot account")
-                await self._notification_center.mark_failed(delivery_id, exc)
-                raise exc
+                await self._notification_center.mark_expired(
+                    delivery_id,
+                    "WeChat notification binding is no longer backed by a bot account",
+                )
+                continue
             try:
                 provider_message_id = await self._client.send_text(
                     account,
@@ -90,9 +95,16 @@ class UserScopedWeChatClawBotService(LegacyWeChatClawBotService):
                 )
             except Exception as exc:
                 await self._notification_center.mark_failed(delivery_id, exc)
-                raise
+                failures.append(exc)
+                continue
             await self._notification_center.mark_sent(delivery_id, provider_message_id)
             sent += 1
+        if failures:
+            first = failures[0]
+            raise RuntimeError(
+                f"{len(failures)} WeChat notification delivery target(s) failed; "
+                f"first={type(first).__name__}: {first}"
+            ) from first
         return sent
 
     async def _handle_message(self, session, account, message: WeChatInboundMessage) -> None:
@@ -102,22 +114,25 @@ class UserScopedWeChatClawBotService(LegacyWeChatClawBotService):
         normalized = message.text.strip().casefold()
         pairing_code = _pairing_code_from_text(message.text)
         if pairing_code is not None:
-            try:
-                await self._notification_center.consume_pairing_code(
-                    channel=CHANNEL_WECHAT,
-                    code=pairing_code,
-                    destination_key=destination_key,
-                    destination={
-                        "account_id": account.account_id,
-                        "user_id": message.from_user_id,
-                    },
-                    label=message.from_user_id,
-                )
-                reply = "✅ 微信已绑定到你的 Notification Center，AI 决策实时通知已开启。"
-            except NotificationBindingConflict:
-                reply = "⚠️ 这个微信会话已经绑定到另一个账号。请先在原账号里解除绑定。"
-            except NotificationPairingError:
-                reply = "⚠️ 配对码无效或已过期。请回到 Notification Center 重新生成。"
+            if not self._pairing_attempts.allow(destination_key):
+                reply = "⚠️ 配对尝试过于频繁，请稍后重新生成配对码再试。"
+            else:
+                try:
+                    await self._notification_center.consume_pairing_code(
+                        channel=CHANNEL_WECHAT,
+                        code=pairing_code,
+                        destination_key=destination_key,
+                        destination={
+                            "account_id": account.account_id,
+                            "user_id": message.from_user_id,
+                        },
+                        label=message.from_user_id,
+                    )
+                    reply = "✅ 微信已绑定到你的 Notification Center，AI 决策实时通知已开启。"
+                except NotificationBindingConflict:
+                    reply = "⚠️ 这个微信会话已经绑定到另一个账号。请先在原账号里解除绑定。"
+                except NotificationPairingError:
+                    reply = "⚠️ 配对码无效或已过期。请回到 Notification Center 重新生成。"
         elif normalized in {"订阅通知", "订阅决策", "订阅"}:
             updated = await self._notification_center.set_preference_for_destination(
                 channel=CHANNEL_WECHAT,
