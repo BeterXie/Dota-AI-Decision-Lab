@@ -9,9 +9,9 @@ from app.entitlements import REALTIME_NOTIFICATIONS_ENTITLEMENT
 from app.notifications.center import (
     PAIRABLE_CHANNELS,
     NotificationBindingConflict,
-    NotificationCenterService,
     normalize_channel,
 )
+from app.notifications.secure_center import NotificationCenterService
 
 
 class NotificationPreferencePayload(BaseModel):
