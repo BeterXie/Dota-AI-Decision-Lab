@@ -24,6 +24,7 @@ class BillingEventConflict(ValueError):
 @dataclass(frozen=True, slots=True)
 class BillingEventResult:
     duplicate: bool
+    stale: bool
     active_entitlements: tuple[str, ...]
 
 
@@ -32,7 +33,8 @@ class BillingEntitlementService:
 
     Provider adapters are responsible only for validating their webhook and
     mapping provider-specific subscription states to ACTIVE or INACTIVE. This
-    service owns idempotency and entitlement mutation in one database transaction.
+    service owns idempotency, stale-event rejection, and entitlement mutation in
+    one database transaction.
     """
 
     def __init__(self, session_factory: async_sessionmaker[AsyncSession]) -> None:
@@ -43,6 +45,7 @@ class BillingEntitlementService:
         *,
         provider: str,
         event_ref: str,
+        occurred_at: datetime,
         user_id: UUID,
         subscription_ref: str,
         plan_key: str,
@@ -60,8 +63,12 @@ class BillingEntitlementService:
             raise ValueError(f"unsupported billing plan: {plan_key}")
         if normalized_state not in {BILLING_ACCESS_ACTIVE, BILLING_ACCESS_INACTIVE}:
             raise ValueError(f"unsupported billing access state: {access_state}")
+        normalized_occurred_at = _as_utc(occurred_at)
+        if normalized_occurred_at is None:
+            raise ValueError("billing event occurrence time is required")
         current_period_end = _as_utc(current_period_end)
         digest = _event_digest(
+            occurred_at=normalized_occurred_at,
             user_id=user_id,
             subscription_ref=normalized_subscription_ref,
             plan_key=normalized_plan,
@@ -100,7 +107,11 @@ class BillingEntitlementService:
                         "billing event reference was replayed with different normalized content"
                     )
                 active = await _active_entitlements(session, user_id, now=now)
-                return BillingEventResult(True, active)
+                return BillingEventResult(
+                    duplicate=True,
+                    stale=not existing_event.applied,
+                    active_entitlements=active,
+                )
 
             subscription = await session.scalar(
                 select(BillingSubscriptionRecord)
@@ -111,6 +122,30 @@ class BillingEntitlementService:
                 .limit(1)
                 .with_for_update()
             )
+            if subscription is not None and subscription.user_id != user_id:
+                raise BillingEventConflict("billing subscription is already owned by another user")
+
+            if (
+                subscription is not None
+                and _as_utc(subscription.last_event_occurred_at) is not None
+                and normalized_occurred_at < _as_utc(subscription.last_event_occurred_at)
+            ):
+                session.add(
+                    _event_record(
+                        provider=normalized_provider,
+                        event_ref=normalized_event_ref,
+                        subscription_ref=normalized_subscription_ref,
+                        user_id=user_id,
+                        occurred_at=normalized_occurred_at,
+                        payload_digest=digest,
+                        applied=False,
+                        processed_at=now,
+                    )
+                )
+                await session.flush()
+                active = await _active_entitlements(session, user_id, now=now)
+                return BillingEventResult(False, True, active)
+
             if subscription is None:
                 subscription = BillingSubscriptionRecord(
                     user_id=user_id,
@@ -121,18 +156,18 @@ class BillingEntitlementService:
                     access_state=normalized_state,
                     provider_status=provider_status,
                     current_period_end=current_period_end,
+                    last_event_occurred_at=normalized_occurred_at,
                     created_at=now,
                     updated_at=now,
                 )
                 session.add(subscription)
             else:
-                if subscription.user_id != user_id:
-                    raise BillingEventConflict("billing subscription is already owned by another user")
                 subscription.customer_ref = customer_ref or subscription.customer_ref
                 subscription.plan_key = normalized_plan
                 subscription.access_state = normalized_state
                 subscription.provider_status = provider_status
                 subscription.current_period_end = current_period_end
+                subscription.last_event_occurred_at = normalized_occurred_at
                 subscription.updated_at = now
 
             plan_entitlements = _PLAN_ENTITLEMENTS[normalized_plan]
@@ -158,7 +193,7 @@ class BillingEntitlementService:
                                 entitlement=entitlement,
                                 status="ACTIVE",
                                 source=source,
-                                starts_at=now,
+                                starts_at=normalized_occurred_at,
                                 expires_at=current_period_end,
                                 created_at=now,
                                 updated_at=now,
@@ -166,23 +201,48 @@ class BillingEntitlementService:
                         )
                     continue
                 row.status = "ACTIVE" if should_be_active else "REVOKED"
-                row.starts_at = now if should_be_active else row.starts_at
+                row.starts_at = normalized_occurred_at if should_be_active else row.starts_at
                 row.expires_at = current_period_end if should_be_active else row.expires_at
                 row.updated_at = now
 
             session.add(
-                BillingEventRecord(
+                _event_record(
                     provider=normalized_provider,
                     event_ref=normalized_event_ref,
                     subscription_ref=normalized_subscription_ref,
                     user_id=user_id,
+                    occurred_at=normalized_occurred_at,
                     payload_digest=digest,
+                    applied=True,
                     processed_at=now,
                 )
             )
             await session.flush()
             active = await _active_entitlements(session, user_id, now=now)
-            return BillingEventResult(False, active)
+            return BillingEventResult(False, False, active)
+
+
+def _event_record(
+    *,
+    provider: str,
+    event_ref: str,
+    subscription_ref: str,
+    user_id: UUID,
+    occurred_at: datetime,
+    payload_digest: str,
+    applied: bool,
+    processed_at: datetime,
+) -> BillingEventRecord:
+    return BillingEventRecord(
+        provider=provider,
+        event_ref=event_ref,
+        subscription_ref=subscription_ref,
+        user_id=user_id,
+        occurred_at=occurred_at,
+        payload_digest=payload_digest,
+        applied=applied,
+        processed_at=processed_at,
+    )
 
 
 async def _lock_billing_key(session: AsyncSession, key: str) -> None:
@@ -226,6 +286,7 @@ def _billing_source(provider: str, subscription_ref: str) -> str:
 
 def _event_digest(
     *,
+    occurred_at: datetime,
     user_id: UUID,
     subscription_ref: str,
     plan_key: str,
@@ -235,6 +296,7 @@ def _event_digest(
     current_period_end: datetime | None,
 ) -> str:
     payload = {
+        "occurred_at": occurred_at.isoformat(),
         "user_id": str(user_id),
         "subscription_ref": subscription_ref,
         "plan_key": plan_key,
