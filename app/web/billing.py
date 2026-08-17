@@ -20,6 +20,8 @@ from app.billing.paddle import (
 from app.config import Settings
 from app.entitlements import EntitlementService
 
+_MAX_PADDLE_WEBHOOK_BYTES = 1_048_576
+
 
 def create_billing_router(
     session_factory: async_sessionmaker[AsyncSession],
@@ -120,7 +122,7 @@ def create_billing_router(
     @router.post("/webhooks/paddle")
     async def paddle_webhook(request: Request) -> dict[str, Any]:
         active_gateway = _require_gateway(gateway)
-        raw_body = await request.body()
+        raw_body = await _bounded_request_body(request, max_bytes=_MAX_PADDLE_WEBHOOK_BYTES)
         try:
             result = await active_gateway.process_webhook(
                 raw_body=raw_body,
@@ -145,6 +147,20 @@ def create_billing_router(
         }
 
     return router
+
+
+async def _bounded_request_body(request: Request, *, max_bytes: int) -> bytes:
+    chunks: list[bytes] = []
+    total = 0
+    async for chunk in request.stream():
+        total += len(chunk)
+        if total > max_bytes:
+            raise HTTPException(
+                status_code=status.HTTP_413_CONTENT_TOO_LARGE,
+                detail="Paddle webhook body is too large",
+            )
+        chunks.append(chunk)
+    return b"".join(chunks)
 
 
 def _configured_offers(settings: Settings) -> tuple[PaddleOffer, ...]:
