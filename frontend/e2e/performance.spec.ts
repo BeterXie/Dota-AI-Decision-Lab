@@ -366,7 +366,7 @@ test("keeps ranking semantics and position audit discoverable at tablet width", 
 
   const gptRow = page.getByRole("button", { name: /#1 GPT gpt-5\.6/ });
   await expect(gptRow).toContainText("13%");
-  await expect(page.getByText("赛事", { exact: true })).toBeVisible();
+  await expect(page.locator(".performance-col-events", { hasText: "赛事" })).toBeVisible();
   await expect(page.getByText("PASS", { exact: true })).toBeVisible();
 
   const positionButton = page.getByRole("button", { name: /MAP 2.*Team Spirit/ });
