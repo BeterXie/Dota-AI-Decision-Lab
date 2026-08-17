@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Index, String, UniqueConstraint, Uuid
+from sqlalchemy import Boolean, DateTime, ForeignKey, Index, String, UniqueConstraint, Uuid
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
@@ -56,4 +56,5 @@ class BillingEventRecord(Base):
     )
     occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
     payload_digest: Mapped[str] = mapped_column(String(64), nullable=False)
+    applied: Mapped[bool] = mapped_column(Boolean, nullable=False)
     processed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
