@@ -25,7 +25,7 @@ test("bottom account badge surfaces logout failures and allows retry", async () 
     </I18nProvider>
   );
 
-  const button = screen.getByRole("button", { name: "退出登录" });
+  const button = screen.getByRole("button", { name: "退出" });
   fireEvent.click(button);
 
   expect(onLogout).toHaveBeenCalledTimes(1);
