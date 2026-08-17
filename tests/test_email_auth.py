@@ -227,7 +227,7 @@ async def test_auth_api_keeps_matches_public_and_requires_entitlement_for_ai(tmp
 
 
 @pytest.mark.asyncio
-async def test_auth_guard_rejects_private_websocket_but_status_socket_is_public() -> None:
+async def test_auth_guard_requires_authentication_for_all_websockets() -> None:
     engine, factory, _, service = await _auth_fixture()
     called: list[str] = []
     sent: list[dict] = []
@@ -276,15 +276,21 @@ async def test_auth_guard_rejects_private_websocket_but_status_socket_is_public(
 
         sent.clear()
         await middleware(scope("/ws/status"), receive, send)  # type: ignore[arg-type]
-        assert called == ["/ws/status"]
-        assert sent == []
+        assert called == []
+        assert sent == [
+            {
+                "type": "websocket.close",
+                "code": 4401,
+                "reason": "authentication required",
+            }
+        ]
     finally:
         await service.close()
         await engine.dispose()
 
 
 @pytest.mark.asyncio
-async def test_auth_disabled_preserves_public_access_but_closes_premium_api(tmp_path) -> None:
+async def test_auth_disabled_preserves_public_access_but_closes_protected_apis(tmp_path) -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
@@ -307,7 +313,7 @@ async def test_auth_disabled_preserves_public_access_but_closes_premium_api(tmp_
                 "entitlements": [],
             }
             assert (await client.get("/api/matches")).status_code == 200
-            assert (await client.get("/metrics")).status_code == 200
+            assert (await client.get("/metrics")).status_code == 503
             premium = await client.get(
                 "/api/maps/11111111-1111-1111-1111-111111111111/ai-decisions"
             )

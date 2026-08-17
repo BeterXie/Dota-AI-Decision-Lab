@@ -20,11 +20,15 @@ class QQBridgeClient:
         *,
         base_url: str,
         timeout_seconds: float = 15.0,
+        token: str | None = None,
         client: httpx.AsyncClient | None = None,
     ) -> None:
         self._base_url = base_url.rstrip("/")
         self._timeout_seconds = timeout_seconds
         self._owns_client = client is None
+        self._token = (
+            token if token is not None else (_default_bridge_token() if client is None else None)
+        )
         self._client = client or httpx.AsyncClient(
             base_url=self._base_url,
             timeout=httpx.Timeout(timeout_seconds),
@@ -90,12 +94,14 @@ class QQBridgeClient:
         params: dict[str, object] | None = None,
         body: dict[str, object] | None = None,
     ) -> dict:
+        headers = {"Authorization": f"Bearer {self._token}"} if self._token else None
         try:
             response = await self._client.request(
                 method,
                 f"{self._base_url}{path}",
                 params=params,
                 json=body,
+                headers=headers,
                 timeout=self._timeout_seconds,
             )
         except httpx.HTTPError as exc:
@@ -112,3 +118,13 @@ class QQBridgeClient:
         if not isinstance(raw, dict):
             raise QQBridgeError("QQ bridge response must be a JSON object")
         return raw
+
+
+def _default_bridge_token() -> str:
+    # Imported lazily to keep the transport module cheap and avoid making mock
+    # clients create runtime state during unit tests.
+    from app.config import get_settings
+    from app.providers.qq_bot.storage import QQBotStore
+
+    settings = get_settings()
+    return QQBotStore(settings.qq_bot_state_dir).bridge_token()

@@ -1,8 +1,8 @@
 """Shared local state primitives for provider channels.
 
 Chat-channel credentials, cursors and preferences are runtime-local state,
-never database facts.  They live in gitignored directories with best-effort
-owner-only permissions.  This module centralizes the JSON and permission
+never database facts. They live in gitignored directories with best-effort
+owner-only permissions. This module centralizes the JSON and permission
 handling used by both the WeChat ClawBot and QQ Bot stores.
 """
 
@@ -122,7 +122,7 @@ class LocalStateStore:
             raise RuntimeError("icacls is unavailable")
         subprocess.run(  # noqa: S603 - no shell; executable is resolved and args are structured
             [executable, str(path), "/inheritance:r", "/grant:r", f"{user}:{permission}"],
-            check=False,
+            check=True,
             capture_output=True,
             creationflags=creation_flags,
         )

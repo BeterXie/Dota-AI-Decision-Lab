@@ -1,13 +1,13 @@
 // QQ Bot bridge for Dota AI Decision Lab.
 //
 // Loads the official @tencent-connect/qqbot-nodejs SDK from the path selected
-// by the Python runtime (harness profile by default) and exposes a loopback
-// HTTP API:
+// by the Python runtime (harness profile by default) and exposes an authenticated
+// loopback HTTP API:
 //   GET  /health             -> bridge/gateway status
 //   GET  /events?cursor=N    -> buffered inbound messages after cursor N
 //   POST /send               -> send a C2C or group text message
 //
-// Inbound messages are only buffered for the Python service.  All command
+// Inbound messages are only buffered for the Python service. All command
 // routing, database queries and decision rendering happen in Python.
 
 import http from "node:http";
@@ -28,6 +28,16 @@ const sdk = await import(pathToFileURL(sdkIndex).href);
 const { QQBot, messageFilter, contentSanitizer, mentionGate, accessPolicy } = sdk;
 
 const host = process.env.QQ_BOT_BRIDGE_HOST || "127.0.0.1";
+const loopbackHosts = new Set(["127.0.0.1", "localhost", "::1"]);
+if (!loopbackHosts.has(host)) {
+  console.error("QQ_BOT_BRIDGE_HOST must remain loopback");
+  process.exit(2);
+}
+const bridgeToken = process.env.QQ_BOT_BRIDGE_TOKEN || "";
+if (bridgeToken.length < 32) {
+  console.error("QQ_BOT_BRIDGE_TOKEN must be at least 32 characters");
+  process.exit(2);
+}
 const port = Number(process.env.QQ_BOT_BRIDGE_PORT || 18081);
 const preferredAccountId = process.env.QQ_BOT_ACCOUNT_ID || "";
 const requireMention = process.env.QQ_BOT_GROUP_REQUIRE_MENTION !== "0";
@@ -69,6 +79,18 @@ function setStatus(next, message = null) {
   status = next;
   statusMessage = message;
   log("info", `bridge_status=${next}${message ? ` message=${message}` : ""}`);
+}
+
+function authorized(req) {
+  const header = req.headers.authorization;
+  if (typeof header !== "string" || !header.startsWith("Bearer ")) return false;
+  const supplied = header.slice("Bearer ".length);
+  const expectedBytes = Buffer.from(bridgeToken, "utf8");
+  const suppliedBytes = Buffer.from(supplied, "utf8");
+  return (
+    expectedBytes.length === suppliedBytes.length &&
+    crypto.timingSafeEqual(expectedBytes, suppliedBytes)
+  );
 }
 
 async function readAccounts() {
@@ -304,6 +326,10 @@ async function idempotentSend(body) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || "/", `http://${host}:${port}`);
   try {
+    if (!authorized(req)) {
+      sendJson(res, 401, { error: "unauthorized" });
+      return;
+    }
     if (req.method === "GET" && url.pathname === "/health") {
       sendJson(res, 200, {
         ok: gatewayConnected,
