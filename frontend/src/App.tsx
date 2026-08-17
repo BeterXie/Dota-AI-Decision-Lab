@@ -21,6 +21,9 @@ import { LoginPage } from "./components/LoginPage";
 const ReviewPage = lazy(() =>
   import("./components/ReviewPage").then((module) => ({ default: module.ReviewPage }))
 );
+const AiPerformancePage = lazy(() =>
+  import("./components/AiPerformancePage").then((module) => ({ default: module.AiPerformancePage }))
+);
 const NotificationCenterPage = lazy(() =>
   import("./components/NotificationCenterPage").then((module) => ({
     default: module.NotificationCenterPage
@@ -106,6 +109,7 @@ function AuthenticatedApp() {
   };
 
   const pathname = typeof window !== "undefined" ? window.location.pathname : "/";
+  const performanceRoute = isAiPerformanceRoute(pathname);
   const reviewRoute = isReviewRoute(pathname);
   const notificationRoute = isNotificationRoute(pathname);
   const billingRoute = isBillingRoute(pathname);
@@ -138,13 +142,27 @@ function AuthenticatedApp() {
         />
       );
     }
+  } else if (performanceRoute) {
+    content = hasAiAccess ? (
+      <Suspense fallback={<div className="auth-bootstrap">AI Performance</div>}>
+        <AiPerformancePage />
+      </Suspense>
+    ) : (
+      <PremiumAnalyticsGate
+        surface="performance"
+        authenticated={isSignedIn}
+        authEnabled={session?.enabled !== false}
+        onLogin={() => setLoginOpen(true)}
+      />
+    );
   } else if (reviewRoute) {
     content = hasAiAccess ? (
       <Suspense fallback={<div className="auth-bootstrap">Dota AI Decision Lab</div>}>
         <ReviewPage />
       </Suspense>
     ) : (
-      <PremiumReviewGate
+      <PremiumAnalyticsGate
+        surface="review"
         authenticated={isSignedIn}
         authEnabled={session?.enabled !== false}
         onLogin={() => setLoginOpen(true)}
@@ -175,6 +193,10 @@ function AuthenticatedApp() {
       ) : null}
     </>
   );
+}
+
+export function isAiPerformanceRoute(pathname: string): boolean {
+  return pathname === "/performance" || pathname.startsWith("/performance/");
 }
 
 export function isReviewRoute(pathname: string): boolean {
@@ -390,16 +412,33 @@ async function fetchPremiumAi(id: string): Promise<PremiumAiPayload> {
   return response.json() as Promise<PremiumAiPayload>;
 }
 
-function PremiumReviewGate({
+function PremiumAnalyticsGate({
+  surface,
   authenticated,
   authEnabled,
   onLogin
 }: {
+  surface: "review" | "performance";
   authenticated: boolean;
   authEnabled: boolean;
   onLogin: () => void;
 }) {
   const { locale } = useI18n();
+  const performance = surface === "performance";
+  const title = locale === "zh-CN"
+    ? performance ? "AI Performance 属于 Pro 权限" : "AI 复盘属于 Pro 权限"
+    : performance ? "AI Performance is a Pro feature" : "AI Review is a Pro feature";
+  const description = locale === "zh-CN"
+    ? performance
+      ? "普通比赛数据保持公开；跨比赛模型成绩、实验版本对比和完整决策追溯属于全局 Pro。单个系列赛通行证不会开放全局模型历史。"
+      : "普通比赛数据保持公开；跨比赛 AI 历史复盘属于全局 Pro。单个系列赛通行证只解锁所购买比赛的 AI 与实时通知。"
+    : performance
+      ? "Match data stays public. Cross-match model performance, experiment comparison and decision audit history require global Pro; a series pass does not unlock global model history."
+      : "Match data stays public. Cross-match AI review requires global Pro; a series pass unlocks only the purchased series AI and alerts.";
+  const denied = locale === "zh-CN"
+    ? performance ? "当前账号尚未拥有全局 AI Performance 权限。" : "当前账号尚未拥有全局 AI Review 权限。"
+    : performance ? "This account does not have global AI Performance access yet." : "This account does not have global AI Review access yet.";
+
   return (
     <main className="auth-page">
       <section className="auth-card">
@@ -407,26 +446,16 @@ function PremiumReviewGate({
           <div className="auth-brand-mark">◆</div>
           <div>
             <div className="auth-eyebrow">PRO INTELLIGENCE</div>
-            <h1>{locale === "zh-CN" ? "AI 复盘属于 Pro 权限" : "AI Review is a Pro feature"}</h1>
+            <h1>{title}</h1>
           </div>
         </div>
-        <p className="auth-description">
-          {locale === "zh-CN"
-            ? "普通比赛数据保持公开；跨比赛 AI 历史复盘属于全局 Pro。单个系列赛通行证只解锁所购买比赛的 AI 与实时通知。"
-            : "Match data stays public. Cross-match AI review requires global Pro; a series pass unlocks only the purchased series AI and alerts."}
-        </p>
+        <p className="auth-description">{description}</p>
         {!authenticated && authEnabled && (
           <button className="auth-primary-btn" type="button" onClick={onLogin}>
             {locale === "zh-CN" ? "登录以查看权限" : "Sign in to check access"}
           </button>
         )}
-        {authenticated && (
-          <div className="auth-error" role="status">
-            {locale === "zh-CN"
-              ? "当前账号尚未拥有全局 AI Review 权限。"
-              : "This account does not have global AI Review access yet."}
-          </div>
-        )}
+        {authenticated && <div className="auth-error" role="status">{denied}</div>}
         {!authEnabled && (
           <div className="auth-error" role="status">
             {locale === "zh-CN"
