@@ -19,6 +19,14 @@ def test_http_access_policy_is_explicit_and_unknown_api_is_not_public() -> None:
     assert _http_access_requirement(
         "/api/maps/00000000-0000-0000-0000-000000000000/ai-decisions"
     ) == ("ENTITLED", AI_DECISIONS_ENTITLEMENT)
+    assert _http_access_requirement("/api/review") == (
+        "ENTITLED",
+        AI_DECISIONS_ENTITLEMENT,
+    )
+    assert _http_access_requirement("/api/snapshots") == (
+        "ENTITLED",
+        AI_DECISIONS_ENTITLEMENT,
+    )
     assert _http_access_requirement("/api/notifications") == (
         "ENTITLED",
         REALTIME_NOTIFICATIONS_ENTITLEMENT,
