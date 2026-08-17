@@ -5,15 +5,49 @@ from fastapi.responses import JSONResponse, Response
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.requests import Request
 
+_PUBLIC_MATCH_FIELDS = frozenset(
+    {
+        "entity_type",
+        "identity_status",
+        "phase",
+        "id",
+        "series_id",
+        "canonical_map_id",
+        "map_number",
+        "valve_match_id",
+        "best_of",
+        "series_score",
+        "series_maps",
+        "scheduled_at",
+        "provider_match_id",
+        "tournament_name",
+        "round",
+        "raw_status",
+        "provider_observed_at",
+        "team_a",
+        "team_b",
+        "market",
+        "market_quality",
+        "current_market_view",
+        "snapshot_market_quality",
+        "draft",
+        "live",
+        "sync",
+        "historical_prewarm",
+        "market_timeline",
+        "live_timeline",
+        "result",
+        "result_evidence",
+    }
+)
+
 
 class PublicMatchDataBoundaryMiddleware(BaseHTTPMiddleware):
-    """Remove premium AI payloads from endpoints that are intentionally public.
+    """Build a fail-closed public projection for ordinary match endpoints.
 
-    The existing projection builder still owns the canonical match shape. This
-    middleware is the transport boundary: public match endpoints never emit AI
-    decisions, checkpoint history, frozen AI input payloads, or decision-linked
-    future-odds captures. Paid clients fetch those from the dedicated premium
-    endpoint instead.
+    The canonical map builder may grow new fields over time. Public responses do
+    not inherit those fields automatically: only the explicit allowlist below,
+    plus a deliberately reduced AI-readiness summary, can cross this boundary.
     """
 
     async def dispatch(self, request: Request, call_next: RequestResponseEndpoint) -> Response:
@@ -64,17 +98,17 @@ def _is_public_match_endpoint(path: str) -> bool:
 
 
 def _sanitize_match_payload(payload: dict) -> dict:
-    sanitized = dict(payload)
-    decisions = sanitized.get("decisions")
-    decision_rows = decisions if isinstance(decisions, list) else []
+    decision_rows = payload.get("decisions")
+    decisions = decision_rows if isinstance(decision_rows, list) else []
     completed_models = len(
         {
             (item.get("provider"), item.get("model"))
-            for item in decision_rows
+            for item in decisions
             if isinstance(item, dict) and item.get("provider") and item.get("model")
         }
     )
-    snapshot = sanitized.get("latest_snapshot")
+
+    snapshot = payload.get("latest_snapshot")
     snapshot_summary = None
     if isinstance(snapshot, dict):
         snapshot_summary = {
@@ -91,15 +125,13 @@ def _sanitize_match_payload(payload: dict) -> dict:
             if key in snapshot
         }
 
+    sanitized = {key: payload[key] for key in _PUBLIC_MATCH_FIELDS if key in payload}
+    sanitized["latest_snapshot"] = snapshot_summary
+    sanitized["decisions"] = []
     sanitized["ai_access"] = {
         "required_entitlement": "ai_decisions",
         "analysis_available": snapshot_summary is not None,
         "updated_at": snapshot_summary.get("decision_at") if snapshot_summary else None,
         "completed_models": completed_models,
     }
-    sanitized["latest_snapshot"] = snapshot_summary
-    sanitized["decisions"] = []
-    sanitized.pop("checkpoint_decisions", None)
-    sanitized.pop("snapshot_payload", None)
-    sanitized.pop("future_odds", None)
     return sanitized
