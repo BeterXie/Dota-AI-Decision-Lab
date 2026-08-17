@@ -44,28 +44,88 @@ jobs:
           from pathlib import Path
 
           def replace(path: str, old: str, new: str, count: int = 1) -> None:
-              p = Path(path)
-              text = p.read_text(encoding="utf-8")
+              file = Path(path)
+              text = file.read_text(encoding="utf-8")
               if old not in text:
                   raise SystemExit(f"target not found in {path}: {old[:180]!r}")
-              p.write_text(text.replace(old, new, count), encoding="utf-8")
+              file.write_text(text.replace(old, new, count), encoding="utf-8")
 
           replace(
               "app/evaluation/portfolio.py",
-              '''    DecisionSnapshotRecord,\n)\n''',
-              '''    DecisionSnapshotRecord,\n    MapResultRecord,\n)\nfrom app.time import ensure_utc\n''',
+              "    DecisionSnapshotRecord,\n)\n",
+              "    DecisionSnapshotRecord,\n    MapResultRecord,\n)\nfrom app.time import ensure_utc\n",
           )
           replace(
               "app/evaluation/portfolio.py",
-              '''        rejection_reason = None\n        status = "OPEN"\n        if odds is None:\n            status = "REJECTED"\n            rejection_reason = "MISSING_DECISION_ODDS"\n        elif stake > _money(account.cash_balance):\n            status = "REJECTED"\n            rejection_reason = "INSUFFICIENT_CASH"\n''',
-              '''        result = await session.scalar(\n            select(MapResultRecord).where(\n                MapResultRecord.canonical_map_id == scope.canonical_map_id\n            )\n        )\n        decision_available_at = ensure_utc(\n            record.response_received_at\n            or record.decision_persisted_at\n            or record.request_started_at\n        )\n        rejection_reason = None\n        status = "OPEN"\n        if result is not None and ensure_utc(result.settled_at) <= decision_available_at:\n            status = "REJECTED"\n            rejection_reason = "MAP_ALREADY_SETTLED"\n        elif odds is None:\n            status = "REJECTED"\n            rejection_reason = "MISSING_DECISION_ODDS"\n        elif stake > _money(account.cash_balance):\n            status = "REJECTED"\n            rejection_reason = "INSUFFICIENT_CASH"\n''',
+              """        rejection_reason = None
+        status = "OPEN"
+        if odds is None:
+            status = "REJECTED"
+            rejection_reason = "MISSING_DECISION_ODDS"
+        elif stake > _money(account.cash_balance):
+            status = "REJECTED"
+            rejection_reason = "INSUFFICIENT_CASH"
+""",
+              """        result = await session.scalar(
+            select(MapResultRecord).where(
+                MapResultRecord.canonical_map_id == scope.canonical_map_id
+            )
+        )
+        decision_available_at = ensure_utc(
+            record.response_received_at
+            or record.decision_persisted_at
+            or record.request_started_at
+        )
+        rejection_reason = None
+        status = "OPEN"
+        if result is not None and ensure_utc(result.settled_at) <= decision_available_at:
+            status = "REJECTED"
+            rejection_reason = "MAP_ALREADY_SETTLED"
+        elif odds is None:
+            status = "REJECTED"
+            rejection_reason = "MISSING_DECISION_ODDS"
+        elif stake > _money(account.cash_balance):
+            status = "REJECTED"
+            rejection_reason = "INSUFFICIENT_CASH"
+""",
           )
           replace(
               "app/evaluation/portfolio.py",
-              '''        await self._ledger(\n            session,\n            account=account,\n            position=position,\n            entry_type="BET_PLACED",\n            cash_delta=-stake,\n            locked_delta=stake,\n            realized_pnl_delta=_ZERO,\n            dedupe_key=f"place:{record.id}",\n            occurred_at=record.request_started_at,\n        )\n        return position\n''',
-              '''        await self._ledger(\n            session,\n            account=account,\n            position=position,\n            entry_type="BET_PLACED",\n            cash_delta=-stake,\n            locked_delta=stake,\n            realized_pnl_delta=_ZERO,\n            dedupe_key=f"place:{record.id}",\n            occurred_at=record.request_started_at,\n        )\n        if result is not None:\n            await self.settle_map(\n                session,\n                canonical_map_id=scope.canonical_map_id,\n                winner_team_id=result.winner_team_id,\n                provider_conflict=bool(result.provider_conflict),\n                settled_at=result.settled_at,\n            )\n        return position\n''',
+              """        await self._ledger(
+            session,
+            account=account,
+            position=position,
+            entry_type="BET_PLACED",
+            cash_delta=-stake,
+            locked_delta=stake,
+            realized_pnl_delta=_ZERO,
+            dedupe_key=f"place:{record.id}",
+            occurred_at=record.request_started_at,
+        )
+        return position
+""",
+              """        await self._ledger(
+            session,
+            account=account,
+            position=position,
+            entry_type="BET_PLACED",
+            cash_delta=-stake,
+            locked_delta=stake,
+            realized_pnl_delta=_ZERO,
+            dedupe_key=f"place:{record.id}",
+            occurred_at=record.request_started_at,
+        )
+        if result is not None:
+            await self.settle_map(
+                session,
+                canonical_map_id=scope.canonical_map_id,
+                winner_team_id=result.winner_team_id,
+                provider_conflict=bool(result.provider_conflict),
+                settled_at=result.settled_at,
+            )
+        return position
+""",
           )
-
           replace(
               "app/web/review.py",
               "from fastapi import APIRouter, Query\n",
@@ -78,115 +138,37 @@ jobs:
           )
           replace(
               "app/web/review.py",
-              '''    cache: dict[int, tuple[float, dict[str, Any]]] = {}\n    cache_lock = asyncio.Lock()\n\n''',
-              '''    cache: dict[int, tuple[float, dict[str, Any]]] = {}\n    cache_lock = asyncio.Lock()\n    quality_service = TournamentQualityService()\n\n    @router.get("/api/review/events/{canonical_event_id}/ai-quality")\n    async def event_ai_quality(canonical_event_id: UUID) -> dict[str, Any]:\n        async with session_factory() as session:\n            event = await session.get(CanonicalEvent, canonical_event_id)\n            if event is None:\n                raise HTTPException(status_code=404, detail="canonical event not found")\n            return await quality_service.build_report(\n                session, canonical_event_id=canonical_event_id\n            )\n\n''',
-          )
+              """    cache: dict[int, tuple[float, dict[str, Any]]] = {}
+    cache_lock = asyncio.Lock()
 
-          path = Path("tests/test_tournament_portfolio.py")
-          text = path.read_text(encoding="utf-8")
-          text = text.replace(
-              '''from app.evaluation.portfolio import TournamentPortfolioService\n''',
-              '''from app.evaluation import SettlementService\nfrom app.evaluation.portfolio import TournamentPortfolioService\n''',
-              1,
-          )
-          if "test_ai_response_after_map_settlement_is_rejected" not in text:
-              text += r'''
+""",
+              """    cache: dict[int, tuple[float, dict[str, Any]]] = {}
+    cache_lock = asyncio.Lock()
+    quality_service = TournamentQualityService()
 
-@pytest.mark.asyncio
-async def test_ai_response_after_map_settlement_is_rejected() -> None:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    service = TournamentPortfolioService(initial_bankroll=10_000)
-
-    async with factory() as session, session.begin():
-        event, team_a, _, _, map1, _, snapshot1, _ = await _fixture(session)
-        decision = _decision(snapshot1, action="BUY_A", stake=1000)
-        session.add(decision)
-        await session.flush()
-        result = await SettlementService().settle(
-            session,
-            canonical_map_id=map1.id,
-            winner_team_id=team_a.id,
-            provider="fixture",
-            provider_match_id="late-result",
-            result_observed_at=decision.response_received_at,
-            basic_first_usable_at=decision.response_received_at,
-            raw_event_id=uuid4(),
-            normalizer_version="portfolio-v1",
-            identity_confidence=1.0,
-        )
-        result.settled_at = decision.response_received_at - timedelta(seconds=1)
-        position = await service.record_decision_position(session, decision)
-        assert position is not None
-        assert position.status == "REJECTED"
-        assert position.rejection_reason == "MAP_ALREADY_SETTLED"
-        account = await session.scalar(
-            select(TournamentPortfolioAccountRecord).where(
-                TournamentPortfolioAccountRecord.canonical_event_id == event.id
+    @router.get("/api/review/events/{canonical_event_id}/ai-quality")
+    async def event_ai_quality(canonical_event_id: UUID) -> dict[str, Any]:
+        async with session_factory() as session:
+            event = await session.get(CanonicalEvent, canonical_event_id)
+            if event is None:
+                raise HTTPException(status_code=404, detail="canonical event not found")
+            return await quality_service.build_report(
+                session, canonical_event_id=canonical_event_id
             )
-        )
-        assert account is not None
-        assert account.cash_balance == Decimal("10000.00")
-        assert account.locked_balance == Decimal("0.00")
 
-    await engine.dispose()
-
-
-@pytest.mark.asyncio
-async def test_pre_result_ai_response_persisted_late_is_immediately_settled() -> None:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    service = TournamentPortfolioService(initial_bankroll=10_000)
-
-    async with factory() as session, session.begin():
-        event, team_a, _, _, map1, _, snapshot1, _ = await _fixture(session)
-        decision = _decision(snapshot1, action="BUY_A", stake=1000)
-        session.add(decision)
-        await session.flush()
-        result = await SettlementService().settle(
-            session,
-            canonical_map_id=map1.id,
-            winner_team_id=team_a.id,
-            provider="fixture",
-            provider_match_id="persisted-late",
-            result_observed_at=decision.response_received_at + timedelta(seconds=10),
-            basic_first_usable_at=decision.response_received_at + timedelta(seconds=10),
-            raw_event_id=uuid4(),
-            normalizer_version="portfolio-v1",
-            identity_confidence=1.0,
-        )
-        result.settled_at = decision.response_received_at + timedelta(seconds=10)
-        position = await service.record_decision_position(session, decision)
-        assert position is not None
-        assert position.status == "WON"
-        assert position.payout == Decimal("1900.00")
-        account = await session.scalar(
-            select(TournamentPortfolioAccountRecord).where(
-                TournamentPortfolioAccountRecord.canonical_event_id == event.id
-            )
-        )
-        assert account is not None
-        assert account.cash_balance == Decimal("10900.00")
-        assert account.locked_balance == Decimal("0.00")
-        assert account.realized_pnl == Decimal("900.00")
-
-    await engine.dispose()
-'''
-          path.write_text(text, encoding="utf-8")
+""",
+          )
           PY
-          uv run ruff check --fix app/evaluation app/web/review.py tests/test_tournament_portfolio.py tests/test_tournament_portfolio_postgres.py tests/test_tournament_quality.py
-          uv run ruff format app/evaluation app/web/review.py tests/test_tournament_portfolio.py tests/test_tournament_portfolio_postgres.py tests/test_tournament_quality.py
-          uv run ruff check app/evaluation app/web/review.py tests/test_tournament_portfolio.py tests/test_tournament_portfolio_postgres.py tests/test_tournament_quality.py
+          uv run ruff check --fix app/evaluation app/web/review.py tests/test_tournament_portfolio_late_result.py tests/test_tournament_portfolio_postgres.py tests/test_tournament_quality.py
+          uv run ruff format app/evaluation app/web/review.py tests/test_tournament_portfolio_late_result.py tests/test_tournament_portfolio_postgres.py tests/test_tournament_quality.py
+          uv run ruff check app/evaluation app/web/review.py tests/test_tournament_portfolio_late_result.py tests/test_tournament_portfolio_postgres.py tests/test_tournament_quality.py
       - name: Validate portfolio hardening and quality report
         run: |
           uv run alembic upgrade head
           uv run alembic check
           uv run pytest -W error -q \
             tests/test_tournament_portfolio.py \
+            tests/test_tournament_portfolio_late_result.py \
             tests/test_tournament_portfolio_postgres.py \
             tests/test_tournament_quality.py \
             tests/test_ai_coordinator.py \
