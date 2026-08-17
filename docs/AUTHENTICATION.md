@@ -125,7 +125,7 @@ Email is not an arbitrary address entered in a form. The user explicitly binds t
 
 ### QQ binding
 
-The QQ bot installation must be configured normally. In Notification Center, the user selects **Generate pairing code** and receives a command like:
+The QQ bot installation must be configured and `QQ_BOT_ENABLED=true` for QQ delivery. In Notification Center, the user selects **Generate pairing code** and receives a command like:
 
 ```text
 绑定 ABCD-1234
@@ -137,7 +137,7 @@ After pairing, `订阅通知` and `退订通知` toggle the preference for the b
 
 ### WeChat binding
 
-WeChat uses the same proof-of-possession flow. Generate a one-time code in Notification Center and send `绑定 <code>` to the configured WeChat bot. The bot binds the actual bot account plus sender user id to the authenticated application account.
+The WeChat ClawBot installation must be configured and `WECHAT_CLAWBOT_ENABLED=true` for WeChat delivery. WeChat uses the same proof-of-possession flow: generate a one-time code in Notification Center and send `绑定 <code>` to the configured WeChat bot. The bot binds the actual bot account plus sender user id to the authenticated application account.
 
 After pairing, `订阅通知` and `退订通知` toggle the WeChat preference. Ordinary bot query commands continue to use the existing WeChat command behavior.
 
