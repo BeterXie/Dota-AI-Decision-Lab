@@ -9,7 +9,7 @@ from typing import Any
 from uuid import UUID
 
 import httpx
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.billing.models import BillingCheckoutRecord, BillingSubscriptionRecord
@@ -41,6 +41,10 @@ _ADJUSTMENT_EVENTS = frozenset({"adjustment.created", "adjustment.updated"})
 
 
 class PaddleApiError(RuntimeError):
+    pass
+
+
+class PaddleCheckoutConflict(ValueError):
     pass
 
 
@@ -173,7 +177,9 @@ class PaddleApiClient:
         payment_link = checkout.get("url") if isinstance(checkout, dict) else None
         if not isinstance(transaction_ref, str) or not transaction_ref.startswith("txn_"):
             raise PaddleApiError("Paddle transaction response is missing a valid transaction id")
-        if not isinstance(payment_link, str) or not payment_link.startswith(("https://", "http://")):
+        if not isinstance(payment_link, str) or not payment_link.startswith(
+            ("https://", "http://")
+        ):
             raise PaddleApiError(
                 "Paddle did not return a checkout URL; configure a default payment link "
                 "or approved checkout URL"
@@ -278,6 +284,10 @@ class PaddleBillingGateway:
         offer = self._offers.get(offer_key)
         if offer is None:
             raise ValueError(f"unknown Paddle billing offer: {offer_key}")
+        if await self._has_active_paddle_purchase(user_id):
+            raise PaddleCheckoutConflict(
+                "an active Paddle Pro purchase already exists; use the customer portal"
+            )
         customer_ref = await self._known_customer_ref(user_id)
         api = PaddleApiClient(
             api_key=self._api_key,
@@ -448,14 +458,18 @@ class PaddleBillingGateway:
                 return None
             offer = self._validated_checkout_offer(checkout, data)
             if not offer.recurring:
-                raise PaddleWebhookError("fixed-term Paddle checkout unexpectedly created a subscription")
+                raise PaddleWebhookError(
+                    "fixed-term Paddle checkout unexpectedly created a subscription"
+                )
             user_id = checkout.user_id
             plan_key = checkout.plan_key
             customer_ref = _optional_string(data.get("customer_id")) or checkout.customer_ref
         elif record is not None:
             offer = self._offer_from_data(data)
             if offer is None or not offer.recurring:
-                raise PaddleWebhookError("mapped Paddle subscription contains an unknown recurring price")
+                raise PaddleWebhookError(
+                    "mapped Paddle subscription contains an unknown recurring price"
+                )
             user_id = record.user_id
             plan_key = record.plan_key
             customer_ref = _optional_string(data.get("customer_id")) or record.customer_ref
@@ -463,16 +477,26 @@ class PaddleBillingGateway:
             return None
 
         status = (_optional_string(data.get("status")) or "").lower()
-        if event_type in {"subscription.activated", "subscription.resumed", "subscription.trialing"}:
+        if event_type in {
+            "subscription.activated",
+            "subscription.resumed",
+            "subscription.trialing",
+        }:
             access_state = BILLING_ACCESS_ACTIVE
-        elif event_type in {"subscription.past_due", "subscription.paused", "subscription.canceled"}:
+        elif event_type in {
+            "subscription.past_due",
+            "subscription.paused",
+            "subscription.canceled",
+        }:
             access_state = BILLING_ACCESS_INACTIVE
         elif status in _ACTIVE_SUBSCRIPTION_STATUSES:
             access_state = BILLING_ACCESS_ACTIVE
         elif status in _INACTIVE_SUBSCRIPTION_STATUSES:
             access_state = BILLING_ACCESS_INACTIVE
         else:
-            raise PaddleWebhookError(f"unsupported Paddle subscription status: {status or 'missing'}")
+            raise PaddleWebhookError(
+                f"unsupported Paddle subscription status: {status or 'missing'}"
+            )
         period_end = _period_end(data)
         if access_state == BILLING_ACCESS_ACTIVE and period_end is None:
             period_end = occurred_at + timedelta(days=32)
@@ -656,6 +680,24 @@ class PaddleBillingGateway:
                 .limit(1)
             )
 
+    async def _has_active_paddle_purchase(self, user_id: UUID) -> bool:
+        now = datetime.now(UTC)
+        async with self._session_factory() as session:
+            row = await session.scalar(
+                select(BillingSubscriptionRecord.id)
+                .where(
+                    BillingSubscriptionRecord.user_id == user_id,
+                    BillingSubscriptionRecord.provider == PADDLE_PROVIDER,
+                    BillingSubscriptionRecord.access_state == BILLING_ACCESS_ACTIVE,
+                    or_(
+                        BillingSubscriptionRecord.current_period_end.is_(None),
+                        BillingSubscriptionRecord.current_period_end > now,
+                    ),
+                )
+                .limit(1)
+            )
+        return row is not None
+
     async def _known_customer_ref(self, user_id: UUID) -> str | None:
         async with self._session_factory() as session:
             subscription_customer = await session.scalar(
@@ -738,9 +780,7 @@ def verify_paddle_signature(
         raise PaddleWebhookSignatureError("Paddle-Signature timestamp is invalid") from exc
     current = int((now or datetime.now(UTC)).timestamp())
     if abs(current - timestamp) > tolerance_seconds:
-        raise PaddleWebhookSignatureError(
-            "Paddle webhook signature timestamp is outside tolerance"
-        )
+        raise PaddleWebhookSignatureError("Paddle webhook signature timestamp is outside tolerance")
     signed_payload = str(timestamp).encode("ascii") + b":" + raw_body
     expected = hmac.new(secret.encode("utf-8"), signed_payload, "sha256").hexdigest()
     if not any(hmac.compare_digest(expected, candidate) for candidate in signatures):
