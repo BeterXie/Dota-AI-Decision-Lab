@@ -1,6 +1,7 @@
 import React from "react";
 import { translateStatus, useI18n } from "../i18n";
 import type { RuntimeSnapshot } from "../api";
+import { logout } from "../authApi";
 
 interface TopBarProps {
   runtime: RuntimeSnapshot | undefined;
@@ -20,6 +21,8 @@ export const TopBar: React.FC<TopBarProps> = ({
   onLogin
 }) => {
   const { locale, setLocale, t } = useI18n();
+  const [logoutBusy, setLogoutBusy] = React.useState(false);
+  const [logoutError, setLogoutError] = React.useState<string | null>(null);
   const status = runtime?.overall ?? "UNKNOWN";
   const statusText = translateStatus(status, locale);
 
@@ -31,6 +34,22 @@ export const TopBar: React.FC<TopBarProps> = ({
       : status === "ACTION_REQUIRED"
       ? "status-error"
       : "status-unknown";
+
+  const handleLogout = async () => {
+    if (logoutBusy) return;
+    setLogoutBusy(true);
+    setLogoutError(null);
+    try {
+      await logout();
+      // Logout revokes the server-side session and clears the HttpOnly cookie.
+      // A full navigation guarantees every React Query cache and protected route
+      // is rebuilt from the now-anonymous /api/auth/session response.
+      window.location.assign("/");
+    } catch {
+      setLogoutError(locale === "zh-CN" ? "退出失败，请重试" : "Sign out failed. Try again.");
+      setLogoutBusy(false);
+    }
+  };
 
   return (
     <header className="top-bar">
@@ -54,10 +73,25 @@ export const TopBar: React.FC<TopBarProps> = ({
         </a>
 
         {authenticated ? (
-          <a className="topbar-account-btn is-authenticated" href="/billing">
-            <span className="topbar-account-dot" aria-hidden="true" />
-            {locale === "zh-CN" ? "账户" : "Account"}
-          </a>
+          <div className="topbar-account-actions">
+            <a className="topbar-account-btn is-authenticated" href="/billing">
+              <span className="topbar-account-dot" aria-hidden="true" />
+              {locale === "zh-CN" ? "账户" : "Account"}
+            </a>
+            <button
+              className="topbar-logout-btn"
+              type="button"
+              disabled={logoutBusy}
+              onClick={() => void handleLogout()}
+            >
+              {logoutBusy ? "…" : locale === "zh-CN" ? "退出" : "Sign out"}
+            </button>
+            {logoutError && (
+              <span className="topbar-logout-error" role="alert">
+                {logoutError}
+              </span>
+            )}
+          </div>
         ) : authEnabled ? (
           <button className="topbar-account-btn" type="button" onClick={onLogin}>
             {locale === "zh-CN" ? "登录" : "Log in"}
