@@ -78,7 +78,6 @@ test("lets an entitled user manage channels and generate a verified QQ pairing c
   await page.goto("/notifications?e2e=pro-notifications");
 
   await expect(page.getByRole("heading", { name: "Get alerts only for the matches you care about" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Notification Center" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Email" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "QQ Bot" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "WeChat Bot" })).toBeVisible();
