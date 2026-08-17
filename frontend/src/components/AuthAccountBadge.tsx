@@ -10,13 +10,20 @@ interface AuthAccountBadgeProps {
 export const AuthAccountBadge: React.FC<AuthAccountBadgeProps> = ({ user, onLogout }) => {
   const { locale, t } = useI18n();
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
   const handleLogout = async () => {
     if (busy) return;
     setBusy(true);
+    setError(null);
     try {
       await onLogout();
-    } finally {
+      // The server revokes the session and clears the HttpOnly cookie. Reload the
+      // document so every auth/query observer is rebuilt from the anonymous
+      // /api/auth/session response instead of retaining a stale signed-in view.
+      window.location.reload();
+    } catch {
+      setError(locale === "zh-CN" ? "退出失败，请重试" : "Sign out failed. Try again.");
       setBusy(false);
     }
   };
@@ -30,6 +37,7 @@ export const AuthAccountBadge: React.FC<AuthAccountBadgeProps> = ({ user, onLogo
       <button type="button" disabled={busy} onClick={() => void handleLogout()}>
         {busy ? "…" : t("authSignOut")}
       </button>
+      {error && <span className="auth-account-error" role="alert">{error}</span>}
     </div>
   );
 };
