@@ -39,6 +39,95 @@ replace_once(
     "    )\n",
 )
 
+# Funding chronology must be tested by creating the immutable snapshot at the intended
+# prematch time, never by mutating a persisted DecisionSnapshotRecord.
+replace_once(
+    "tests/test_tournament_portfolio.py",
+    '''@pytest.mark.asyncio
+async def test_event_funding_precedes_prematch_snapshot() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    service = TournamentPortfolioService(initial_bankroll=10_000)
+
+    async with factory() as session, session.begin():
+        event, _, _, _, _, _, snapshot1, _ = await _fixture(session)
+        snapshot1.decision_at = NOW - timedelta(minutes=30)
+        event.started_at = NOW + timedelta(hours=1)
+        context = await service.context_for_snapshot(
+            session,
+            snapshot_id=snapshot1.id,
+            experiment=EXPERIMENT,
+        )
+        assert context is not None
+        funded_at = await session.scalar(
+            select(TournamentPortfolioLedgerRecord.occurred_at).where(
+                TournamentPortfolioLedgerRecord.portfolio_account_id == context.account_id,
+                TournamentPortfolioLedgerRecord.entry_type == "EVENT_FUNDED",
+            )
+        )
+        assert funded_at is not None
+        assert funded_at.replace(tzinfo=UTC) == snapshot1.decision_at
+
+    await engine.dispose()
+''',
+    '''@pytest.mark.asyncio
+async def test_event_funding_precedes_prematch_snapshot() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    service = TournamentPortfolioService(initial_bankroll=10_000)
+
+    async with factory() as session, session.begin():
+        decision_at = NOW - timedelta(minutes=30)
+        event = CanonicalEvent(name="Prematch Funding Cup", started_at=NOW + timedelta(hours=1))
+        team_a = CanonicalTeam(name="Prematch A")
+        team_b = CanonicalTeam(name="Prematch B")
+        session.add_all([event, team_a, team_b])
+        await session.flush()
+        series = CanonicalSeries(
+            event_id=event.id,
+            team_a_id=team_a.id,
+            team_b_id=team_b.id,
+            best_of=1,
+            scheduled_at=event.started_at,
+        )
+        session.add(series)
+        await session.flush()
+        canonical_map = CanonicalMap(
+            series_id=series.id,
+            map_number=1,
+            scheduled_at=event.started_at,
+        )
+        session.add(canonical_map)
+        await session.flush()
+        snapshot = _snapshot(canonical_map.id, team_a.id, team_b.id, 99)
+        snapshot.decision_at = decision_at
+        snapshot.created_at = decision_at
+        session.add(snapshot)
+        await session.flush()
+
+        context = await service.context_for_snapshot(
+            session,
+            snapshot_id=snapshot.id,
+            experiment=EXPERIMENT,
+        )
+        assert context is not None
+        funded_at = await session.scalar(
+            select(TournamentPortfolioLedgerRecord.occurred_at).where(
+                TournamentPortfolioLedgerRecord.portfolio_account_id == context.account_id,
+                TournamentPortfolioLedgerRecord.entry_type == "EVENT_FUNDED",
+            )
+        )
+        assert funded_at is not None
+        assert funded_at.replace(tzinfo=UTC) == decision_at
+
+    await engine.dispose()
+''',
+)
+
 # Add a latency regression: a horizon observation that happened before the AI response
 # is diagnostic only and must not contribute to actionable-rate samples.
 p = Path("tests/test_tournament_quality.py")
