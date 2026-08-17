@@ -11,11 +11,22 @@ export interface BillingOffer {
   };
 }
 
+export interface SeriesPassOffer extends Partial<BillingOffer> {
+  enabled: boolean;
+  scope_type?: "SERIES";
+  access_days?: number;
+}
+
 export interface BillingOffersState {
   provider: "paddle";
   enabled: boolean;
   environment: "sandbox" | "live";
   offers: BillingOffer[];
+  series_pass: SeriesPassOffer;
+  referral: {
+    enabled: boolean;
+    campaign_key: string;
+  };
   local_payment_notes: {
     alipay: string;
     wechat_pay: string;
@@ -29,6 +40,14 @@ export interface BillingOffersState {
 
 export interface BillingAccountState {
   entitlements: string[];
+  grants: Array<{
+    entitlement: string;
+    scope_type: string;
+    scope_ref: string | null;
+    campaign_key: string | null;
+    starts_at: string | null;
+    expires_at: string | null;
+  }>;
   subscriptions: Array<{
     provider: string;
     plan: string;
@@ -38,6 +57,29 @@ export interface BillingAccountState {
     updated_at: string;
     recurring: boolean;
   }>;
+  series_passes: Array<{
+    provider: string;
+    canonical_series_id: string;
+    status: string;
+    grant_expires_at: string | null;
+    completed_at: string | null;
+    payment_blocked: boolean;
+  }>;
+}
+
+export interface ReferralState {
+  enabled: boolean;
+  campaign_key: string;
+  code: string | null;
+  claimed_invites: number;
+  rewarded_invites: number;
+  reward: {
+    trigger: string;
+    inviter_days: number;
+    invited_days: number;
+    max_rewards_per_inviter: number;
+    claim_window_days: number;
+  };
 }
 
 export async function fetchBillingOffers(): Promise<BillingOffersState> {
@@ -54,8 +96,29 @@ export async function createBillingCheckout(offerKey: string): Promise<{ checkou
   });
 }
 
+export async function createSeriesPassCheckout(
+  canonicalSeriesId: string
+): Promise<{ checkout_url: string }> {
+  return billingRequest<{ checkout_url: string }>(
+    `/api/billing/series/${encodeURIComponent(canonicalSeriesId)}/checkout`,
+    { method: "POST" }
+  );
+}
+
 export async function createBillingPortal(): Promise<{ portal_url: string }> {
   return billingRequest<{ portal_url: string }>("/api/billing/portal", { method: "POST" });
+}
+
+export async function fetchReferral(): Promise<ReferralState> {
+  return billingRequest<ReferralState>("/api/promotions/referral");
+}
+
+export async function claimReferral(code: string): Promise<{ claimed: boolean; status: string }> {
+  return billingRequest<{ claimed: boolean; status: string }>("/api/promotions/referral/claim", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ code })
+  });
 }
 
 async function billingRequest<T>(url: string, init?: RequestInit): Promise<T> {
