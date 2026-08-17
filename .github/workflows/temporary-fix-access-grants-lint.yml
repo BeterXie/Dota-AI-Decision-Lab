@@ -27,8 +27,9 @@ jobs:
       - name: Install locked development environment
         run: uv sync --frozen --extra dev
       - name: Apply safe Ruff fixes
+        shell: bash
         run: |
-          uv run ruff check --fix app migrations tests tools
+          uv run ruff check --fix app migrations tests tools || true
           uv run ruff format app migrations tests tools
       - name: Commit safe fixer output
         shell: bash
@@ -42,3 +43,6 @@ jobs:
           git add app migrations tests tools
           git commit -m "Apply safe Ruff fixes to access grants"
           git push origin HEAD:feat/access-grants-promotions
+      - name: Report remaining lint
+        if: always()
+        run: uv run ruff check app migrations tests tools
