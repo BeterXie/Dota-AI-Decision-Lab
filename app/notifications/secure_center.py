@@ -89,6 +89,33 @@ class NotificationCenterService(BaseNotificationCenterService):
             label=label,
         )
 
+    async def bound_active_user_id(
+        self,
+        *,
+        channel: str,
+        destination_key: str,
+    ) -> UUID | None:
+        """Resolve a verified active destination to its active account owner.
+
+        Chat transports use this as the identity bridge before checking premium
+        entitlements. Disabled accounts and disabled/unverified bindings fail closed.
+        """
+
+        normalized_channel = normalize_channel(channel)
+        async with self._session_factory() as session:
+            return await session.scalar(
+                select(NotificationBindingRecord.user_id)
+                .join(UserAccountRecord, UserAccountRecord.id == NotificationBindingRecord.user_id)
+                .where(
+                    NotificationBindingRecord.channel == normalized_channel,
+                    NotificationBindingRecord.destination_key == destination_key,
+                    NotificationBindingRecord.status == "ACTIVE",
+                    NotificationBindingRecord.verified_at.is_not(None),
+                    UserAccountRecord.disabled_at.is_(None),
+                )
+                .limit(1)
+            )
+
     async def eligible_bindings(
         self,
         session: AsyncSession,
