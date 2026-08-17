@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.billing.models import BillingEventRecord, BillingSubscriptionRecord
@@ -74,6 +74,17 @@ class BillingEntitlementService:
         source = _billing_source(normalized_provider, normalized_subscription_ref)
 
         async with self._session_factory() as session, session.begin():
+            # Postgres row locks cannot lock a row that does not exist yet. Use
+            # transaction-scoped advisory locks so concurrent webhook deliveries
+            # for the same event/subscription serialize before their first insert.
+            await _lock_billing_key(
+                session,
+                f"event:{normalized_provider}:{normalized_event_ref}",
+            )
+            await _lock_billing_key(
+                session,
+                f"subscription:{normalized_provider}:{normalized_subscription_ref}",
+            )
             existing_event = await session.scalar(
                 select(BillingEventRecord)
                 .where(
@@ -172,6 +183,15 @@ class BillingEntitlementService:
             await session.flush()
             active = await _active_entitlements(session, user_id, now=now)
             return BillingEventResult(False, active)
+
+
+async def _lock_billing_key(session: AsyncSession, key: str) -> None:
+    if session.get_bind().dialect.name != "postgresql":
+        return
+    await session.execute(
+        text("select pg_advisory_xact_lock(hashtextextended(:key, 0))"),
+        {"key": key},
+    )
 
 
 async def _active_entitlements(
