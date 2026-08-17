@@ -338,7 +338,7 @@ test("compares AI portfolios and drills into an auditable event position", async
   await expect(page.getByText("Brier 改善 vs 市场", { exact: true })).toBeVisible();
   await expect(page.getByText("+0.025", { exact: true })).toBeVisible();
 
-  const positionButton = page.getByRole("button", { name: /MAP 2 Team Spirit/ });
+  const positionButton = page.getByRole("button", { name: /MAP 2.*Team Spirit/ });
   await expect(positionButton).toContainText("WON");
   await expect(positionButton).toContainText("详情");
   await positionButton.click();
@@ -369,7 +369,7 @@ test("keeps ranking semantics and position audit discoverable at tablet width", 
   await expect(page.getByText("赛事", { exact: true })).toBeVisible();
   await expect(page.getByText("PASS", { exact: true })).toBeVisible();
 
-  const positionButton = page.getByRole("button", { name: /MAP 2 Team Spirit/ });
+  const positionButton = page.getByRole("button", { name: /MAP 2.*Team Spirit/ });
   await expect(positionButton).toContainText("WON");
   await expect(positionButton).toContainText("详情");
   await positionButton.click();
