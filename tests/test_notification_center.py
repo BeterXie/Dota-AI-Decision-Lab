@@ -140,7 +140,10 @@ async def test_delivery_is_idempotent_and_rechecks_entitlement_before_send() -> 
             )
         assert [item.id for item in first] == [item.id for item in second]
         async with factory() as session:
-            assert await session.scalar(select(func.count()).select_from(NotificationDeliveryRecord)) == 1
+            assert (
+                await session.scalar(select(func.count()).select_from(NotificationDeliveryRecord))
+                == 1
+            )
 
         await entitlements.revoke(
             user_id,

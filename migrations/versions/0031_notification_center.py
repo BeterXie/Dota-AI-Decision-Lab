@@ -109,9 +109,7 @@ def upgrade() -> None:
         sa.Column("last_error", sa.Text()),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["user_id"], ["user_accounts.id"], ondelete="CASCADE"),
-        sa.ForeignKeyConstraint(
-            ["binding_id"], ["notification_bindings.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["binding_id"], ["notification_bindings.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["snapshot_id"], ["decision_snapshots.id"], ondelete="CASCADE"),
         sa.UniqueConstraint(
             "binding_id",

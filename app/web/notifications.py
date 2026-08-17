@@ -50,7 +50,9 @@ def create_notification_router(
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
         if normalized not in PAIRABLE_CHANNELS:
-            raise HTTPException(status_code=422, detail="pairing is only supported for QQ and WeChat")
+            raise HTTPException(
+                status_code=422, detail="pairing is only supported for QQ and WeChat"
+            )
         code, expires_at = await center.create_pairing_code(user.id, normalized)
         return {
             "channel": normalized,
@@ -86,7 +88,9 @@ def create_notification_router(
 def _request_user(request: Request) -> AuthenticatedUser:
     user = getattr(request.state, "auth_user", None)
     if not isinstance(user, AuthenticatedUser):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED, detail="authentication required"
+        )
     entitlements = tuple(getattr(request.state, "auth_entitlements", ()))
     if REALTIME_NOTIFICATIONS_ENTITLEMENT not in entitlements:
         raise HTTPException(

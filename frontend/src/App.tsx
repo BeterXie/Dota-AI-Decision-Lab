@@ -18,9 +18,17 @@ import { AppShell } from "./components/AppShell";
 import { AuthAccountBadge } from "./components/AuthAccountBadge";
 import { LoginPage } from "./components/LoginPage";
 
-const ReviewPage = lazy(() => import("./components/ReviewPage").then((module) => ({ default: module.ReviewPage })));
+const ReviewPage = lazy(() =>
+  import("./components/ReviewPage").then((module) => ({ default: module.ReviewPage }))
+);
+const NotificationCenterPage = lazy(() =>
+  import("./components/NotificationCenterPage").then((module) => ({
+    default: module.NotificationCenterPage
+  }))
+);
 const authSessionKey = ["auth", "session"] as const;
 const AI_DECISIONS_ENTITLEMENT = "ai_decisions";
+const REALTIME_NOTIFICATIONS_ENTITLEMENT = "realtime_notifications";
 
 interface PremiumAiPayload {
   canonical_map_id: string;
@@ -53,6 +61,9 @@ function AuthenticatedApp() {
   });
   const session = auth.data;
   const hasAiAccess = Boolean(session?.entitlements?.includes(AI_DECISIONS_ENTITLEMENT));
+  const hasNotificationAccess = Boolean(
+    session?.entitlements?.includes(REALTIME_NOTIFICATIONS_ENTITLEMENT)
+  );
   const isSignedIn = Boolean(session?.enabled && session.authenticated && session.user);
 
   const handleAuthenticated = (next: AuthSessionState) => {
@@ -84,9 +95,30 @@ function AuthenticatedApp() {
     });
   };
 
-  const reviewRoute = typeof window !== "undefined" && isReviewRoute(window.location.pathname);
-  const content = reviewRoute ? (
-    hasAiAccess ? (
+  const pathname = typeof window !== "undefined" ? window.location.pathname : "/";
+  const reviewRoute = isReviewRoute(pathname);
+  const notificationRoute = isNotificationRoute(pathname);
+  let content: React.ReactNode;
+  if (notificationRoute) {
+    if (auth.isLoading) {
+      content = <div className="auth-bootstrap">Dota AI Decision Lab</div>;
+    } else if (hasNotificationAccess && session?.user) {
+      content = (
+        <Suspense fallback={<div className="auth-bootstrap">Notification Center</div>}>
+          <NotificationCenterPage userEmail={session.user.email} />
+        </Suspense>
+      );
+    } else {
+      content = (
+        <NotificationAccessGate
+          authenticated={isSignedIn}
+          authEnabled={session?.enabled !== false}
+          onLogin={() => setLoginOpen(true)}
+        />
+      );
+    }
+  } else if (reviewRoute) {
+    content = hasAiAccess ? (
       <Suspense fallback={<div className="auth-bootstrap">Dota AI Decision Lab</div>}>
         <ReviewPage />
       </Suspense>
@@ -96,14 +128,16 @@ function AuthenticatedApp() {
         authEnabled={session?.enabled !== false}
         onLogin={() => setLoginOpen(true)}
       />
-    )
-  ) : (
-    <DashboardApp
-      session={session}
-      authLoading={auth.isLoading}
-      onLogin={() => setLoginOpen(true)}
-    />
-  );
+    );
+  } else {
+    content = (
+      <DashboardApp
+        session={session}
+        authLoading={auth.isLoading}
+        onLogin={() => setLoginOpen(true)}
+      />
+    );
+  }
 
   return (
     <>
@@ -126,6 +160,10 @@ export function isReviewRoute(pathname: string): boolean {
   return pathname === "/review" || pathname.startsWith("/review/");
 }
 
+export function isNotificationRoute(pathname: string): boolean {
+  return pathname === "/notifications" || pathname.startsWith("/notifications/");
+}
+
 function DashboardApp({
   session,
   authLoading,
@@ -142,8 +180,16 @@ function DashboardApp({
   const isSignedIn = Boolean(session?.enabled && session.authenticated && session.user);
   const canFetchOperationalData = Boolean(session && (!session.enabled || isSignedIn));
 
-  const runtime = useQuery({ queryKey: queryKeys.runtime, queryFn: fetchRuntime, refetchInterval: 5000 });
-  const maps = useQuery({ queryKey: queryKeys.maps, queryFn: fetchMaps, refetchInterval: 5000 });
+  const runtime = useQuery({
+    queryKey: queryKeys.runtime,
+    queryFn: fetchRuntime,
+    refetchInterval: 5000
+  });
+  const maps = useQuery({
+    queryKey: queryKeys.maps,
+    queryFn: fetchMaps,
+    refetchInterval: 5000
+  });
   const jobs = useQuery({
     queryKey: queryKeys.jobs,
     queryFn: fetchJobs,
@@ -203,7 +249,9 @@ function DashboardApp({
       )
     : enrichedMatches;
 
-  const handleRefresh = () => { void queryClient.invalidateQueries(); };
+  const handleRefresh = () => {
+    void queryClient.invalidateQueries();
+  };
 
   return (
     <AppShell
@@ -237,7 +285,9 @@ function chooseActiveMapId(selectedMapId: string | null, matches: MapSummary[]):
   const liveMatches = matches.filter((match) => match.phase === "LIVE");
   if (liveMatches.length > 0) return liveMatches[0].id;
 
-  const upcomingMatches = matches.filter((match) => match.phase === "PREMATCH" || match.phase === "UNKNOWN");
+  const upcomingMatches = matches.filter(
+    (match) => match.phase === "PREMATCH" || match.phase === "UNKNOWN"
+  );
   if (upcomingMatches.length > 0) {
     const sortedUpcoming = [...upcomingMatches].sort((a, b) => {
       const timeA = a.scheduled_at ? Date.parse(a.scheduled_at) : Infinity;
@@ -247,7 +297,9 @@ function chooseActiveMapId(selectedMapId: string | null, matches: MapSummary[]):
     return sortedUpcoming[0].id;
   }
 
-  const finishedMatches = matches.filter((match) => match.phase === "POSTMATCH" || match.phase === "AWAITING_RESULT");
+  const finishedMatches = matches.filter(
+    (match) => match.phase === "POSTMATCH" || match.phase === "AWAITING_RESULT"
+  );
   if (finishedMatches.length > 0) {
     const sortedFinished = [...finishedMatches].sort((a, b) => {
       const timeA = a.scheduled_at ? Date.parse(a.scheduled_at) : 0;
@@ -306,7 +358,9 @@ function PremiumReviewGate({
         )}
         {authenticated && (
           <div className="auth-error" role="status">
-            {locale === "zh-CN" ? "当前账号尚未拥有 AI Decision 权限。" : "This account does not have AI Decision access yet."}
+            {locale === "zh-CN"
+              ? "当前账号尚未拥有 AI Decision 权限。"
+              : "This account does not have AI Decision access yet."}
           </div>
         )}
         {!authEnabled && (
@@ -316,6 +370,62 @@ function PremiumReviewGate({
               : "Authentication is disabled in this runtime, so Pro AI access remains closed."}
           </div>
         )}
+      </section>
+    </main>
+  );
+}
+
+function NotificationAccessGate({
+  authenticated,
+  authEnabled,
+  onLogin
+}: {
+  authenticated: boolean;
+  authEnabled: boolean;
+  onLogin: () => void;
+}) {
+  const { locale } = useI18n();
+  return (
+    <main className="auth-page">
+      <section className="auth-card">
+        <div className="auth-card-header">
+          <div className="auth-brand-mark">◆</div>
+          <div>
+            <div className="auth-eyebrow">REALTIME PRO</div>
+            <h1>
+              {locale === "zh-CN"
+                ? "实时 Notification Center 属于 Pro 权限"
+                : "Realtime Notification Center is a Pro feature"}
+            </h1>
+          </div>
+        </div>
+        <p className="auth-description">
+          {locale === "zh-CN"
+            ? "拥有 realtime_notifications 后，可把已验证邮箱、QQ 和微信会话绑定到账号，接收新的 AI BUY 决策。"
+            : "With realtime_notifications, verified email, QQ and WeChat destinations can receive new AI BUY decisions."}
+        </p>
+        {!authenticated && authEnabled && (
+          <button className="auth-primary-btn" type="button" onClick={onLogin}>
+            {locale === "zh-CN" ? "登录以查看权限" : "Sign in to check access"}
+          </button>
+        )}
+        {authenticated && (
+          <div className="auth-error" role="status">
+            {locale === "zh-CN"
+              ? "当前账号尚未拥有 realtime_notifications 权限。"
+              : "This account does not have realtime_notifications access yet."}
+          </div>
+        )}
+        {!authEnabled && (
+          <div className="auth-error" role="status">
+            {locale === "zh-CN"
+              ? "当前运行环境尚未启用登录，因此用户级实时通知保持关闭。"
+              : "Authentication is disabled, so user-scoped realtime notifications remain closed."}
+          </div>
+        )}
+        <a className="auth-secondary-link" href="/">
+          {locale === "zh-CN" ? "返回比赛" : "Back to matches"}
+        </a>
       </section>
     </main>
   );

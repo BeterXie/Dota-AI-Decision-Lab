@@ -57,7 +57,9 @@ class UserDecisionEmailNotificationService(DecisionEmailNotificationService):
     async def deliver(self, notification_id: UUID) -> UserEmailDeliveryReceipt:
         target = await self._notification_center.start_delivery(notification_id)
         if target is None:
-            delivery, destination = await self._notification_center.delivery_receipt(notification_id)
+            delivery, destination = await self._notification_center.delivery_receipt(
+                notification_id
+            )
             email = destination.get("email")
             recipients = (email,) if isinstance(email, str) and email else ()
             return UserEmailDeliveryReceipt(delivery.id, recipients, delivery.sent_at)

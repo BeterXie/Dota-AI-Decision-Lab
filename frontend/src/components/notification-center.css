@@ -1,0 +1,275 @@
+.notification-page {
+  min-height: 100vh;
+  padding: 48px clamp(20px, 5vw, 72px) 72px;
+  background:
+    radial-gradient(circle at 10% 0%, rgba(108, 92, 231, 0.16), transparent 34%),
+    #0a0b0e;
+  color: #f4f4f5;
+}
+
+.notification-hero,
+.notification-history {
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.notification-hero {
+  display: flex;
+  justify-content: space-between;
+  gap: 32px;
+  align-items: flex-end;
+  margin-bottom: 30px;
+}
+
+.notification-back {
+  display: inline-block;
+  margin-bottom: 22px;
+  color: #a9abb3;
+  text-decoration: none;
+}
+
+.notification-eyebrow,
+.notification-channel-code {
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  color: #9b8cff;
+}
+
+.notification-hero h1,
+.notification-channel-card h2,
+.notification-history h2 {
+  margin: 7px 0 0;
+}
+
+.notification-hero h1 {
+  font-size: clamp(32px, 5vw, 56px);
+  letter-spacing: -0.04em;
+}
+
+.notification-hero p {
+  max-width: 720px;
+  color: #a9abb3;
+  line-height: 1.65;
+}
+
+.notification-account {
+  min-width: 240px;
+  padding: 16px 18px;
+  border: 1px solid #272a33;
+  border-radius: 14px;
+  background: rgba(18, 20, 25, 0.86);
+}
+
+.notification-account span,
+.notification-binding-row span,
+.notification-pairing-code span,
+.notification-pairing-code small {
+  display: block;
+  color: #8d9099;
+  font-size: 12px;
+}
+
+.notification-account strong {
+  display: block;
+  margin-top: 4px;
+  overflow-wrap: anywhere;
+}
+
+.notification-grid {
+  max-width: 1180px;
+  margin: 0 auto 28px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 16px;
+}
+
+.notification-channel-card,
+.notification-history {
+  border: 1px solid #272a33;
+  border-radius: 18px;
+  background: rgba(18, 20, 25, 0.9);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.2);
+}
+
+.notification-channel-card {
+  padding: 22px;
+}
+
+.notification-channel-card > header,
+.notification-section-heading,
+.notification-binding-row,
+.notification-delivery-row {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: center;
+}
+
+.notification-channel-description {
+  min-height: 72px;
+  color: #a9abb3;
+  line-height: 1.55;
+  font-size: 14px;
+}
+
+.notification-toggle {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  color: #c8cad0;
+  font-size: 12px;
+}
+
+.notification-toggle input {
+  accent-color: #9b8cff;
+}
+
+.notification-binding-list {
+  display: grid;
+  gap: 9px;
+  margin: 18px 0;
+}
+
+.notification-binding-row {
+  padding: 12px;
+  border: 1px solid #2a2d36;
+  border-radius: 12px;
+  background: #101217;
+}
+
+.notification-binding-row strong {
+  display: block;
+  margin-bottom: 3px;
+}
+
+.notification-binding-row button,
+.notification-section-heading button {
+  border: 0;
+  background: transparent;
+  color: #b8baff;
+  cursor: pointer;
+}
+
+.notification-primary {
+  width: 100%;
+  min-height: 42px;
+  border: 1px solid #5f55ba;
+  border-radius: 11px;
+  background: linear-gradient(180deg, #7368da, #554ba9);
+  color: white;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.notification-primary:disabled,
+.notification-binding-row button:disabled {
+  cursor: default;
+  opacity: 0.55;
+}
+
+.notification-pairing {
+  display: grid;
+  gap: 12px;
+}
+
+.notification-pairing-code {
+  padding: 14px;
+  border-radius: 12px;
+  background: #0d0f14;
+  border: 1px solid #343744;
+}
+
+.notification-pairing-code code {
+  display: block;
+  margin: 8px 0;
+  padding: 10px;
+  border-radius: 8px;
+  background: #171923;
+  color: #e9e7ff;
+  font-size: 15px;
+  overflow-wrap: anywhere;
+}
+
+.notification-history {
+  padding: 22px;
+}
+
+.notification-section-heading {
+  margin-bottom: 16px;
+}
+
+.notification-delivery-list {
+  display: grid;
+  gap: 8px;
+}
+
+.notification-delivery-row {
+  justify-content: flex-start;
+  padding: 11px 0;
+  border-top: 1px solid #242731;
+  color: #a9abb3;
+  font-size: 13px;
+}
+
+.notification-delivery-row strong {
+  min-width: 100px;
+  color: #f4f4f5;
+}
+
+.notification-status {
+  min-width: 82px;
+  padding: 4px 7px;
+  border-radius: 999px;
+  background: #272a33;
+  text-align: center;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.06em;
+}
+
+.status-sent {
+  background: rgba(66, 190, 120, 0.16);
+  color: #79d9a4;
+}
+
+.status-failed,
+.status-expired {
+  background: rgba(220, 80, 90, 0.16);
+  color: #ff9ba3;
+}
+
+.notification-empty,
+.notification-loading {
+  color: #8d9099;
+}
+
+@media (max-width: 900px) {
+  .notification-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .notification-channel-description {
+    min-height: auto;
+  }
+
+  .notification-hero {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .notification-account {
+    min-width: 0;
+  }
+}
+
+@media (max-width: 560px) {
+  .notification-page {
+    padding: 28px 14px 48px;
+  }
+
+  .notification-delivery-row {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+}

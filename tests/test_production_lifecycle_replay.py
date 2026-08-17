@@ -282,7 +282,7 @@ async def test_production_lifecycle_replay_uses_postgres_and_converges() -> None
         async with engine.connect() as connection:
             assert await connection.scalar(text("select 1")) == 1
             revision = await connection.scalar(text("select version_num from alembic_version"))
-            assert revision == "0030_user_entitlements"
+            assert revision == "0031_notification_center"
 
         start = datetime.now(UTC).replace(microsecond=0)
         raw_events = RawEventRepository()

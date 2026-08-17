@@ -415,7 +415,9 @@ class NotificationCenterService:
             binding = await session.get(NotificationBindingRecord, delivery.binding_id)
             if binding is None or not await self._binding_is_allowed(session, binding, now=now):
                 delivery.status = "CANCELLED"
-                delivery.last_error = "binding, preference, or realtime entitlement is no longer active"
+                delivery.last_error = (
+                    "binding, preference, or realtime entitlement is no longer active"
+                )
                 return None
             delivery.status = "SENDING"
             delivery.attempt_count += 1
