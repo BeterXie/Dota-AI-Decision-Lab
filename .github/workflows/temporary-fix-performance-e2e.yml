@@ -49,6 +49,14 @@ jobs:
               raise SystemExit("position action row not found")
           path.write_text(text.replace(old, new, 1), encoding="utf-8")
 
+          path = Path("frontend/src/components/ai-performance.css")
+          text = path.read_text(encoding="utf-8")
+          old = '''  .performance-position-main { grid-template-columns: 1fr 88px; }\n  .performance-position-main > :nth-child(2),\n  .performance-position-main > :nth-child(4) { display: none; }\n'''
+          new = '''  .performance-position-main { grid-template-columns: 48px minmax(0, 1fr) 82px; }\n  .performance-position-main > :nth-child(3),\n  .performance-position-main > :nth-child(4),\n  .performance-position-main > :nth-child(6) { display: none; }\n'''
+          if old not in text:
+              raise SystemExit("mobile position layout block not found")
+          path.write_text(text.replace(old, new, 1), encoding="utf-8")
+
           path = Path("frontend/e2e/performance.spec.ts")
           text = path.read_text(encoding="utf-8")
           old = '''      action: "BUY_A",\n      cash_before: 10700,\n'''
@@ -98,6 +106,6 @@ jobs:
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app/web/quality.py tests/test_quality_position_audit.py frontend/src/performanceApi.ts frontend/src/components/AiPerformancePage.tsx frontend/e2e/performance.spec.ts
+          git add app/web/quality.py tests/test_quality_position_audit.py frontend/src/performanceApi.ts frontend/src/components/AiPerformancePage.tsx frontend/src/components/ai-performance.css frontend/e2e/performance.spec.ts
           git commit -m "Show selected teams in AI position audit"
           git push origin HEAD:feat/ai-performance-dashboard
