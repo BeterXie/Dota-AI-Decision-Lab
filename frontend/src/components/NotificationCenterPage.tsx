@@ -241,8 +241,8 @@ function channelDescription(channel: NotificationChannel, locale: string): strin
   }
   if (channel === "QQ") {
     return locale === "zh-CN"
-      ? "生成一次性配对码，在 QQ 私聊或允许的群聊中发送给机器人完成绑定。"
-      : "Generate a one-time code and send it to the QQ bot in an allowed chat.";
+      ? "生成一次性配对码，只能在 QQ 私聊中发送给机器人完成账号绑定；群聊不支持付费账号绑定。"
+      : "Generate a one-time code and send it to the QQ bot in C2C chat. Group chats cannot be bound to a paid account.";
   }
   return locale === "zh-CN"
     ? "生成一次性配对码并发给微信机器人；机器人看到的会话才会成为你的推送目标。"
