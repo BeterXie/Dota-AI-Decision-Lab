@@ -8,7 +8,7 @@ from pydantic import Field, SecretStr
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 _GOOGLE_AUTHORIZATION_ENDPOINT = "https://accounts.google.com/o/oauth2/v2/auth"
-_GOOGLE_TOKEN_ENDPOINT = "https://oauth2.googleapis.com/token"
+_GOOGLE_OAUTH_EXCHANGE_ENDPOINT = "https://oauth2.googleapis.com/token"
 _GOOGLE_USERINFO_ENDPOINT = "https://openidconnect.googleapis.com/v1/userinfo"
 _STEAM_OPENID_ENDPOINT = "https://steamcommunity.com/openid/login"
 _OPENID_NS = "http://specs.openid.net/auth/2.0"
@@ -105,7 +105,7 @@ class SocialAuthService:
             follow_redirects=False,
         ) as client:
             token_response = await client.post(
-                _GOOGLE_TOKEN_ENDPOINT,
+                _GOOGLE_OAUTH_EXCHANGE_ENDPOINT,
                 data={
                     "code": code,
                     "client_id": self.settings.google_client_id or "",
