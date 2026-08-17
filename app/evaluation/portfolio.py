@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from datetime import UTC, datetime
-from decimal import ROUND_HALF_UP, Decimal
+from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 from uuid import UUID
 
@@ -580,7 +580,7 @@ def _selected_odds(
             continue
         try:
             price = Decimal(str(raw_price))
-        except Exception:
+        except InvalidOperation, ValueError:
             continue
         if price <= 1:
             continue

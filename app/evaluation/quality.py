@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from typing import Any
 from uuid import UUID
 
+from pydantic import ValidationError
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -172,17 +173,23 @@ class TournamentQualityService:
 
         action_counts: Counter[str] = Counter()
         settled_maps: set[UUID] = set()
-        briers: list[float] = []
-        losses: list[float] = []
-        clvs: list[float] = []
-        market_briers: list[float] = []
-        market_losses: list[float] = []
-        comparable_ai_briers: list[float] = []
-        comparable_ai_losses: list[float] = []
+        decision_level_briers: list[float] = []
+        decision_level_losses: list[float] = []
+        decision_level_clvs: list[float] = []
+        map_forecasts: dict[UUID, dict[str, float | None]] = {}
+        first_settled_position_by_map: dict[UUID, UUID] = {}
+        for position, _ in position_pairs:
+            if (
+                position.status in {"WON", "LOST"}
+                and position.canonical_map_id not in first_settled_position_by_map
+            ):
+                first_settled_position_by_map[position.canonical_map_id] = position.ai_decision_id
+
+        map_clvs: list[float] = []
         for decision_record, snapshot, series, result, evaluation in decision_rows:
             try:
                 decision = AiDecision.model_validate(decision_record.normalized_response)
-            except Exception:
+            except ValidationError:
                 continue
             action_counts[decision.action] += 1
             if (
@@ -192,14 +199,17 @@ class TournamentQualityService:
                 or snapshot.canonical_map_id is None
             ):
                 continue
-            settled_maps.add(snapshot.canonical_map_id)
+            map_id = snapshot.canonical_map_id
+            settled_maps.add(map_id)
             if evaluation is not None:
                 if evaluation.brier_score is not None:
-                    briers.append(float(evaluation.brier_score))
+                    decision_level_briers.append(float(evaluation.brier_score))
                 if evaluation.log_loss is not None:
-                    losses.append(float(evaluation.log_loss))
+                    decision_level_losses.append(float(evaluation.log_loss))
                 if evaluation.clv is not None:
-                    clvs.append(float(evaluation.clv))
+                    decision_level_clvs.append(float(evaluation.clv))
+                    if first_settled_position_by_map.get(map_id) == decision_record.id:
+                        map_clvs.append(float(evaluation.clv))
             team_a_won = result.winner_team_id == series.team_a_id
             market_probability = _market_probability_a(
                 snapshot.canonical_payload,
@@ -208,21 +218,46 @@ class TournamentQualityService:
             )
             market_brier = brier_score(market_probability, team_a_won)
             market_loss = log_loss(market_probability, team_a_won)
-            if (
-                evaluation is not None
-                and evaluation.brier_score is not None
-                and evaluation.log_loss is not None
-                and market_brier is not None
-                and market_loss is not None
-            ):
-                comparable_ai_briers.append(float(evaluation.brier_score))
-                comparable_ai_losses.append(float(evaluation.log_loss))
-                market_briers.append(float(market_brier))
-                market_losses.append(float(market_loss))
+            if map_id not in map_forecasts:
+                map_forecasts[map_id] = {
+                    "ai_brier": (
+                        float(evaluation.brier_score)
+                        if evaluation is not None and evaluation.brier_score is not None
+                        else None
+                    ),
+                    "ai_log_loss": (
+                        float(evaluation.log_loss)
+                        if evaluation is not None and evaluation.log_loss is not None
+                        else None
+                    ),
+                    "market_brier": float(market_brier) if market_brier is not None else None,
+                    "market_log_loss": (float(market_loss) if market_loss is not None else None),
+                }
 
-        avg_brier = _average(briers)
-        avg_loss = _average(losses)
-        avg_clv = _average(clvs)
+        map_briers = [
+            float(row["ai_brier"]) for row in map_forecasts.values() if row["ai_brier"] is not None
+        ]
+        map_losses = [
+            float(row["ai_log_loss"])
+            for row in map_forecasts.values()
+            if row["ai_log_loss"] is not None
+        ]
+        comparable = [
+            row
+            for row in map_forecasts.values()
+            if row["ai_brier"] is not None
+            and row["ai_log_loss"] is not None
+            and row["market_brier"] is not None
+            and row["market_log_loss"] is not None
+        ]
+        comparable_ai_briers = [float(row["ai_brier"]) for row in comparable]
+        comparable_ai_losses = [float(row["ai_log_loss"]) for row in comparable]
+        market_briers = [float(row["market_brier"]) for row in comparable]
+        market_losses = [float(row["market_log_loss"]) for row in comparable]
+
+        avg_brier = _average(map_briers)
+        avg_loss = _average(map_losses)
+        avg_clv = _average(map_clvs)
         ai_brier_comparable = _average(comparable_ai_briers)
         ai_loss_comparable = _average(comparable_ai_losses)
         market_brier = _average(market_briers)
@@ -235,22 +270,34 @@ class TournamentQualityService:
             risk_adjusted_return = portfolio_row["roi"] / portfolio_row["max_drawdown_pct"]
 
         metrics = {
+            "sample_policy": {
+                "prediction": "FIRST_SUCCESSFUL_DECISION_PER_MAP",
+                "clv": "FIRST_SETTLED_POSITION_PER_MAP",
+                "portfolio": "ALL_EXECUTED_POSITIONS",
+            },
             "settled_maps": len(settled_maps),
             "successful_decisions": len(decision_rows),
             "action_counts": dict(sorted(action_counts.items())),
-            "prediction_sample_count": len(briers),
+            "prediction_sample_count": len(map_briers),
             "average_brier_score": avg_brier,
             "average_log_loss": avg_loss,
             "average_clv": avg_clv,
-            "clv_sample_count": len(clvs),
+            "clv_sample_count": len(map_clvs),
             "market_comparison": {
-                "sample_count": len(market_briers),
+                "sample_count": len(comparable),
                 "market_average_brier_score": market_brier,
                 "ai_average_brier_score": ai_brier_comparable,
                 "brier_improvement_vs_market": brier_improvement,
                 "market_average_log_loss": market_loss,
                 "ai_average_log_loss": ai_loss_comparable,
                 "log_loss_improvement_vs_market": log_loss_improvement,
+            },
+            "decision_level": {
+                "prediction_sample_count": len(decision_level_briers),
+                "average_brier_score": _average(decision_level_briers),
+                "average_log_loss": _average(decision_level_losses),
+                "average_clv": _average(decision_level_clvs),
+                "clv_sample_count": len(decision_level_clvs),
             },
             "average_stake_pct_of_available_cash": _average(stake_ratios),
             "largest_stake_pct_of_available_cash": max(stake_ratios, default=None),
