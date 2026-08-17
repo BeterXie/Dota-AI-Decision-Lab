@@ -1,551 +1,631 @@
-import React, { useMemo, useState } from "react";
+import React, { lazy, Suspense, useEffect, useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
-import { useI18n, type Locale } from "../i18n";
 import {
-  fetchAiPerformance,
-  type PerformanceDecision,
-  type PerformanceExperiment
+  fetchAiEventQuality,
+  fetchAiLeaderboard,
+  fetchAiPositionAudit,
+  type AiEventBreakdown,
+  type AiEventQualityExperiment,
+  type AiExperimentIdentity,
+  type AiLeaderboardExperiment,
+  type AiPositionAudit,
+  type AiQualityPolicy
 } from "../performanceApi";
-import "./AiPerformancePage.css";
+import { useI18n } from "../i18n";
+import "./ai-performance.css";
 
-type SortMetric = "unit_roi" | "average_brier" | "buy_accuracy" | "success_rate" | "average_latency_seconds";
-type StatusFilter = "ALL" | "SUCCESS" | "FAILED";
-
-const copy = {
-  "zh-CN": {
-    back: "← 实时比赛",
-    review: "赛后复盘",
-    title: "AI Performance",
-    kicker: "MODEL & EXPERIMENT INTELLIGENCE",
-    headline: "别只问 AI 猜对了几次，要知道是哪一版、靠什么、花多久、能不能复现。",
-    description: "按模型、Prompt、决策策略和 AI View 版本拆开比较；每条结果都能追到 immutable snapshot、AI input hash、延迟链路与结算证据。",
-    audit: "可审计 · 无赛后回填",
-    refresh: "刷新",
-    attempts: "AI 调用",
-    success: "成功解析",
-    evaluated: "已结算/评估",
-    buyAccuracy: "BUY 命中率",
-    brier: "平均 Brier",
-    unitRoi: "1-unit ROI",
-    experiments: "实验版本",
-    compareTitle: "实验对比",
-    compareHint: "最多固定 3 个版本。Brier / Log loss 越低越好；ROI、命中率越高越好。",
-    noCompare: "从下方实验表点“加入对比”，这里会并排展示。",
-    identity: "实验身份",
-    sample: "样本",
-    reliability: "可靠性",
-    probability: "概率质量",
-    returns: "标准化收益",
-    latency: "速度",
-    tokens: "Token",
-    versions: "版本",
-    tableTitle: "版本成绩单",
-    tableHint: "同一个模型升级 Prompt / Policy / AI View 后不会被混算。",
-    sortBy: "排序",
-    roiSort: "1-unit ROI",
-    brierSort: "Brier（低优先）",
-    accuracySort: "BUY 命中率",
-    successSort: "解析成功率",
-    latencySort: "模型延迟（低优先）",
-    model: "模型",
-    rounds: "调用 / 成功",
-    buy: "BUY",
-    pnl: "1-unit P&L",
-    p95: "P95 延迟",
-    cache: "输入缓存",
-    compare: "加入对比",
-    remove: "移出对比",
-    ledgerTitle: "Decision Trace",
-    ledgerHint: "点任意一条决策，打开完整审计链路。",
-    search: "搜索队伍、模型、snapshot/hash…",
-    allExperiments: "全部实验",
-    allStatuses: "全部状态",
-    successStatus: "成功",
-    failedStatus: "失败",
-    noRows: "当前筛选没有决策记录。",
-    traceTitle: "决策审计链路",
-    close: "关闭",
-    match: "比赛",
-    decision: "决策",
-    evidence: "AI 依据",
-    evaluation: "赛后评估",
-    timing: "延迟链路",
-    tokenUsage: "Token 使用",
-    auditIdentity: "可复现身份",
-    snapshot: "Snapshot",
-    inputHash: "AI Input Hash",
-    providerRequest: "模型请求",
-    endToEnd: "端到端",
-    queue: "排队",
-    prepare: "输入准备",
-    reasonNone: "没有结构化理由",
-    blockerNone: "没有 blocker",
-    loading: "正在读取 AI 实验记录…",
-    proError: "无法读取 AI Performance。请确认当前账号拥有全局 Pro 权限。",
-    methodology: "口径",
-    latest: "最近决策"
-  },
-  en: {
-    back: "← Live matches",
-    review: "Post-match review",
-    title: "AI Performance",
-    kicker: "MODEL & EXPERIMENT INTELLIGENCE",
-    headline: "Don’t stop at how often AI was right. Know which version, why, how fast, and whether it can be reproduced.",
-    description: "Compare model, prompt, policy and AI-view versions separately. Every result traces back to an immutable snapshot, AI input hash, latency path and settlement evidence.",
-    audit: "Auditable · no hindsight refill",
-    refresh: "Refresh",
-    attempts: "AI calls",
-    success: "Parsed successfully",
-    evaluated: "Evaluated",
-    buyAccuracy: "BUY accuracy",
-    brier: "Average Brier",
-    unitRoi: "1-unit ROI",
-    experiments: "Experiment versions",
-    compareTitle: "Experiment comparison",
-    compareHint: "Pin up to 3 versions. Lower Brier / log loss is better; higher ROI and accuracy are better.",
-    noCompare: "Choose “Compare” in the experiment table to pin versions here.",
-    identity: "Experiment identity",
-    sample: "Sample",
-    reliability: "Reliability",
-    probability: "Probability quality",
-    returns: "Standardized return",
-    latency: "Speed",
-    tokens: "Tokens",
-    versions: "Versions",
-    tableTitle: "Version scoreboard",
-    tableHint: "Prompt / policy / AI-view upgrades are never silently merged into older results.",
-    sortBy: "Sort",
-    roiSort: "1-unit ROI",
-    brierSort: "Brier (low first)",
-    accuracySort: "BUY accuracy",
-    successSort: "Parse success",
-    latencySort: "Model latency (low first)",
-    model: "Model",
-    rounds: "Calls / success",
-    buy: "BUY",
-    pnl: "1-unit P&L",
-    p95: "P95 latency",
-    cache: "Input cache",
-    compare: "Compare",
-    remove: "Unpin",
-    ledgerTitle: "Decision Trace",
-    ledgerHint: "Open any decision to inspect the full audit chain.",
-    search: "Search teams, model, snapshot/hash…",
-    allExperiments: "All experiments",
-    allStatuses: "All statuses",
-    successStatus: "Success",
-    failedStatus: "Failed",
-    noRows: "No decisions match the current filters.",
-    traceTitle: "Decision audit trail",
-    close: "Close",
-    match: "Match",
-    decision: "Decision",
-    evidence: "AI evidence",
-    evaluation: "Post-match evaluation",
-    timing: "Latency path",
-    tokenUsage: "Token usage",
-    auditIdentity: "Reproducible identity",
-    snapshot: "Snapshot",
-    inputHash: "AI Input Hash",
-    providerRequest: "Provider request",
-    endToEnd: "End-to-end",
-    queue: "Queue",
-    prepare: "Input prep",
-    reasonNone: "No structured reasons",
-    blockerNone: "No blockers",
-    loading: "Loading AI experiment records…",
-    proError: "AI Performance could not be loaded. Confirm this account has global Pro access.",
-    methodology: "Methodology",
-    latest: "Latest decision"
-  }
-} as const;
+const IntelligenceChart = lazy(() => import("../Chart"));
 
 export function AiPerformancePage() {
   const { locale, setLocale } = useI18n();
-  const text = copy[locale];
-  const [sortMetric, setSortMetric] = useState<SortMetric>("unit_roi");
-  const [compareIds, setCompareIds] = useState<string[]>([]);
-  const [experimentFilter, setExperimentFilter] = useState("ALL");
-  const [statusFilter, setStatusFilter] = useState<StatusFilter>("ALL");
+  const [selectedExperimentKey, setSelectedExperimentKey] = useState<string | null>(null);
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
-  const [selectedDecision, setSelectedDecision] = useState<PerformanceDecision | null>(null);
+  const [expandedPositionId, setExpandedPositionId] = useState<string | null>(null);
 
-  const performance = useQuery({
-    queryKey: ["ai-performance"],
-    queryFn: () => fetchAiPerformance(1000),
+  const leaderboard = useQuery({
+    queryKey: ["ai-performance", "leaderboard"],
+    queryFn: fetchAiLeaderboard,
     staleTime: 30_000,
     refetchInterval: 60_000
   });
 
-  const sortedExperiments = useMemo(
-    () => sortExperiments(performance.data?.experiments ?? [], sortMetric),
-    [performance.data?.experiments, sortMetric]
-  );
-  const compared = useMemo(
-    () => compareIds.map((id) => performance.data?.experiments.find((item) => item.id === id)).filter(Boolean) as PerformanceExperiment[],
-    [compareIds, performance.data?.experiments]
-  );
-  const decisions = useMemo(() => {
+  const filtered = useMemo(() => {
     const query = search.trim().toLocaleLowerCase();
-    return (performance.data?.decisions ?? []).filter((item) => {
-      if (experimentFilter !== "ALL" && item.experiment_id !== experimentFilter) return false;
-      if (statusFilter === "SUCCESS" && item.parse_status !== "SUCCESS") return false;
-      if (statusFilter === "FAILED" && item.parse_status === "SUCCESS") return false;
-      if (!query) return true;
-      const match = item.match;
-      const haystack = [
-        item.provider,
-        item.model,
-        item.model_version,
-        item.prompt_version,
-        item.decision_policy_version,
-        item.ai_view_version,
-        item.snapshot_id,
-        item.snapshot_hash,
-        item.ai_input_hash ?? "",
-        match?.team_a?.name ?? "",
-        match?.team_b?.name ?? "",
-        match?.tournament_name ?? ""
-      ].join(" ").toLocaleLowerCase();
-      return haystack.includes(query);
+    const rows = leaderboard.data?.experiments ?? [];
+    if (!query) return rows;
+    return rows.filter((row) => {
+      const identity = row.experiment;
+      return `${identity.provider} ${identity.model} ${identity.prompt_version} ${identity.decision_policy_version}`
+        .toLocaleLowerCase()
+        .includes(query);
     });
-  }, [performance.data?.decisions, experimentFilter, statusFilter, search]);
+  }, [leaderboard.data?.experiments, search]);
 
-  const toggleCompare = (id: string) => {
-    setCompareIds((current) => {
-      if (current.includes(id)) return current.filter((item) => item !== id);
-      if (current.length < 3) return [...current, id];
-      return [...current.slice(1), id];
-    });
+  const selectedExperiment = useMemo(() => {
+    if (filtered.length === 0) return null;
+    return (
+      filtered.find((row) => identityKey(row.experiment) === selectedExperimentKey) ??
+      filtered[0]
+    );
+  }, [filtered, selectedExperimentKey]);
+
+  useEffect(() => {
+    if (!selectedExperiment) return;
+    const key = identityKey(selectedExperiment.experiment);
+    if (selectedExperimentKey !== key) setSelectedExperimentKey(key);
+    if (
+      !selectedEventId ||
+      !selectedExperiment.events.some((event) => event.canonical_event_id === selectedEventId)
+    ) {
+      setSelectedEventId(selectedExperiment.events.at(-1)?.canonical_event_id ?? null);
+    }
+  }, [selectedEventId, selectedExperiment, selectedExperimentKey]);
+
+  const eventQuality = useQuery({
+    queryKey: ["ai-performance", "event", selectedEventId],
+    queryFn: () => fetchAiEventQuality(selectedEventId!),
+    enabled: Boolean(selectedEventId),
+    staleTime: 30_000,
+    refetchInterval: 60_000
+  });
+
+  const selectedEventExperiment = useMemo(() => {
+    if (!selectedExperiment || !eventQuality.data) return null;
+    return (
+      eventQuality.data.experiments.find((item) =>
+        sameIdentity(item.experiment, selectedExperiment.experiment)
+      ) ?? null
+    );
+  }, [eventQuality.data, selectedExperiment]);
+
+  const positions = useQuery({
+    queryKey: [
+      "ai-performance",
+      "positions",
+      selectedEventId,
+      selectedEventExperiment?.portfolio.account_id
+    ],
+    queryFn: () =>
+      fetchAiPositionAudit(selectedEventId!, selectedEventExperiment!.portfolio.account_id),
+    enabled: Boolean(selectedEventId && selectedEventExperiment?.portfolio.account_id),
+    staleTime: 30_000
+  });
+
+  const selectedEvent = selectedExperiment?.events.find(
+    (event) => event.canonical_event_id === selectedEventId
+  );
+
+  const refresh = () => {
+    void leaderboard.refetch();
+    if (selectedEventId) void eventQuality.refetch();
+    if (positions.isEnabled) void positions.refetch();
   };
 
   return (
-    <div className="perf-page">
-      <header className="perf-header">
-        <div className="perf-brand">
-          <a href="/" className="perf-back">{text.back}</a>
-          <div><span className="perf-kicker">DOTA AI DECISION LAB</span><h1>{text.title}</h1></div>
+    <div className="performance-page">
+      <header className="performance-header">
+        <div className="performance-brand">
+          <a href="/" className="performance-back">
+            ← {locale === "zh-CN" ? "返回比赛" : "Back to matches"}
+          </a>
+          <div>
+            <span className="performance-kicker">AI SHADOW COMPETITION</span>
+            <h1>{locale === "zh-CN" ? "AI 盈利与质量" : "AI Performance"}</h1>
+          </div>
         </div>
-        <div className="perf-header-actions">
-          <a href="/review">{text.review}</a>
-          <button className={locale === "zh-CN" ? "active" : ""} onClick={() => setLocale("zh-CN")}>中文</button>
-          <button className={locale === "en" ? "active" : ""} onClick={() => setLocale("en")}>EN</button>
-          <button onClick={() => void performance.refetch()}>{text.refresh}</button>
+        <div className="performance-header-actions">
+          <a href="/review">{locale === "zh-CN" ? "比赛复盘" : "Match review"}</a>
+          <button className={locale === "zh-CN" ? "active" : ""} onClick={() => setLocale("zh-CN")}>
+            中文
+          </button>
+          <button className={locale === "en" ? "active" : ""} onClick={() => setLocale("en")}>
+            EN
+          </button>
+          <button onClick={refresh}>{locale === "zh-CN" ? "刷新" : "Refresh"}</button>
         </div>
       </header>
 
-      <main className="perf-main">
-        <section className="perf-hero">
+      <main className="performance-main">
+        <section className="performance-intro">
           <div>
-            <span className="perf-kicker">{text.kicker}</span>
-            <h2>{text.headline}</h2>
-            <p>{text.description}</p>
+            <span className="performance-kicker">SAME STARTING BANKROLL · SHADOW SETTLEMENT</span>
+            <h2>
+              {locale === "zh-CN"
+                ? "同样的赛事模拟本金，谁的 Shadow 组合表现更好？"
+                : "Same shadow bankroll. Which AI portfolio performed best?"}
+            </h2>
+            <p>
+              {locale === "zh-CN"
+                ? "每个 AI experiment 在每个赛事独立获得固定 Shadow 启动资金，所有 Map 共用同一资金池。这里展示的是按已记录赔率进行模拟结算后的 Shadow PnL，不代表真实账户下注、真实资金收益或博彩公司实际成交。先看收益与风险，再下钻到预测质量、赔率变化和逐笔仓位。"
+                : "Each AI experiment receives a fixed shadow bankroll per event and shares it across every map. Shadow P&L is simulated from recorded odds; it is not a live account return, real-money betting result, or bookmaker execution confirmation. Start with return and risk, then drill into prediction quality, odds movement, and every position."}
+            </p>
           </div>
-          <div className="perf-audit-pill">✓ {text.audit}</div>
+          <span className="performance-shadow-badge">SHADOW ONLY</span>
         </section>
 
-        {performance.isLoading && <div className="perf-state">{text.loading}</div>}
-        {performance.error && <div className="perf-state error">{text.proError}<small>{performance.error.message}</small></div>}
-
-        {performance.data && (
+        {leaderboard.isLoading ? (
+          <StateBlock text={locale === "zh-CN" ? "正在计算 AI 排行榜…" : "Loading AI leaderboard…"} />
+        ) : leaderboard.error ? (
+          <StateBlock error text={locale === "zh-CN" ? "AI 排行榜加载失败。" : "Failed to load AI leaderboard."} onRetry={() => void leaderboard.refetch()} />
+        ) : filtered.length === 0 ? (
+          <StateBlock text={locale === "zh-CN" ? "没有匹配的 AI experiment。" : "No matching AI experiments."} />
+        ) : (
           <>
-            <SummaryCards locale={locale} text={text} summary={performance.data.summary} />
-
-            <section className="perf-panel perf-compare-panel">
-              <SectionHeading kicker="COMPARE" title={text.compareTitle} hint={text.compareHint} />
-              {compared.length ? (
-                <div className="perf-compare-grid">
-                  {compared.map((item) => (
-                    <CompareCard key={item.id} item={item} locale={locale} text={text} onRemove={() => toggleCompare(item.id)} />
+            <section className="performance-overview-grid">
+              <div className="performance-leaderboard-panel">
+                <div className="performance-section-heading">
+                  <div>
+                    <span className="performance-kicker">LONG-RUN LEADERBOARD</span>
+                    <h3>{locale === "zh-CN" ? "跨赛事 Shadow 排行" : "Cross-event shadow leaderboard"}</h3>
+                  </div>
+                  <input
+                    aria-label={locale === "zh-CN" ? "搜索 AI" : "Search AI"}
+                    value={search}
+                    onChange={(event) => setSearch(event.target.value)}
+                    placeholder={locale === "zh-CN" ? "搜索模型 / Provider" : "Search model / provider"}
+                  />
+                </div>
+                <p className="performance-ranking-note">
+                  {rankingLabel(leaderboard.data?.ranking, locale)}
+                </p>
+                <div className="performance-leader-header" aria-hidden="true">
+                  <span>{locale === "zh-CN" ? "排名" : "Rank"}</span>
+                  <span>{locale === "zh-CN" ? "模型" : "Model"}</span>
+                  <span className="performance-col-roi">ROI</span>
+                  <span className="performance-col-pnl">Shadow PnL</span>
+                  <span className="performance-col-dd">{locale === "zh-CN" ? "最差回撤" : "Worst DD"}</span>
+                  <span className="performance-col-events">{locale === "zh-CN" ? "赛事" : "Events"}</span>
+                </div>
+                <div className="performance-leaderboard" role="list">
+                  {filtered.map((row) => (
+                    <LeaderboardRow
+                      key={identityKey(row.experiment)}
+                      row={row}
+                      active={identityKey(row.experiment) === selectedExperimentKey}
+                      locale={locale}
+                      onSelect={() => {
+                        setSelectedExperimentKey(identityKey(row.experiment));
+                        setSelectedEventId(row.events.at(-1)?.canonical_event_id ?? null);
+                        setExpandedPositionId(null);
+                      }}
+                    />
                   ))}
                 </div>
-              ) : <div className="perf-empty compact">{text.noCompare}</div>}
-            </section>
-
-            <section className="perf-panel">
-              <div className="perf-toolbar">
-                <SectionHeading kicker="EXPERIMENTS" title={text.tableTitle} hint={text.tableHint} />
-                <label className="perf-sort-label">
-                  <span>{text.sortBy}</span>
-                  <select value={sortMetric} onChange={(event) => setSortMetric(event.target.value as SortMetric)}>
-                    <option value="unit_roi">{text.roiSort}</option>
-                    <option value="average_brier">{text.brierSort}</option>
-                    <option value="buy_accuracy">{text.accuracySort}</option>
-                    <option value="success_rate">{text.successSort}</option>
-                    <option value="average_latency_seconds">{text.latencySort}</option>
-                  </select>
-                </label>
               </div>
-              <ExperimentTable
-                experiments={sortedExperiments}
-                compareIds={compareIds}
-                onCompare={toggleCompare}
-                locale={locale}
-                text={text}
-              />
+
+              {selectedExperiment && (
+                <section className="performance-selected-summary" aria-label="Selected AI summary">
+                  <div className="performance-selected-title">
+                    <div>
+                      <span className="performance-rank">#{selectedExperiment.rank}</span>
+                      <h3>{providerLabel(selectedExperiment.experiment.provider)}</h3>
+                      <small>{selectedExperiment.experiment.model}</small>
+                    </div>
+                    <PnlBadge value={selectedExperiment.realized_pnl} locale={locale} />
+                  </div>
+                  <div className="performance-summary-metrics">
+                    <Metric label={locale === "zh-CN" ? "累计 Shadow 本金" : "Total shadow capital"} value={money(selectedExperiment.total_initial_bankroll, locale)} />
+                    <Metric label={locale === "zh-CN" ? "当前 Shadow 权益" : "Shadow equity"} value={money(selectedExperiment.equity, locale)} />
+                    <Metric label="ROI" value={rate(selectedExperiment.realized_roi, locale)} tone={tone(selectedExperiment.realized_roi)} />
+                    <Metric label={locale === "zh-CN" ? "最差赛事回撤" : "Worst event drawdown"} value={rate(-selectedExperiment.worst_event_drawdown_pct, locale)} tone="negative" />
+                    <Metric label={locale === "zh-CN" ? "盈利赛事" : "Profitable events"} value={`${selectedExperiment.profitable_events}/${selectedExperiment.event_count}`} sub={rate(selectedExperiment.profitable_event_rate, locale)} />
+                    <Metric label={locale === "zh-CN" ? "已结算投注 / 命中率" : "Settled bets / hit rate"} value={`${selectedExperiment.bet_count}`} sub={rate(selectedExperiment.hit_rate, locale)} />
+                  </div>
+                  <div className="performance-version-line">
+                    <span>{selectedExperiment.experiment.prompt_version}</span>
+                    <span>{selectedExperiment.experiment.decision_policy_version}</span>
+                    <span>{selectedExperiment.experiment.ai_view_version}</span>
+                  </div>
+                </section>
+              )}
             </section>
 
-            <section className="perf-panel">
-              <div className="perf-toolbar perf-ledger-toolbar">
-                <SectionHeading kicker="AUDIT LEDGER" title={text.ledgerTitle} hint={text.ledgerHint} />
-                <div className="perf-filters">
-                  <input value={search} onChange={(event) => setSearch(event.target.value)} placeholder={text.search} />
-                  <select value={experimentFilter} onChange={(event) => setExperimentFilter(event.target.value)}>
-                    <option value="ALL">{text.allExperiments}</option>
-                    {performance.data.experiments.map((item) => (
-                      <option key={item.id} value={item.id}>{providerLabel(item.provider)} · {shortModel(item.model)} · {item.prompt_version}</option>
-                    ))}
-                  </select>
-                  <select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value as StatusFilter)}>
-                    <option value="ALL">{text.allStatuses}</option>
-                    <option value="SUCCESS">{text.successStatus}</option>
-                    <option value="FAILED">{text.failedStatus}</option>
-                  </select>
+            {selectedExperiment && (
+              <section className="performance-event-section">
+                <div className="performance-section-heading">
+                  <div>
+                    <span className="performance-kicker">EVENT BREAKDOWN</span>
+                    <h3>{locale === "zh-CN" ? "按赛事追踪 Shadow 资金" : "Trace shadow performance by event"}</h3>
+                  </div>
+                  <span>{locale === "zh-CN" ? "点击赛事查看资金曲线、质量与逐笔仓位" : "Select an event for equity, quality and position audit"}</span>
                 </div>
-              </div>
-              <DecisionLedger decisions={decisions} locale={locale} text={text} onOpen={setSelectedDecision} />
-            </section>
+                <div className="performance-event-list">
+                  {selectedExperiment.events.map((event) => (
+                    <EventButton
+                      key={event.canonical_event_id}
+                      event={event}
+                      active={event.canonical_event_id === selectedEventId}
+                      locale={locale}
+                      onSelect={() => {
+                        setSelectedEventId(event.canonical_event_id);
+                        setExpandedPositionId(null);
+                      }}
+                    />
+                  ))}
+                </div>
+              </section>
+            )}
 
-            <section className="perf-methodology">
-              <span className="perf-kicker">{text.methodology.toUpperCase()}</span>
-              <div>
-                <code>{performance.data.methodology.experiment_identity.join(" + ")}</code>
-                <span>· {performance.data.methodology.buy_accuracy}</span>
-                <span>· {performance.data.methodology.unit_roi}</span>
-                <span>· {performance.data.methodology.source}</span>
-              </div>
-            </section>
+            {selectedEventId && selectedEvent && (
+              <EventDetail
+                locale={locale}
+                event={selectedEvent}
+                experiment={selectedEventExperiment}
+                policy={eventQuality.data?.policy}
+                loading={eventQuality.isLoading}
+                error={Boolean(eventQuality.error)}
+                onRetry={() => void eventQuality.refetch()}
+                positions={positions.data?.positions ?? []}
+                positionsLoading={positions.isLoading}
+                positionsError={Boolean(positions.error)}
+                onRetryPositions={() => void positions.refetch()}
+                expandedPositionId={expandedPositionId}
+                onTogglePosition={(id) => setExpandedPositionId((current) => (current === id ? null : id))}
+              />
+            )}
           </>
         )}
       </main>
+    </div>
+  );
+}
 
-      {selectedDecision && (
-        <DecisionTraceDialog decision={selectedDecision} locale={locale} text={text} onClose={() => setSelectedDecision(null)} />
+function LeaderboardRow({
+  row,
+  active,
+  locale,
+  onSelect
+}: {
+  row: AiLeaderboardExperiment;
+  active: boolean;
+  locale: string;
+  onSelect: () => void;
+}) {
+  return (
+    <button className={`performance-leader-row ${active ? "active" : ""}`} type="button" onClick={onSelect}>
+      <span className="performance-place">#{row.rank}</span>
+      <span className="performance-model-name">
+        <strong>{providerLabel(row.experiment.provider)}</strong>
+        <small>{row.experiment.model}</small>
+      </span>
+      <span className={`performance-table-number performance-col-roi ${tone(row.realized_roi)}`}>{rate(row.realized_roi, locale)}</span>
+      <span className={`performance-table-number performance-col-pnl ${tone(row.realized_pnl)}`}>{signedMoney(row.realized_pnl, locale)}</span>
+      <span className="performance-table-number performance-col-dd negative">{rate(-row.worst_event_drawdown_pct, locale)}</span>
+      <span className="performance-table-number performance-col-events">{row.event_count}</span>
+    </button>
+  );
+}
+
+function EventButton({
+  event,
+  active,
+  locale,
+  onSelect
+}: {
+  event: AiEventBreakdown;
+  active: boolean;
+  locale: string;
+  onSelect: () => void;
+}) {
+  return (
+    <button className={`performance-event-btn ${active ? "active" : ""}`} type="button" onClick={onSelect}>
+      <span className="performance-event-name">{event.event_name || shortId(event.canonical_event_id)}</span>
+      <span>{formatDateRange(event.started_at, event.ended_at, locale)}</span>
+      <strong className={tone(event.realized_pnl)}>Shadow PnL {signedMoney(event.realized_pnl, locale)}</strong>
+      <span className={tone(event.realized_roi)}>ROI {rate(event.realized_roi, locale)}</span>
+      <small>{locale === "zh-CN" ? "最大回撤" : "Max DD"} {rate(-event.max_drawdown_pct, locale)}</small>
+    </button>
+  );
+}
+
+function EventDetail({
+  locale,
+  event,
+  experiment,
+  policy,
+  loading,
+  error,
+  onRetry,
+  positions,
+  positionsLoading,
+  positionsError,
+  onRetryPositions,
+  expandedPositionId,
+  onTogglePosition
+}: {
+  locale: string;
+  event: AiEventBreakdown;
+  experiment: AiEventQualityExperiment | null;
+  policy: AiQualityPolicy | undefined;
+  loading: boolean;
+  error: boolean;
+  onRetry: () => void;
+  positions: AiPositionAudit[];
+  positionsLoading: boolean;
+  positionsError: boolean;
+  onRetryPositions: () => void;
+  expandedPositionId: string | null;
+  onTogglePosition: (id: string) => void;
+}) {
+  if (loading) return <StateBlock text={locale === "zh-CN" ? "正在读取赛事质量报告…" : "Loading event quality report…"} />;
+  if (error) return <StateBlock error text={locale === "zh-CN" ? "赛事质量报告加载失败。" : "Failed to load event quality report."} onRetry={onRetry} />;
+  if (!experiment || !policy) return <StateBlock text={locale === "zh-CN" ? "这个 AI 在该赛事还没有可评估账户。" : "No evaluable portfolio for this AI in the event."} />;
+
+  const portfolio = experiment.portfolio;
+  const quality = experiment.quality;
+  return (
+    <section className="performance-detail">
+      <div className="performance-detail-heading">
+        <div>
+          <span className="performance-kicker">EVENT DETAIL</span>
+          <h3>{event.event_name || shortId(event.canonical_event_id)}</h3>
+          <p>{formatDateRange(event.started_at, event.ended_at, locale)}</p>
+        </div>
+        <GateBadge status={experiment.gate.status} mode={experiment.gate.mode} />
+      </div>
+
+      <div className="performance-detail-metrics">
+        <Metric label={locale === "zh-CN" ? "Shadow 启动资金" : "Shadow start"} value={money(portfolio.initial_bankroll, locale)} />
+        <Metric label={locale === "zh-CN" ? "当前 Shadow 权益" : "Shadow equity"} value={money(portfolio.equity, locale)} />
+        <Metric label={locale === "zh-CN" ? "已实现 Shadow PnL" : "Realized shadow PnL"} value={signedMoney(portfolio.realized_pnl, locale)} tone={tone(portfolio.realized_pnl)} />
+        <Metric label="ROI" value={rate(portfolio.roi, locale)} tone={tone(portfolio.roi)} />
+        <Metric label={locale === "zh-CN" ? "最大回撤" : "Max drawdown"} value={rate(-portfolio.max_drawdown_pct, locale)} tone="negative" />
+        <Metric label={locale === "zh-CN" ? "盈亏比" : "Profit factor"} value={decimal(portfolio.profit_factor, 2)} />
+      </div>
+
+      <div className="performance-two-column">
+        <section className="performance-panel">
+          <div className="performance-panel-heading">
+            <div>
+              <span className="performance-kicker">EQUITY CURVE</span>
+              <h4>{locale === "zh-CN" ? "赛事 Shadow 资金曲线" : "Event shadow equity"}</h4>
+            </div>
+            <span>{portfolio.wins}W · {portfolio.losses}L · {portfolio.rejected_bet_count} rejected</span>
+          </div>
+          <div className="performance-chart-wrap">
+            {experiment.equity_curve.length > 1 ? (
+              <Suspense fallback={<div className="performance-chart-loading">Chart…</div>}>
+                <IntelligenceChart option={equityChartOption(experiment, locale)} />
+              </Suspense>
+            ) : (
+              <div className="performance-empty-inline">{locale === "zh-CN" ? "等待更多资金流水。" : "Waiting for more ledger points."}</div>
+            )}
+          </div>
+        </section>
+
+        <section className="performance-panel">
+          <div className="performance-panel-heading">
+            <div>
+              <span className="performance-kicker">QUALITY GATE</span>
+              <h4>{locale === "zh-CN" ? "为什么是这个结论" : "Why this gate status"}</h4>
+            </div>
+            <span>SHADOW ONLY</span>
+          </div>
+          <div className="performance-gate-progress">
+            <SampleProgress label={locale === "zh-CN" ? "已结算 Maps" : "Settled maps"} current={quality.settled_maps} target={policy.min_settled_maps} />
+            <SampleProgress label={locale === "zh-CN" ? "已结算投注" : "Settled bets"} current={portfolio.bet_count} target={policy.min_settled_bets} />
+            <SampleProgress label={locale === "zh-CN" ? "独立预测样本" : "Prediction samples"} current={quality.prediction_sample_count} target={policy.min_prediction_samples} />
+            <SampleProgress label="CLV" current={quality.clv_sample_count} target={policy.min_clv_samples} />
+            <SampleProgress label={locale === "zh-CN" ? "市场对照" : "Market comparison"} current={quality.market_comparison.sample_count} target={policy.min_market_comparison_samples} />
+          </div>
+          {experiment.gate.failures.length > 0 && (
+            <div className="performance-gate-reasons">
+              {experiment.gate.failures.map((failure) => <span key={failure}>{failureLabel(failure, locale)}</span>)}
+            </div>
+          )}
+        </section>
+      </div>
+
+      <div className="performance-three-column">
+        <section className="performance-panel compact">
+          <span className="performance-kicker">PREDICTION QUALITY</span>
+          <h4>{locale === "zh-CN" ? "预测质量" : "Prediction quality"}</h4>
+          <MetricLine label="AI Brier" value={decimal(quality.market_comparison.ai_average_brier_score ?? quality.average_brier_score, 3)} />
+          <MetricLine label={locale === "zh-CN" ? "市场 Brier" : "Market Brier"} value={decimal(quality.market_comparison.market_average_brier_score, 3)} />
+          <MetricLine label={locale === "zh-CN" ? "Brier 改善 vs 市场" : "Brier improvement vs market"} value={signedDecimal(quality.market_comparison.brier_improvement_vs_market, 3)} tone={tone(quality.market_comparison.brier_improvement_vs_market)} />
+          <MetricLine label="Log Loss" value={decimal(quality.average_log_loss, 3)} />
+          <MetricLine label="CLV" value={rate(quality.average_clv, locale)} tone={tone(quality.average_clv)} />
+          <MetricLine label={locale === "zh-CN" ? "平均仓位 / 可用现金" : "Avg stake / available cash"} value={rate(quality.average_stake_pct_of_available_cash, locale)} />
+          <MetricLine label={locale === "zh-CN" ? "最长连败" : "Longest losing streak"} value={`${quality.longest_losing_streak}`} />
+          <p className="performance-method-note">
+            {locale === "zh-CN"
+              ? "Brier 越低越好；“改善 vs 市场” = 市场 Brier − AI Brier，正数表示 AI 更好。"
+              : "Lower Brier is better. Improvement vs market = market Brier − AI Brier, so positive values favor the AI."}
+          </p>
+        </section>
+
+        <section className="performance-panel compact performance-latency-panel">
+          <span className="performance-kicker">EDGE AFTER AI RESPONSE</span>
+          <h4>{locale === "zh-CN" ? "AI 给出答案后，纸面优势还剩多少？" : "How much paper edge remains after the AI responds?"}</h4>
+          <div className="performance-latency-grid">
+            {Object.entries(experiment.execution_latency.horizons).map(([horizon, row]) => (
+              <div key={horizon} className="performance-latency-cell">
+                <strong>T+{horizon}s</strong>
+                <span>{locale === "zh-CN" ? "纸面 Edge 保留率" : "Paper edge retained"} {rate(row.actionable_rate, locale)}</span>
+                <span>{locale === "zh-CN" ? "赔率变化" : "Odds move"} {rate(row.average_odds_slippage_pct, locale)}</span>
+                <small>n={row.sample_count}</small>
+              </div>
+            ))}
+            {Object.keys(experiment.execution_latency.horizons).length === 0 && (
+              <div className="performance-empty-inline">{locale === "zh-CN" ? "暂无 AI 响应后的赔率样本。" : "No post-response market samples yet."}</div>
+            )}
+          </div>
+          <p className="performance-method-note">
+            {locale === "zh-CN"
+              ? "只衡量 AI 响应后的市场赔率观测中，仍满足模型 edge 条件的比例；不是实际下单成功率，也不代表博彩公司接受了订单。AI 响应前的赔率不计入。"
+              : "Measures the share of post-response market observations where the model edge still qualifies. It is not an order fill rate or bookmaker execution confirmation; pre-response odds are excluded."}
+          </p>
+        </section>
+
+        <section className="performance-panel compact">
+          <span className="performance-kicker">RISK / ACTIVITY</span>
+          <h4>{locale === "zh-CN" ? "风险与交易行为" : "Risk and activity"}</h4>
+          <MetricLine label={locale === "zh-CN" ? "已结算投注" : "Settled bets"} value={`${portfolio.bet_count}`} />
+          <MetricLine label={locale === "zh-CN" ? "命中率" : "Hit rate"} value={rate(portfolio.hit_rate, locale)} />
+          <MetricLine label={locale === "zh-CN" ? "总投注额" : "Turnover"} value={money(portfolio.turnover, locale)} />
+          <MetricLine label={locale === "zh-CN" ? "最大单笔 / 可用现金" : "Largest stake / available cash"} value={rate(quality.largest_stake_pct_of_available_cash, locale)} />
+          <MetricLine label={locale === "zh-CN" ? "锁定资金" : "Locked capital"} value={money(portfolio.locked_balance, locale)} />
+          <MetricLine label={locale === "zh-CN" ? "账户状态" : "Account status"} value={portfolio.status} />
+        </section>
+      </div>
+
+      <section className="performance-panel performance-position-panel">
+        <div className="performance-panel-heading">
+          <div>
+            <span className="performance-kicker">POSITION AUDIT</span>
+            <h4>{locale === "zh-CN" ? "逐笔追溯：Shadow PnL 是怎么产生的" : "Position audit: where the shadow P&L came from"}</h4>
+          </div>
+          <span>{positions.length} positions</span>
+        </div>
+        {positionsLoading ? (
+          <div className="performance-empty-inline">{locale === "zh-CN" ? "正在读取仓位流水…" : "Loading position audit…"}</div>
+        ) : positionsError ? (
+          <button className="performance-retry" type="button" onClick={onRetryPositions}>{locale === "zh-CN" ? "仓位加载失败 · 重试" : "Position audit failed · Retry"}</button>
+        ) : positions.length === 0 ? (
+          <div className="performance-empty-inline">{locale === "zh-CN" ? "这个赛事还没有 BUY 仓位。" : "No BUY positions in this event yet."}</div>
+        ) : (
+          <div className="performance-position-list">
+            {positions.map((position) => (
+              <PositionRow
+                key={position.id}
+                position={position}
+                locale={locale}
+                expanded={position.id === expandedPositionId}
+                onToggle={() => onTogglePosition(position.id)}
+              />
+            ))}
+          </div>
+        )}
+      </section>
+    </section>
+  );
+}
+
+function PositionRow({
+  position,
+  locale,
+  expanded,
+  onToggle
+}: {
+  position: AiPositionAudit;
+  locale: string;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div className={`performance-position ${expanded ? "expanded" : ""}`}>
+      <button type="button" className="performance-position-main" onClick={onToggle} aria-expanded={expanded}>
+        <span className="performance-position-map"><b>MAP {position.map_number ?? "?"}</b><small>{formatDateTime(position.opened_at, locale)}</small></span>
+        <span className="performance-position-choice"><b>{position.selected_team?.name ?? position.action.replace("_", " ")}</b><small>{position.action.replace("_", " ")} · {locale === "zh-CN" ? "AI 操作" : "AI action"}</small></span>
+        <span className="performance-position-stake"><b>{money(position.stake, locale)}</b><small>@ {position.odds?.toFixed(3) ?? "—"}</small></span>
+        <span className={`position-status status-${position.status.toLowerCase()}`}>{position.status}</span>
+        <span className={`performance-position-pnl ${tone(position.realized_pnl)}`}><b>{position.realized_pnl == null ? "—" : signedMoney(position.realized_pnl, locale)}</b><small>Shadow PnL</small></span>
+        <span className="performance-position-action">{locale === "zh-CN" ? (expanded ? "收起" : "详情") : (expanded ? "Less" : "Details")} <b>{expanded ? "−" : "›"}</b></span>
+      </button>
+      {expanded && (
+        <div className="performance-position-detail">
+          <DetailDatum label={locale === "zh-CN" ? "模拟成交前现金" : "Shadow cash before"} value={money(position.cash_before, locale)} />
+          <DetailDatum label={locale === "zh-CN" ? "模拟返还" : "Shadow payout"} value={position.payout == null ? "—" : money(position.payout, locale)} />
+          <DetailDatum label={locale === "zh-CN" ? "拒绝原因" : "Rejection"} value={position.rejection_reason ?? "—"} />
+          <DetailDatum label={locale === "zh-CN" ? "结算时间" : "Settled"} value={position.settled_at ? formatDateTime(position.settled_at, locale) : "—"} />
+          <DetailDatum label="Map ID" value={shortId(position.canonical_map_id)} title={position.canonical_map_id} />
+          <DetailDatum label="Decision ID" value={shortId(position.ai_decision_id)} title={position.ai_decision_id} />
+        </div>
       )}
     </div>
   );
 }
 
-function SummaryCards({ locale, text, summary }: { locale: Locale; text: typeof copy[Locale]; summary: Awaited<ReturnType<typeof fetchAiPerformance>>["summary"] }) {
+function SampleProgress({ label, current, target }: { label: string; current: number; target: number }) {
+  const ratio = target > 0 ? Math.min(1, current / target) : 1;
+  const complete = current >= target;
   return (
-    <section className="perf-kpis">
-      <Kpi label={text.attempts} value={`${summary.attempts}`} sub={`${summary.experiment_count} ${text.experiments}`} />
-      <Kpi label={text.success} value={percent(summary.success_rate, locale)} sub={`${summary.successful}/${summary.attempts}`} />
-      <Kpi label={text.evaluated} value={`${summary.evaluated}`} sub={`BUY ${summary.settled_buy_decisions}`} />
-      <Kpi label={text.buyAccuracy} value={percent(summary.buy_accuracy, locale)} sub={`${summary.correct_buy_decisions}/${summary.settled_buy_decisions}`} />
-      <Kpi label={text.brier} value={decimal(summary.average_brier, 3)} sub="↓ better" />
-      <Kpi label={text.unitRoi} value={percent(summary.unit_roi, locale)} sub={`${signed(summary.unit_pnl, 2)} / ${summary.unit_bets}`} tone={tone(summary.unit_roi)} />
-    </section>
-  );
-}
-
-function Kpi({ label, value, sub, tone: toneClass }: { label: string; value: string; sub?: string; tone?: string }) {
-  return <div className="perf-kpi"><span>{label}</span><strong className={toneClass}>{value}</strong>{sub && <small>{sub}</small>}</div>;
-}
-
-function SectionHeading({ kicker, title, hint }: { kicker: string; title: string; hint: string }) {
-  return <div className="perf-section-heading"><div><span className="perf-kicker">{kicker}</span><h3>{title}</h3></div><p>{hint}</p></div>;
-}
-
-function CompareCard({ item, locale, text, onRemove }: { item: PerformanceExperiment; locale: Locale; text: typeof copy[Locale]; onRemove: () => void }) {
-  return (
-    <article className="perf-compare-card">
-      <div className="perf-compare-head">
-        <div><strong>{providerLabel(item.provider)}</strong><span>{item.model}</span></div>
-        <button onClick={onRemove}>{text.remove}</button>
-      </div>
-      <VersionStack item={item} />
-      <div className="perf-compare-metrics">
-        <MiniMetric label={text.sample} value={`${item.successful}/${item.attempts}`} />
-        <MiniMetric label={text.buyAccuracy} value={percent(item.buy_accuracy, locale)} />
-        <MiniMetric label="Brier ↓" value={decimal(item.average_brier, 3)} />
-        <MiniMetric label="Log loss ↓" value={decimal(item.average_log_loss, 3)} />
-        <MiniMetric label={text.unitRoi} value={percent(item.unit_roi, locale)} tone={tone(item.unit_roi)} />
-        <MiniMetric label={text.pnl} value={signed(item.unit_pnl, 2)} tone={tone(item.unit_pnl)} />
-        <MiniMetric label="Avg latency" value={seconds(item.average_latency_seconds)} />
-        <MiniMetric label={text.p95} value={seconds(item.p95_latency_seconds)} />
-      </div>
-    </article>
-  );
-}
-
-function ExperimentTable({ experiments, compareIds, onCompare, locale, text }: { experiments: PerformanceExperiment[]; compareIds: string[]; onCompare: (id: string) => void; locale: Locale; text: typeof copy[Locale] }) {
-  return (
-    <div className="perf-table-wrap">
-      <table className="perf-table">
-        <thead><tr><th>{text.model}</th><th>{text.versions}</th><th>{text.rounds}</th><th>{text.buyAccuracy}</th><th>Brier ↓</th><th>{text.unitRoi}</th><th>{text.pnl}</th><th>{text.p95}</th><th>{text.cache}</th><th /></tr></thead>
-        <tbody>
-          {experiments.map((item) => {
-            const pinned = compareIds.includes(item.id);
-            return (
-              <tr key={item.id} className={pinned ? "pinned" : ""}>
-                <td><strong>{providerLabel(item.provider)}</strong><span>{item.model}</span></td>
-                <td><VersionStack item={item} compact /></td>
-                <td><strong>{item.attempts}</strong><span>{item.successful} ✓ · {item.failed} ✕</span></td>
-                <td><strong>{percent(item.buy_accuracy, locale)}</strong><span>{item.correct_buy_decisions}/{item.settled_buy_decisions}</span></td>
-                <td><strong>{decimal(item.average_brier, 3)}</strong><span>log {decimal(item.average_log_loss, 3)}</span></td>
-                <td><strong className={tone(item.unit_roi)}>{percent(item.unit_roi, locale)}</strong><span>{item.unit_bets} bets</span></td>
-                <td><strong className={tone(item.unit_pnl)}>{signed(item.unit_pnl, 2)}</strong></td>
-                <td><strong>{seconds(item.p95_latency_seconds)}</strong><span>avg {seconds(item.average_latency_seconds)}</span></td>
-                <td><strong>{percent(item.cached_input_ratio, locale)}</strong><span>{item.average_total_tokens == null ? "—" : `${Math.round(item.average_total_tokens)} tok`}</span></td>
-                <td><button className={pinned ? "active" : ""} onClick={() => onCompare(item.id)}>{pinned ? text.remove : text.compare}</button></td>
-              </tr>
-            );
-          })}
-        </tbody>
-      </table>
-      {experiments.length === 0 && <div className="perf-empty">—</div>}
+    <div className="performance-sample-progress">
+      <div><span>{label}</span><strong className={complete ? "positive" : ""}>{current}/{target}</strong></div>
+      <div className="performance-progress-track"><span style={{ width: `${ratio * 100}%` }} /></div>
     </div>
   );
 }
 
-function DecisionLedger({ decisions, locale, text, onOpen }: { decisions: PerformanceDecision[]; locale: Locale; text: typeof copy[Locale]; onOpen: (decision: PerformanceDecision) => void }) {
-  return (
-    <div className="perf-decision-list">
-      {decisions.map((item) => {
-        const match = item.match;
-        const teams = match?.team_a && match?.team_b ? `${match.team_a.name} vs ${match.team_b.name}` : item.canonical_map_id ?? "—";
-        return (
-          <button className="perf-decision-row" key={item.id} onClick={() => onOpen(item)}>
-            <div className="perf-decision-match"><strong>{teams}</strong><span>{formatDate(item.decision_at, locale)}{match?.map_number != null ? ` · MAP ${match.map_number}` : ""}</span></div>
-            <div className="perf-decision-model"><strong>{providerLabel(item.provider)}</strong><span>{shortModel(item.model)} · {item.prompt_version}</span></div>
-            <ActionBadge action={item.action} status={item.parse_status} />
-            <div className="perf-decision-score"><strong>{item.evaluation?.result_correct == null ? "—" : item.evaluation.result_correct ? "✓" : "✕"}</strong><span>Brier {decimal(item.evaluation?.brier_score ?? null, 3)}</span></div>
-            <div className="perf-decision-score"><strong className={tone(item.evaluation?.unit_pnl ?? null)}>{signed(item.evaluation?.unit_pnl ?? null, 2)}</strong><span>1-unit</span></div>
-            <div className="perf-decision-hash"><code>{shortHash(item.snapshot_hash)}</code><span>{shortHash(item.ai_input_hash)}</span></div>
-            <span className="perf-open-arrow">›</span>
-          </button>
-        );
-      })}
-      {decisions.length === 0 && <div className="perf-empty">{text.noRows}</div>}
-    </div>
-  );
+function GateBadge({ status, mode }: { status: string; mode: string }) {
+  return <div className={`performance-gate-badge gate-${status.toLowerCase()}`}><strong>{status}</strong><span>{mode}</span></div>;
 }
 
-function DecisionTraceDialog({ decision, locale, text, onClose }: { decision: PerformanceDecision; locale: Locale; text: typeof copy[Locale]; onClose: () => void }) {
-  const match = decision.match;
-  return (
-    <div className="perf-dialog-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
-      <section className="perf-dialog" role="dialog" aria-modal="true" aria-label={text.traceTitle}>
-        <header className="perf-dialog-header">
-          <div><span className="perf-kicker">AUDIT TRACE</span><h2>{text.traceTitle}</h2></div>
-          <button onClick={onClose}>{text.close}</button>
-        </header>
-        <div className="perf-dialog-body">
-          <TraceSection title={text.match}>
-            <div className="perf-trace-hero"><strong>{match?.team_a?.name ?? "Team A"} <span>vs</span> {match?.team_b?.name ?? "Team B"}</strong><small>{match?.tournament_name ?? "—"}{match?.map_number != null ? ` · MAP ${match.map_number}` : ""} · {formatDate(decision.decision_at, locale)}</small></div>
-          </TraceSection>
-
-          <TraceSection title={text.decision}>
-            <div className="perf-detail-grid">
-              <Detail label="Provider / model" value={`${decision.provider} / ${decision.model}`} />
-              <Detail label="Action" value={decision.action ?? decision.parse_status} />
-              <Detail label="Fair p(A)" value={percent(decision.fair_probability_a, locale)} />
-              <Detail label="Confidence" value={percent(decision.confidence, locale)} />
-              <Detail label="Market" value={decision.market_assessment ?? "—"} />
-              <Detail label="Stake / bankroll" value={`${decimal(decision.stake, 2)} / ${decimal(decision.bankroll_before, 2)}`} />
-            </div>
-            {decision.error && <div className="perf-error-callout">{decision.error}</div>}
-          </TraceSection>
-
-          <TraceSection title={text.evidence}>
-            <div className="perf-evidence-columns">
-              <div><span className="perf-detail-label">Primary reasons</span><ul>{decision.primary_reasons.length ? decision.primary_reasons.map((item, index) => <li key={`${index}:${item}`}>{item}</li>) : <li className="muted">{text.reasonNone}</li>}</ul></div>
-              <div><span className="perf-detail-label">Blockers</span><ul>{decision.blockers.length ? decision.blockers.map((item, index) => <li key={`${index}:${item}`}>{item}</li>) : <li className="muted">{text.blockerNone}</li>}</ul></div>
-            </div>
-          </TraceSection>
-
-          <TraceSection title={text.evaluation}>
-            {decision.evaluation ? (
-              <div className="perf-detail-grid">
-                <Detail label="Result" value={decision.evaluation.result_correct == null ? "—" : decision.evaluation.result_correct ? "✓ CORRECT" : "✕ WRONG"} />
-                <Detail label="Brier" value={decimal(decision.evaluation.brier_score, 4)} />
-                <Detail label="Log loss" value={decimal(decision.evaluation.log_loss, 4)} />
-                <Detail label="CLV" value={decimal(decision.evaluation.clv, 4)} />
-                <Detail label="1-unit P&L" value={signed(decision.evaluation.unit_pnl, 3)} />
-                <Detail label="Virtual P&L" value={signed(decision.evaluation.virtual_pnl, 2)} />
-                <Detail label="Metrics version" value={decision.evaluation.metrics_version} />
-                <Detail label="Evaluated" value={formatDate(decision.evaluation.evaluated_at, locale)} />
-              </div>
-            ) : <span className="perf-muted">—</span>}
-          </TraceSection>
-
-          <TraceSection title={text.auditIdentity}>
-            <div className="perf-hash-stack">
-              <HashRow label="Snapshot ID" value={decision.snapshot_id} />
-              <HashRow label="Snapshot hash" value={decision.snapshot_hash} />
-              <HashRow label={text.inputHash} value={decision.ai_input_hash ?? "—"} />
-              <HashRow label="Model version" value={decision.model_version} />
-              <HashRow label="Prompt version" value={decision.prompt_version} />
-              <HashRow label="Decision policy" value={decision.decision_policy_version} />
-              <HashRow label="AI view" value={decision.ai_view_version} />
-            </div>
-          </TraceSection>
-
-          <TraceSection title={text.timing}>
-            <div className="perf-timing-flow">
-              <Timing label={text.queue} value={decision.trace.queue_seconds} />
-              <span>→</span>
-              <Timing label={text.prepare} value={decision.trace.input_prepare_seconds} />
-              <span>→</span>
-              <Timing label={text.providerRequest} value={decision.trace.provider_latency_seconds} />
-              <span>→</span>
-              <Timing label={text.endToEnd} value={decision.trace.end_to_end_seconds} strong />
-            </div>
-          </TraceSection>
-
-          <TraceSection title={text.tokenUsage}>
-            <div className="perf-detail-grid token-grid">
-              <Detail label="Input" value={integer(decision.tokens.input)} />
-              <Detail label="Cached input" value={integer(decision.tokens.cached_input)} />
-              <Detail label="Reasoning" value={integer(decision.tokens.reasoning)} />
-              <Detail label="Output" value={integer(decision.tokens.output)} />
-              <Detail label="Total" value={integer(decision.tokens.total)} />
-            </div>
-          </TraceSection>
-        </div>
-      </section>
-    </div>
-  );
+function PnlBadge({ value, locale }: { value: number; locale: string }) {
+  return <div className={`performance-pnl-badge ${tone(value)}`}><span>{locale === "zh-CN" ? "累计 Shadow PnL" : "Total shadow PnL"}</span><strong>{signedMoney(value, locale)}</strong></div>;
 }
 
-function TraceSection({ title, children }: { title: string; children: React.ReactNode }) {
-  return <section className="perf-trace-section"><h3>{title}</h3>{children}</section>;
-}
-function Detail({ label, value }: { label: string; value: string }) {
-  return <div className="perf-detail"><span>{label}</span><strong>{value}</strong></div>;
-}
-function HashRow({ label, value }: { label: string; value: string }) {
-  return <div><span>{label}</span><code>{value}</code></div>;
-}
-function Timing({ label, value, strong = false }: { label: string; value: number | null; strong?: boolean }) {
-  return <div className={strong ? "strong" : ""}><span>{label}</span><strong>{seconds(value)}</strong></div>;
-}
-function MiniMetric({ label, value, tone: toneClass }: { label: string; value: string; tone?: string }) {
-  return <div><span>{label}</span><strong className={toneClass}>{value}</strong></div>;
-}
-function VersionStack({ item, compact = false }: { item: PerformanceExperiment; compact?: boolean }) {
-  return <div className={compact ? "perf-version-stack compact" : "perf-version-stack"}><code>{item.prompt_version}</code><span>policy {item.decision_policy_version}</span><span>view {item.ai_view_version}</span><span>model {item.model_version}</span></div>;
-}
-function ActionBadge({ action, status }: { action: string | null; status: string }) {
-  const failed = status !== "SUCCESS";
-  const label = failed ? status : action ?? "NO DECISION";
-  return <span className={`perf-action ${failed ? "failed" : action?.startsWith("BUY") ? "buy" : "neutral"}`}>{label.replaceAll("_", " ")}</span>;
+function Metric({ label, value, sub, tone: toneClass }: { label: string; value: string; sub?: string; tone?: string }) {
+  return <div className="performance-metric"><span>{label}</span><strong className={toneClass}>{value}</strong>{sub && <small>{sub}</small>}</div>;
 }
 
-function sortExperiments(items: PerformanceExperiment[], metric: SortMetric): PerformanceExperiment[] {
-  const copyItems = [...items];
-  const lowIsBetter = metric === "average_brier" || metric === "average_latency_seconds";
-  copyItems.sort((a, b) => {
-    const av = a[metric];
-    const bv = b[metric];
-    if (av == null && bv == null) return b.attempts - a.attempts;
-    if (av == null) return 1;
-    if (bv == null) return -1;
-    return lowIsBetter ? av - bv : bv - av;
-  });
-  return copyItems;
+function MetricLine({ label, value, tone: toneClass }: { label: string; value: string; tone?: string }) {
+  return <div className="performance-metric-line"><span>{label}</span><strong className={toneClass}>{value}</strong></div>;
 }
+
+function DetailDatum({ label, value, title }: { label: string; value: string; title?: string }) {
+  return <div><span>{label}</span><strong title={title}>{value}</strong></div>;
+}
+
+function StateBlock({ text, error, onRetry }: { text: string; error?: boolean; onRetry?: () => void }) {
+  return <section className={`performance-state ${error ? "error" : ""}`}><span>{text}</span>{onRetry && <button type="button" onClick={onRetry}>Retry</button>}</section>;
+}
+
+export function identityKey(identity: AiExperimentIdentity): string {
+  return [identity.provider, identity.model, identity.prompt_version, identity.decision_policy_version, identity.ai_view_version].join("\u0000");
+}
+
+function sameIdentity(left: AiExperimentIdentity, right: AiExperimentIdentity): boolean {
+  return identityKey(left) === identityKey(right);
+}
+
+function rankingLabel(ranking: string | undefined, locale: string): string {
+  if (ranking === "REALIZED_ROI_THEN_PNL") {
+    return locale === "zh-CN"
+      ? "排序规则：已实现 ROI 从高到低；ROI 相同时，再按累计 Shadow PnL 从高到低。"
+      : "Ranking: realized ROI descending; ties are broken by total shadow P&L descending.";
+  }
+  return locale === "zh-CN" ? "排序规则由服务端排行榜定义。" : "Ranking follows the server leaderboard policy.";
+}
+
+function equityChartOption(experiment: AiEventQualityExperiment, locale: string): object {
+  const points = experiment.equity_curve;
+  return {
+    animation: false,
+    grid: { left: 55, right: 18, top: 18, bottom: 42 },
+    tooltip: {
+      trigger: "axis",
+      valueFormatter: (value: number) => money(value, locale)
+    },
+    xAxis: {
+      type: "category",
+      boundaryGap: false,
+      data: points.map((point) => formatChartTime(point.occurred_at, locale)),
+      axisLabel: { color: "#728099", fontSize: 10 },
+      axisLine: { lineStyle: { color: "rgba(255,255,255,.10)" } }
+    },
+    yAxis: {
+      type: "value",
+      scale: true,
+      axisLabel: { color: "#728099", fontSize: 10 },
+      splitLine: { lineStyle: { color: "rgba(255,255,255,.055)" } }
+    },
+    series: [
+      {
+        name: locale === "zh-CN" ? "Shadow 权益" : "Shadow equity",
+        type: "line",
+        smooth: 0.22,
+        showSymbol: points.length <= 18,
+        symbolSize: 5,
+        data: points.map((point) => point.equity),
+        lineStyle: { width: 2 },
+        areaStyle: { opacity: 0.08 }
+      }
+    ]
+  };
+}
+
 function providerLabel(value: string): string {
   const normalized = value.toLowerCase();
   if (normalized.includes("local_openai")) return "Local GPT";
@@ -556,15 +636,73 @@ function providerLabel(value: string): string {
   if (normalized.includes("kimi")) return "Kimi";
   return value;
 }
-function shortModel(value: string): string { return value.length > 26 ? `${value.slice(0, 23)}…` : value; }
-function shortHash(value: string | null): string { return value ? `${value.slice(0, 8)}…${value.slice(-6)}` : "—"; }
-function percent(value: number | null, locale: Locale): string { return value == null ? "—" : new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 1 }).format(value); }
-function decimal(value: number | null, digits: number): string { return value == null ? "—" : value.toFixed(digits); }
-function signed(value: number | null, digits: number): string { return value == null ? "—" : `${value > 0 ? "+" : ""}${value.toFixed(digits)}`; }
-function integer(value: number | null): string { return value == null ? "—" : new Intl.NumberFormat().format(value); }
-function seconds(value: number | null): string { return value == null ? "—" : value < 1 ? `${Math.round(value * 1000)}ms` : `${value.toFixed(value >= 10 ? 1 : 2)}s`; }
-function tone(value: number | null): string { return value == null ? "" : value > 0 ? "positive" : value < 0 ? "negative" : ""; }
-function formatDate(value: string, locale: Locale): string {
+
+function failureLabel(value: string, locale: string): string {
+  if (locale !== "zh-CN") return value.replaceAll("_", " ");
+  const labels: Record<string, string> = {
+    MIN_SETTLED_MAPS: "已结算地图样本不足",
+    MIN_SETTLED_BETS: "已结算投注不足",
+    MIN_PREDICTION_SAMPLES: "独立预测样本不足",
+    MIN_CLV_SAMPLES: "CLV 样本不足",
+    MIN_MARKET_COMPARISON_SAMPLES: "市场对照样本不足",
+    ROI: "ROI 未达标",
+    CLV: "CLV 未达标",
+    BRIER_VS_MARKET: "Brier 未优于市场",
+    MAX_DRAWDOWN: "最大回撤超阈值",
+    BANKRUPTCY: "发生破产"
+  };
+  return labels[value] ?? value;
+}
+
+function money(value: number, locale: string): string {
+  return new Intl.NumberFormat(locale, { maximumFractionDigits: 0 }).format(value);
+}
+
+function signedMoney(value: number, locale: string): string {
+  return `${value > 0 ? "+" : value < 0 ? "−" : ""}${money(Math.abs(value), locale)}`;
+}
+
+function rate(value: number | null, locale: string): string {
+  return value == null ? "—" : new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 1 }).format(value);
+}
+
+function decimal(value: number | null, digits: number): string {
+  return value == null ? "—" : value.toFixed(digits);
+}
+
+function signedDecimal(value: number | null, digits: number): string {
+  if (value == null) return "—";
+  return `${value > 0 ? "+" : value < 0 ? "−" : ""}${Math.abs(value).toFixed(digits)}`;
+}
+
+function tone(value: number | null): string {
+  return value == null || value === 0 ? "" : value > 0 ? "positive" : "negative";
+}
+
+function shortId(value: string): string {
+  return value.length > 12 ? `${value.slice(0, 8)}…${value.slice(-4)}` : value;
+}
+
+function formatDateTime(value: string, locale: string): string {
   const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? "—" : new Intl.DateTimeFormat(locale, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" }).format(parsed);
+  return Number.isNaN(parsed.getTime())
+    ? "—"
+    : new Intl.DateTimeFormat(locale, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(parsed);
+}
+
+function formatChartTime(value: string, locale: string): string {
+  const parsed = new Date(value);
+  return Number.isNaN(parsed.getTime())
+    ? "—"
+    : new Intl.DateTimeFormat(locale, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).format(parsed);
+}
+
+function formatDateRange(start: string | null, end: string | null, locale: string): string {
+  if (!start && !end) return locale === "zh-CN" ? "时间待确认" : "Date pending";
+  const format = (value: string | null) => {
+    if (!value) return "…";
+    const parsed = new Date(value);
+    return Number.isNaN(parsed.getTime()) ? "—" : new Intl.DateTimeFormat(locale, { year: "numeric", month: "2-digit", day: "2-digit" }).format(parsed);
+  };
+  return `${format(start)} → ${format(end)}`;
 }
