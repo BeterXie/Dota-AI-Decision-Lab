@@ -12,7 +12,7 @@ import httpx
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.billing.models import BillingSubscriptionRecord
+from app.billing.models import BillingCheckoutRecord, BillingSubscriptionRecord
 from app.billing.service import (
     BILLING_ACCESS_ACTIVE,
     BILLING_ACCESS_INACTIVE,
@@ -48,6 +48,10 @@ class PaddleWebhookError(ValueError):
     pass
 
 
+class PaddleWebhookSignatureError(PaddleWebhookError):
+    pass
+
+
 @dataclass(frozen=True, slots=True)
 class PaddleOffer:
     key: str
@@ -67,10 +71,20 @@ class PaddleOffer:
             "entitlements": ["ai_decisions", "realtime_notifications"],
             "payment_methods": {
                 "card": "subscription" if self.recurring else "one_time",
-                "alipay": "subscription" if self.recurring else "one_time",
-                "wechat_pay": "not_supported_for_subscription"
-                if self.recurring
-                else "one_time",
+                "alipay": (
+                    "subscription"
+                    if self.recurring and self.supports_alipay
+                    else "one_time"
+                    if self.supports_alipay
+                    else "unavailable"
+                ),
+                "wechat_pay": (
+                    "one_time"
+                    if self.supports_wechat_pay and not self.recurring
+                    else "not_supported_for_subscription"
+                    if self.recurring
+                    else "unavailable"
+                ),
             },
         }
 
@@ -161,7 +175,8 @@ class PaddleApiClient:
             raise PaddleApiError("Paddle transaction response is missing a valid transaction id")
         if not isinstance(payment_link, str) or not payment_link.startswith(("https://", "http://")):
             raise PaddleApiError(
-                "Paddle did not return a checkout URL; configure a default payment link or approved checkout URL"
+                "Paddle did not return a checkout URL; configure a default payment link "
+                "or approved checkout URL"
             )
         return PaddleCheckout(transaction_ref, customer_ref, payment_link)
 
@@ -273,12 +288,14 @@ class PaddleBillingGateway:
         try:
             if customer_ref is None:
                 customer_ref = await api.create_customer(email=email, user_id=user_id)
-            return await api.create_checkout(
+            checkout = await api.create_checkout(
                 user_id=user_id,
                 customer_ref=customer_ref,
                 offer=offer,
                 checkout_url=self._checkout_url,
             )
+            await self._record_checkout(user_id=user_id, offer=offer, checkout=checkout)
+            return checkout
         finally:
             await api.close()
 
@@ -376,14 +393,17 @@ class PaddleBillingGateway:
         occurred_at: datetime,
         data: dict[str, Any],
     ) -> BillingEventResult | None:
-        user_id = _user_id_from_data(data)
-        if user_id is None:
-            return None
-        offer = self._offer_from_data(data)
-        if offer is None:
-            raise PaddleWebhookError("trusted Dota billing transaction contains an unknown price")
         transaction_ref = _required_string(data.get("id"), "transaction id")
+        checkout = await self._checkout_record(transaction_ref)
+        if checkout is None:
+            # A signed Paddle event is not enough to establish application
+            # account ownership. Only a checkout created by our authenticated
+            # server is allowed to provision access.
+            return None
+        offer = self._validated_checkout_offer(checkout, data)
         customer_ref = _optional_string(data.get("customer_id"))
+        if customer_ref is not None and checkout.customer_ref not in {None, customer_ref}:
+            raise PaddleWebhookError("Paddle transaction customer does not match server checkout")
         provider_status = _optional_string(data.get("status")) or event_type
         subscription_ref = _optional_string(data.get("subscription_id"))
         if offer.recurring:
@@ -395,18 +415,20 @@ class PaddleBillingGateway:
                 raise PaddleWebhookError("fixed-term Paddle offer is missing grant duration")
             subscription_ref = transaction_ref
             current_period_end = occurred_at + timedelta(days=offer.grant_days)
-        return await self._billing.apply_subscription_event(
+        result = await self._billing.apply_subscription_event(
             provider=PADDLE_PROVIDER,
             event_ref=event_ref,
             occurred_at=occurred_at,
-            user_id=user_id,
+            user_id=checkout.user_id,
             subscription_ref=subscription_ref,
-            customer_ref=customer_ref,
-            plan_key=PRO_PLAN,
+            customer_ref=customer_ref or checkout.customer_ref,
+            plan_key=checkout.plan_key,
             access_state=BILLING_ACCESS_ACTIVE,
             provider_status=provider_status,
             current_period_end=current_period_end,
         )
+        await self._mark_checkout_completed(checkout.checkout_ref, occurred_at)
+        return result
 
     async def _apply_subscription(
         self,
@@ -416,15 +438,30 @@ class PaddleBillingGateway:
         occurred_at: datetime,
         data: dict[str, Any],
     ) -> BillingEventResult | None:
-        user_id = _user_id_from_data(data)
-        if user_id is None:
-            return None
-        offer = self._offer_from_data(data)
-        if offer is None:
-            raise PaddleWebhookError("trusted Dota billing subscription contains an unknown price")
-        if not offer.recurring:
-            raise PaddleWebhookError("fixed-term Paddle price unexpectedly created a subscription")
         subscription_ref = _required_string(data.get("id"), "subscription id")
+        record = await self._billing_record(subscription_ref)
+        checkout: BillingCheckoutRecord | None = None
+        if record is None and event_type == "subscription.created":
+            transaction_ref = _optional_string(data.get("transaction_id"))
+            checkout = await self._checkout_record(transaction_ref) if transaction_ref else None
+            if checkout is None:
+                return None
+            offer = self._validated_checkout_offer(checkout, data)
+            if not offer.recurring:
+                raise PaddleWebhookError("fixed-term Paddle checkout unexpectedly created a subscription")
+            user_id = checkout.user_id
+            plan_key = checkout.plan_key
+            customer_ref = _optional_string(data.get("customer_id")) or checkout.customer_ref
+        elif record is not None:
+            offer = self._offer_from_data(data)
+            if offer is None or not offer.recurring:
+                raise PaddleWebhookError("mapped Paddle subscription contains an unknown recurring price")
+            user_id = record.user_id
+            plan_key = record.plan_key
+            customer_ref = _optional_string(data.get("customer_id")) or record.customer_ref
+        else:
+            return None
+
         status = (_optional_string(data.get("status")) or "").lower()
         if event_type in {"subscription.activated", "subscription.resumed", "subscription.trialing"}:
             access_state = BILLING_ACCESS_ACTIVE
@@ -439,18 +476,21 @@ class PaddleBillingGateway:
         period_end = _period_end(data)
         if access_state == BILLING_ACCESS_ACTIVE and period_end is None:
             period_end = occurred_at + timedelta(days=32)
-        return await self._billing.apply_subscription_event(
+        result = await self._billing.apply_subscription_event(
             provider=PADDLE_PROVIDER,
             event_ref=event_ref,
             occurred_at=occurred_at,
             user_id=user_id,
             subscription_ref=subscription_ref,
-            customer_ref=_optional_string(data.get("customer_id")),
-            plan_key=PRO_PLAN,
+            customer_ref=customer_ref,
+            plan_key=plan_key,
             access_state=access_state,
             provider_status=status or event_type,
             current_period_end=period_end,
         )
+        if checkout is not None:
+            await self._mark_checkout_completed(checkout.checkout_ref, occurred_at)
+        return result
 
     async def _apply_adjustment(
         self,
@@ -467,9 +507,9 @@ class PaddleBillingGateway:
         if adjustment_type != "full":
             return None
         action = (_optional_string(data.get("action")) or "").lower()
-        if action in {"refund", "chargeback"}:
+        if action in {"refund", "chargeback", "chargeback_warning"}:
             access_state = BILLING_ACCESS_INACTIVE
-        elif action == "chargeback_reverse":
+        elif action in {"chargeback_reverse", "chargeback_warning_reverse"}:
             access_state = BILLING_ACCESS_ACTIVE
         else:
             return None
@@ -494,6 +534,35 @@ class PaddleBillingGateway:
             current_period_end=record.current_period_end,
         )
 
+    def _validated_checkout_offer(
+        self,
+        checkout: BillingCheckoutRecord,
+        data: dict[str, Any],
+    ) -> PaddleOffer:
+        offer = self._offers.get(checkout.offer_key)
+        if (
+            offer is None
+            or offer.price_id != checkout.price_ref
+            or offer.recurring != checkout.recurring
+            or offer.grant_days != checkout.grant_days
+            or checkout.plan_key != PRO_PLAN
+        ):
+            raise PaddleWebhookError("server checkout references an unsupported Paddle offer")
+        webhook_offer = self._offer_from_data(data)
+        if webhook_offer is None or webhook_offer.key != offer.key:
+            raise PaddleWebhookError("Paddle event price does not match server checkout")
+        custom = data.get("custom_data")
+        if not isinstance(custom, dict):
+            raise PaddleWebhookError("Paddle event is missing server checkout metadata")
+        if (
+            custom.get("dota_ai_billing") != _PADDLE_SCHEMA_MARKER
+            or custom.get("dota_user_id") != str(checkout.user_id)
+            or custom.get("dota_offer") != checkout.offer_key
+            or custom.get("dota_plan") != checkout.plan_key
+        ):
+            raise PaddleWebhookError("Paddle event metadata does not match server checkout")
+        return offer
+
     def _offer_from_data(self, data: dict[str, Any]) -> PaddleOffer | None:
         items = data.get("items")
         if not isinstance(items, list):
@@ -515,9 +584,81 @@ class PaddleBillingGateway:
             raise PaddleWebhookError("Paddle billing event contains multiple configured Pro offers")
         return next(iter(unique.values()))
 
-    async def _known_customer_ref(self, user_id: UUID) -> str | None:
+    async def _record_checkout(
+        self,
+        *,
+        user_id: UUID,
+        offer: PaddleOffer,
+        checkout: PaddleCheckout,
+    ) -> None:
+        now = datetime.now(UTC)
+        async with self._session_factory() as session, session.begin():
+            existing = await session.scalar(
+                select(BillingCheckoutRecord)
+                .where(
+                    BillingCheckoutRecord.provider == PADDLE_PROVIDER,
+                    BillingCheckoutRecord.checkout_ref == checkout.transaction_ref,
+                )
+                .limit(1)
+                .with_for_update()
+            )
+            if existing is not None:
+                if (
+                    existing.user_id != user_id
+                    or existing.offer_key != offer.key
+                    or existing.price_ref != offer.price_id
+                ):
+                    raise PaddleApiError("Paddle transaction id collided with another checkout")
+                return
+            session.add(
+                BillingCheckoutRecord(
+                    user_id=user_id,
+                    provider=PADDLE_PROVIDER,
+                    checkout_ref=checkout.transaction_ref,
+                    customer_ref=checkout.customer_ref,
+                    offer_key=offer.key,
+                    price_ref=offer.price_id,
+                    plan_key=PRO_PLAN,
+                    recurring=offer.recurring,
+                    grant_days=offer.grant_days,
+                    status="PENDING",
+                    created_at=now,
+                    updated_at=now,
+                )
+            )
+
+    async def _mark_checkout_completed(self, checkout_ref: str, occurred_at: datetime) -> None:
+        async with self._session_factory() as session, session.begin():
+            record = await session.scalar(
+                select(BillingCheckoutRecord)
+                .where(
+                    BillingCheckoutRecord.provider == PADDLE_PROVIDER,
+                    BillingCheckoutRecord.checkout_ref == checkout_ref,
+                )
+                .limit(1)
+                .with_for_update()
+            )
+            if record is not None:
+                record.status = "COMPLETED"
+                record.completed_at = occurred_at
+                record.updated_at = datetime.now(UTC)
+
+    async def _checkout_record(self, checkout_ref: str | None) -> BillingCheckoutRecord | None:
+        if checkout_ref is None:
+            return None
         async with self._session_factory() as session:
             return await session.scalar(
+                select(BillingCheckoutRecord)
+                .where(
+                    BillingCheckoutRecord.provider == PADDLE_PROVIDER,
+                    BillingCheckoutRecord.checkout_ref == checkout_ref,
+                )
+                .limit(1)
+            )
+
+    async def _known_customer_ref(self, user_id: UUID) -> str | None:
+        async with self._session_factory() as session:
+            subscription_customer = await session.scalar(
                 select(BillingSubscriptionRecord.customer_ref)
                 .where(
                     BillingSubscriptionRecord.user_id == user_id,
@@ -525,6 +666,18 @@ class PaddleBillingGateway:
                     BillingSubscriptionRecord.customer_ref.is_not(None),
                 )
                 .order_by(BillingSubscriptionRecord.updated_at.desc())
+                .limit(1)
+            )
+            if subscription_customer is not None:
+                return subscription_customer
+            return await session.scalar(
+                select(BillingCheckoutRecord.customer_ref)
+                .where(
+                    BillingCheckoutRecord.user_id == user_id,
+                    BillingCheckoutRecord.provider == PADDLE_PROVIDER,
+                    BillingCheckoutRecord.customer_ref.is_not(None),
+                )
+                .order_by(BillingCheckoutRecord.created_at.desc())
                 .limit(1)
             )
 
@@ -566,30 +719,32 @@ def verify_paddle_signature(
     tolerance_seconds: int = 5,
 ) -> None:
     if not signature_header:
-        raise PaddleWebhookError("Paddle-Signature header is required")
+        raise PaddleWebhookSignatureError("Paddle-Signature header is required")
     if tolerance_seconds < 1:
         raise ValueError("Paddle webhook tolerance must be positive")
     parts: dict[str, list[str]] = {}
     for segment in signature_header.split(";"):
         key, separator, value = segment.partition("=")
         if not separator or not key or not value:
-            raise PaddleWebhookError("Paddle-Signature header is malformed")
+            raise PaddleWebhookSignatureError("Paddle-Signature header is malformed")
         parts.setdefault(key.strip(), []).append(value.strip())
     timestamps = parts.get("ts", [])
     signatures = parts.get("h1", [])
     if len(timestamps) != 1 or not signatures:
-        raise PaddleWebhookError("Paddle-Signature header is missing ts or h1")
+        raise PaddleWebhookSignatureError("Paddle-Signature header is missing ts or h1")
     try:
         timestamp = int(timestamps[0])
     except ValueError as exc:
-        raise PaddleWebhookError("Paddle-Signature timestamp is invalid") from exc
+        raise PaddleWebhookSignatureError("Paddle-Signature timestamp is invalid") from exc
     current = int((now or datetime.now(UTC)).timestamp())
     if abs(current - timestamp) > tolerance_seconds:
-        raise PaddleWebhookError("Paddle webhook signature timestamp is outside tolerance")
+        raise PaddleWebhookSignatureError(
+            "Paddle webhook signature timestamp is outside tolerance"
+        )
     signed_payload = str(timestamp).encode("ascii") + b":" + raw_body
     expected = hmac.new(secret.encode("utf-8"), signed_payload, "sha256").hexdigest()
     if not any(hmac.compare_digest(expected, candidate) for candidate in signatures):
-        raise PaddleWebhookError("Paddle webhook signature is invalid")
+        raise PaddleWebhookSignatureError("Paddle webhook signature is invalid")
 
 
 def paddle_signature_for_test(raw_body: bytes, *, secret: str, timestamp: int | None = None) -> str:
@@ -597,19 +752,6 @@ def paddle_signature_for_test(raw_body: bytes, *, secret: str, timestamp: int | 
     signed_payload = str(value).encode("ascii") + b":" + raw_body
     digest = hmac.new(secret.encode("utf-8"), signed_payload, "sha256").hexdigest()
     return f"ts={value};h1={digest}"
-
-
-def _user_id_from_data(data: dict[str, Any]) -> UUID | None:
-    custom = data.get("custom_data")
-    if not isinstance(custom, dict) or custom.get("dota_ai_billing") != _PADDLE_SCHEMA_MARKER:
-        return None
-    raw = custom.get("dota_user_id")
-    if not isinstance(raw, str):
-        raise PaddleWebhookError("trusted Dota billing event is missing user id")
-    try:
-        return UUID(raw)
-    except ValueError as exc:
-        raise PaddleWebhookError("trusted Dota billing event contains an invalid user id") from exc
 
 
 def _period_end(data: dict[str, Any]) -> datetime | None:
