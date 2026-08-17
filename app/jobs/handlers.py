@@ -18,6 +18,7 @@ from app.draft.coordinator import DltvBootstrapCoordinator
 from app.draft.rosh_service import RoshService
 from app.evaluation.future_odds import FutureOddsService
 from app.evaluation.metrics import EvaluationService
+from app.evaluation.portfolio import TournamentPortfolioService
 from app.evaluation.settlement import SettlementService
 from app.events.outbox import EventRepository
 from app.history.builder import HistoricalFeatureBuilder
@@ -72,6 +73,7 @@ class JobHandlerDependencies:
     future_odds: FutureOddsService
     settlement: SettlementService
     evaluation: EvaluationService
+    portfolio: TournamentPortfolioService
     dltv_result: object | None = None
     wechat_clawbot: object | None = None
     qq_bot: object | None = None
@@ -426,7 +428,19 @@ class ApplicationJobHandlers:
             snapshot = await self._eligible_ai_snapshot(session, snapshot_id)
         if snapshot is None:
             return
-        lane_key = ai_experiment_lane_key(snapshot, provider=provider, model=model)
+        portfolio = getattr(self._d, "portfolio", None)
+        account_scope = None
+        if portfolio is not None:
+            async with self._d.session_factory() as session:
+                account_scope = await portfolio.lane_scope_for_snapshot(
+                    session, snapshot.snapshot_id
+                )
+        lane_key = ai_experiment_lane_key(
+            snapshot,
+            provider=provider,
+            model=model,
+            account_scope=account_scope,
+        )
         async with self._ai_lanes.hold(lane_key, snapshot.decision_at):
             async with self._d.session_factory() as session, session.begin():
                 prepared = await self._d.ai.prepare(
@@ -479,6 +493,11 @@ class ApplicationJobHandlers:
                     record.decision_persisted_at = persisted_at
                     session.add(record)
             await session.flush()
+            portfolio = getattr(self._d, "portfolio", None)
+            if portfolio is not None:
+                for prepared, record in results:
+                    if prepared.existing_record is None:
+                        await portfolio.record_decision_position(session, record)
 
             snapshot_records = list(
                 (
@@ -868,6 +887,15 @@ class ApplicationJobHandlers:
                     identity_confidence=1.0,
                     advanced_first_usable_at=fact.advanced_ready_at,
                     provider_conflict=fact.sync_status == "DATA_CONFLICT",
+                )
+            portfolio = getattr(self._d, "portfolio", None)
+            if portfolio is not None:
+                await portfolio.settle_map(
+                    session,
+                    canonical_map_id=canonical_map_id,
+                    winner_team_id=result.winner_team_id,
+                    provider_conflict=bool(result.provider_conflict),
+                    settled_at=result.settled_at,
                 )
             snapshots = list(
                 (

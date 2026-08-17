@@ -18,6 +18,7 @@ from app.evaluation.portfolio_models import (
 )
 from app.models import (
     AiDecisionRecord,
+    CanonicalEvent,
     CanonicalMap,
     CanonicalSeries,
     DecisionSnapshotRecord,
@@ -175,8 +176,7 @@ class TournamentPortfolioService:
         account = await session.scalar(
             select(TournamentPortfolioAccountRecord)
             .where(
-                TournamentPortfolioAccountRecord.canonical_event_id
-                == scope.canonical_event_id,
+                TournamentPortfolioAccountRecord.canonical_event_id == scope.canonical_event_id,
                 TournamentPortfolioAccountRecord.provider == record.provider,
                 TournamentPortfolioAccountRecord.model == record.model,
                 TournamentPortfolioAccountRecord.prompt_version == record.prompt_version,
@@ -262,8 +262,7 @@ class TournamentPortfolioService:
                 (
                     await session.scalars(
                         select(TournamentPortfolioPositionRecord.portfolio_account_id).where(
-                            TournamentPortfolioPositionRecord.canonical_map_id
-                            == canonical_map_id,
+                            TournamentPortfolioPositionRecord.canonical_map_id == canonical_map_id,
                             TournamentPortfolioPositionRecord.status == "OPEN",
                         )
                     )
@@ -285,10 +284,8 @@ class TournamentPortfolioService:
                     await session.scalars(
                         select(TournamentPortfolioPositionRecord)
                         .where(
-                            TournamentPortfolioPositionRecord.portfolio_account_id
-                            == account_id,
-                            TournamentPortfolioPositionRecord.canonical_map_id
-                            == canonical_map_id,
+                            TournamentPortfolioPositionRecord.portfolio_account_id == account_id,
+                            TournamentPortfolioPositionRecord.canonical_map_id == canonical_map_id,
                             TournamentPortfolioPositionRecord.status == "OPEN",
                         )
                         .order_by(
@@ -307,9 +304,7 @@ class TournamentPortfolioService:
                     position.status = "VOID"
                     entry_type = "BET_VOID"
                 else:
-                    won = (
-                        position.action == "BUY_A" and winner_team_id == series.team_a_id
-                    ) or (
+                    won = (position.action == "BUY_A" and winner_team_id == series.team_a_id) or (
                         position.action == "BUY_B" and winner_team_id == series.team_b_id
                     )
                     payout = (
@@ -359,8 +354,7 @@ class TournamentPortfolioService:
                 await session.scalars(
                     select(TournamentPortfolioAccountRecord)
                     .where(
-                        TournamentPortfolioAccountRecord.canonical_event_id
-                        == canonical_event_id
+                        TournamentPortfolioAccountRecord.canonical_event_id == canonical_event_id
                     )
                     .order_by(TournamentPortfolioAccountRecord.realized_pnl.desc())
                 )
@@ -372,10 +366,7 @@ class TournamentPortfolioService:
                 (
                     await session.scalars(
                         select(TournamentPortfolioPositionRecord)
-                        .where(
-                            TournamentPortfolioPositionRecord.portfolio_account_id
-                            == account.id
-                        )
+                        .where(TournamentPortfolioPositionRecord.portfolio_account_id == account.id)
                         .order_by(TournamentPortfolioPositionRecord.opened_at)
                     )
                 ).all()
@@ -388,9 +379,7 @@ class TournamentPortfolioService:
                 (_money(item.realized_pnl or 0) for item in wins),
                 _ZERO,
             )
-            gross_loss = abs(
-                sum((_money(item.realized_pnl or 0) for item in losses), _ZERO)
-            )
+            gross_loss = abs(sum((_money(item.realized_pnl or 0) for item in losses), _ZERO))
             initial = _money(account.initial_bankroll)
             equity = _money(account.cash_balance + account.locked_balance)
             rows.append(
@@ -420,9 +409,7 @@ class TournamentPortfolioService:
                     "losses": len(losses),
                     "hit_rate": len(wins) / len(settled_positions) if settled_positions else None,
                     "turnover": float(turnover),
-                    "profit_factor": (
-                        float(gross_profit / gross_loss) if gross_loss > 0 else None
-                    ),
+                    "profit_factor": (float(gross_profit / gross_loss) if gross_loss > 0 else None),
                     "status": account.status,
                 }
             )
@@ -441,16 +428,19 @@ class TournamentPortfolioService:
             TournamentPortfolioAccountRecord.provider == provider,
             TournamentPortfolioAccountRecord.model == model,
             TournamentPortfolioAccountRecord.prompt_version == prompt_version,
-            TournamentPortfolioAccountRecord.decision_policy_version
-            == decision_policy_version,
+            TournamentPortfolioAccountRecord.decision_policy_version == decision_policy_version,
             TournamentPortfolioAccountRecord.ai_view_version == ai_view_version,
         )
-        account = await session.scalar(
-            select(TournamentPortfolioAccountRecord).where(*predicates)
-        )
+        account = await session.scalar(select(TournamentPortfolioAccountRecord).where(*predicates))
         if account is not None:
             return account
 
+        event = await session.get(CanonicalEvent, canonical_event_id)
+        funded_at = (
+            event.started_at
+            if event is not None and event.started_at is not None
+            else datetime.now(UTC)
+        )
         candidate = TournamentPortfolioAccountRecord(
             canonical_event_id=canonical_event_id,
             provider=provider,
@@ -491,7 +481,7 @@ class TournamentPortfolioService:
             locked_delta=_ZERO,
             realized_pnl_delta=_ZERO,
             dedupe_key=f"fund:{candidate.id}",
-            occurred_at=candidate.created_at,
+            occurred_at=funded_at,
         )
         return candidate
 

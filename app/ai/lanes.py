@@ -67,9 +67,10 @@ def ai_experiment_lane_key(
     *,
     provider: str,
     model: str,
+    account_scope: str | None = None,
 ) -> str:
     identity = snapshot.identity if isinstance(snapshot.identity, dict) else {}
-    match_scope = (
+    match_scope = account_scope or (
         identity.get("map_id")
         or identity.get("canonical_map_id")
         or identity.get("valve_match_id")

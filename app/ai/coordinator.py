@@ -24,6 +24,7 @@ from app.ai.input import build_ai_input
 from app.canonical import canonical_bytes
 from app.domain.decision import AiDecision
 from app.domain.snapshot import DecisionSnapshot
+from app.evaluation.portfolio import PortfolioContext, TournamentPortfolioService
 from app.models import AiDecisionRecord, DecisionSnapshotRecord
 
 ExperimentKey = tuple[str, str, str, str, str]
@@ -34,6 +35,7 @@ class _PriorDecision:
     decision_at: datetime
     mode: str
     decision: AiDecision
+    bankroll_before: float | None = None
 
 
 @dataclass(frozen=True)
@@ -67,6 +69,7 @@ class AiCoordinator:
         max_live_data_lag_seconds: float = 120.0,
         virtual_bankroll: float = 10_000.0,
         prior_decisions_limit: int = 10,
+        portfolio: TournamentPortfolioService | None = None,
     ) -> None:
         if virtual_bankroll <= 0:
             raise ValueError("virtual_bankroll must be positive")
@@ -77,6 +80,7 @@ class AiCoordinator:
         self._max_live_data_lag_seconds = max_live_data_lag_seconds
         self._virtual_bankroll = round(float(virtual_bankroll), 2)
         self._prior_decisions_limit = prior_decisions_limit
+        self._portfolio = portfolio
 
     @property
     def experiments(self) -> tuple[ExperimentKey, ...]:
@@ -131,7 +135,16 @@ class AiCoordinator:
             provider=provider,
             model=model,
         )
-        bankroll_context = self._bankroll_context(prior)
+        portfolio_context = (
+            await self._portfolio.context_for_snapshot(
+                session,
+                snapshot_id=snapshot.snapshot_id,
+                experiment=experiment,
+            )
+            if self._portfolio is not None
+            else None
+        )
+        bankroll_context = self._bankroll_context(prior, portfolio_context=portfolio_context)
         if existing_record is not None:
             provider_input = ""
             ai_input_hash = existing_record.ai_input_hash or ""
@@ -211,7 +224,16 @@ class AiCoordinator:
             experiment = ai_experiment_key(provider.name, provider.model)
             existing_record = existing_by_experiment.get(experiment)
             prior = prior_by_provider_model.get((provider.name, provider.model), [])
-            bankroll_context = self._bankroll_context(prior)
+            portfolio_context = (
+                await self._portfolio.context_for_snapshot(
+                    session,
+                    snapshot_id=snapshot.snapshot_id,
+                    experiment=experiment,
+                )
+                if self._portfolio is not None
+                else None
+            )
+            bankroll_context = self._bankroll_context(prior, portfolio_context=portfolio_context)
             if existing_record is not None:
                 provider_input = ""
                 ai_input_hash = existing_record.ai_input_hash or ""
@@ -328,6 +350,10 @@ class AiCoordinator:
                 record.decision_persisted_at = persisted_at
                 session.add(record)
         await session.flush()
+        if self._portfolio is not None:
+            for prepared, record in zip(prepared_jobs, records, strict=True):
+                if prepared.existing_record is None:
+                    await self._portfolio.record_decision_position(session, record)
         return records
 
     async def _prior_decisions(
@@ -430,37 +456,63 @@ class AiCoordinator:
         ).all()
         return list(rows)
 
-    def _bankroll_context(self, prior: list[_PriorDecision]) -> dict:
-        bankroll_before = self._virtual_bankroll
-        prior_decisions: list[dict] = []
+    def _bankroll_context(
+        self,
+        prior: list[_PriorDecision],
+        *,
+        portfolio_context: PortfolioContext | None = None,
+    ) -> dict:
+        if portfolio_context is None:
+            bankroll_before = self._virtual_bankroll
+            prior_decisions: list[dict] = []
+            for item in prior:
+                stake = round(float(item.decision.stake or 0.0), 2)
+                prior_decisions.append(
+                    self._prior_payload(item, bankroll_before=bankroll_before, stake=stake)
+                )
+                bankroll_before = round(bankroll_before - stake, 2)
+            return {
+                "initial": self._virtual_bankroll,
+                "bankroll_before": bankroll_before,
+                "unsettled_stakes": round(self._virtual_bankroll - bankroll_before, 2),
+                "units": "virtual-units",
+                "prior_decisions": prior_decisions[-self._prior_decisions_limit :],
+            }
+
+        prior_decisions = []
         for item in prior:
             stake = round(float(item.decision.stake or 0.0), 2)
-            prior_decisions.append(
-                {
-                    "decision_at": item.decision_at.isoformat(),
-                    "mode": item.mode,
-                    "action": item.decision.action,
-                    "fair_probability_a": item.decision.fair_probability_a,
-                    "confidence": item.decision.confidence,
-                    "market_assessment": item.decision.market_assessment,
-                    "minimum_acceptable_odds_a": item.decision.minimum_acceptable_odds_a,
-                    "stake": stake,
-                    "bankroll_before": bankroll_before,
-                    "bankroll_after": round(bankroll_before - stake, 2),
-                    "primary_reasons": item.decision.primary_reasons,
-                    "blockers": item.decision.blockers,
-                }
+            frozen_before = (
+                item.bankroll_before
+                if item.bankroll_before is not None
+                else float(portfolio_context.cash_balance)
             )
-            bankroll_before = round(bankroll_before - stake, 2)
+            prior_decisions.append(
+                self._prior_payload(item, bankroll_before=frozen_before, stake=stake)
+            )
         return {
-            "initial": self._virtual_bankroll,
-            "bankroll_before": bankroll_before,
-            "unsettled_stakes": round(self._virtual_bankroll - bankroll_before, 2),
-            "units": "virtual-units",
-            # Accounting covers every canonical prior round. Only the most
-            # recent rounds are shown to the model, keeping token usage and
-            # bankroll correctness as two independent controls.
+            **portfolio_context.provider_payload(),
+            "unsettled_stakes": float(portfolio_context.locked_balance),
             "prior_decisions": prior_decisions[-self._prior_decisions_limit :],
+        }
+
+    @staticmethod
+    def _prior_payload(item: _PriorDecision, *, bankroll_before: float, stake: float) -> dict:
+        bankroll_after = round(bankroll_before - stake, 2)
+        return {
+            "decision_at": item.decision_at.isoformat(),
+            "mode": item.mode,
+            "action": item.decision.action,
+            "fair_probability_a": item.decision.fair_probability_a,
+            "confidence": item.decision.confidence,
+            "market_assessment": item.decision.market_assessment,
+            "minimum_acceptable_odds_a": item.decision.minimum_acceptable_odds_a,
+            "stake": stake,
+            "bankroll_before": bankroll_before,
+            "bankroll_after": bankroll_after,
+            "bankroll_after_commit": bankroll_after,
+            "primary_reasons": item.decision.primary_reasons,
+            "blockers": item.decision.blockers,
         }
 
     @staticmethod
@@ -508,6 +560,9 @@ def _prior_from_rows(
                 decision_at=decision_at,
                 mode=mode,
                 decision=decision,
+                bankroll_before=(
+                    float(record.bankroll_before) if record.bankroll_before is not None else None
+                ),
             )
         )
     # All prior rounds are returned for bankroll accounting. Trimming to
