@@ -12,6 +12,7 @@ from app.billing.paddle import (
     PADDLE_PROVIDER,
     PaddleApiError,
     PaddleBillingGateway,
+    PaddleCheckoutConflict,
     PaddleOffer,
     PaddleWebhookError,
     PaddleWebhookSignatureError,
@@ -92,6 +93,8 @@ def create_billing_router(
                 email=user.email,
                 offer_key=offer_key,
             )
+        except PaddleCheckoutConflict as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         except ValueError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except PaddleApiError as exc:
