@@ -79,10 +79,6 @@ class SocialAuthProviderError(RuntimeError):
 class SocialAuthService:
     def __init__(self, settings: SocialAuthSettings) -> None:
         self.settings = settings
-        self._client = httpx.AsyncClient(
-            timeout=settings.timeout_seconds,
-            follow_redirects=False,
-        )
 
     def callback_url(self, provider: str) -> str:
         base = _required_base_url(self.settings.external_base_url)
@@ -104,31 +100,37 @@ class SocialAuthService:
     async def google_identity(self, code: str) -> ExternalIdentityClaim:
         if not self.settings.google_available or self.settings.google_client_secret is None:
             raise SocialAuthProviderError("Google login is not configured")
-        token_response = await self._client.post(
-            _GOOGLE_TOKEN_ENDPOINT,
-            data={
-                "code": code,
-                "client_id": self.settings.google_client_id or "",
-                "client_secret": self.settings.google_client_secret.get_secret_value(),
-                "redirect_uri": self.callback_url("google"),
-                "grant_type": "authorization_code",
-            },
-            headers={"Accept": "application/json"},
-        )
-        if token_response.status_code >= 400:
-            raise SocialAuthProviderError("Google rejected the authorization code")
-        token_payload = token_response.json()
-        access_token = token_payload.get("access_token")
-        if not isinstance(access_token, str) or not access_token:
-            raise SocialAuthProviderError("Google token response did not include an access token")
+        async with httpx.AsyncClient(
+            timeout=self.settings.timeout_seconds,
+            follow_redirects=False,
+        ) as client:
+            token_response = await client.post(
+                _GOOGLE_TOKEN_ENDPOINT,
+                data={
+                    "code": code,
+                    "client_id": self.settings.google_client_id or "",
+                    "client_secret": self.settings.google_client_secret.get_secret_value(),
+                    "redirect_uri": self.callback_url("google"),
+                    "grant_type": "authorization_code",
+                },
+                headers={"Accept": "application/json"},
+            )
+            if token_response.status_code >= 400:
+                raise SocialAuthProviderError("Google rejected the authorization code")
+            token_payload = token_response.json()
+            access_token = token_payload.get("access_token")
+            if not isinstance(access_token, str) or not access_token:
+                raise SocialAuthProviderError(
+                    "Google token response did not include an access token"
+                )
 
-        profile_response = await self._client.get(
-            _GOOGLE_USERINFO_ENDPOINT,
-            headers={
-                "Authorization": f"Bearer {access_token}",
-                "Accept": "application/json",
-            },
-        )
+            profile_response = await client.get(
+                _GOOGLE_USERINFO_ENDPOINT,
+                headers={
+                    "Authorization": f"Bearer {access_token}",
+                    "Accept": "application/json",
+                },
+            )
         if profile_response.status_code >= 400:
             raise SocialAuthProviderError("Google profile lookup failed")
         profile = profile_response.json()
@@ -159,7 +161,9 @@ class SocialAuthService:
         }
         return f"{_STEAM_OPENID_ENDPOINT}?{urlencode(params)}"
 
-    async def steam_identity(self, params: dict[str, str], expected_state: str) -> ExternalIdentityClaim:
+    async def steam_identity(
+        self, params: dict[str, str], expected_state: str
+    ) -> ExternalIdentityClaim:
         if not self.settings.steam_available:
             raise SocialAuthProviderError("Steam login is not configured")
         if params.get("openid.ns") != _OPENID_NS:
@@ -190,17 +194,19 @@ class SocialAuthService:
             key: value for key, value in params.items() if key.startswith("openid.")
         }
         verification_payload["openid.mode"] = "check_authentication"
-        verify_response = await self._client.post(
-            _STEAM_OPENID_ENDPOINT,
-            data=verification_payload,
-            headers={"Accept": "text/plain"},
-        )
+        async with httpx.AsyncClient(
+            timeout=self.settings.timeout_seconds,
+            follow_redirects=False,
+        ) as client:
+            verify_response = await client.post(
+                _STEAM_OPENID_ENDPOINT,
+                data=verification_payload,
+                headers={"Accept": "text/plain"},
+            )
         if verify_response.status_code >= 400:
             raise SocialAuthProviderError("Steam OpenID verification failed")
         verdict = dict(
-            line.split(":", 1)
-            for line in verify_response.text.splitlines()
-            if ":" in line
+            line.split(":", 1) for line in verify_response.text.splitlines() if ":" in line
         )
         if verdict.get("is_valid") != "true":
             raise SocialAuthProviderError("Steam OpenID assertion is not valid")
@@ -210,9 +216,6 @@ class SocialAuthService:
             subject=steam_id,
             display_name=f"Steam {steam_id[-6:]}",
         )
-
-    async def close(self) -> None:
-        await self._client.aclose()
 
 
 def _required_base_url(value: str | None) -> str:
