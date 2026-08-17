@@ -314,8 +314,10 @@ test("compares AI portfolios and drills into an auditable event position", async
 
   await expect(page.getByRole("heading", { name: "AI 盈利与质量" })).toBeVisible();
   await expect(page.getByText("长期盈利排行")).toBeVisible();
-  await expect(page.getByText("+2,600", { exact: true })).toBeVisible();
-  await expect(page.getByText("−400", { exact: true })).toBeVisible();
+  const gptRow = page.getByRole("button", { name: /#1 GPT gpt-5\.6/ });
+  const deepseekRow = page.getByRole("button", { name: /#2 DeepSeek deepseek-reasoner/ });
+  await expect(gptRow).toContainText("+2,600");
+  await expect(deepseekRow).toContainText("−400");
   await expect(page.getByText("The International", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("PASS", { exact: true })).toBeVisible();
   await expect(page.getByText("22/20", { exact: true })).toBeVisible();
@@ -323,9 +325,9 @@ test("compares AI portfolios and drills into an auditable event position", async
 
   await page.getByText("MAP 2", { exact: true }).click();
   await expect(page.getByText("10,700", { exact: true })).toBeVisible();
-  await expect(page.getByText(/decision-…7890/)).toBeVisible();
+  await expect(page.getByText(/decision…7890/)).toBeVisible();
 
-  await page.getByRole("button", { name: /DeepSeek/ }).click();
+  await deepseekRow.click();
   await expect(page.getByText("FAIL", { exact: true })).toBeVisible();
   await expect(page.getByText("ROI 未达标", { exact: true })).toBeVisible();
 

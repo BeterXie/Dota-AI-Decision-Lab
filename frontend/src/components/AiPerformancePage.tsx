@@ -414,7 +414,7 @@ function EventDetail({
           <h4>{locale === "zh-CN" ? "预测质量" : "Prediction quality"}</h4>
           <MetricLine label="Brier" value={decimal(quality.average_brier_score, 3)} />
           <MetricLine label="Log Loss" value={decimal(quality.average_log_loss, 3)} />
-          <MetricLine label="CLV" value={percentPoints(quality.average_clv)} tone={tone(quality.average_clv)} />
+          <MetricLine label="CLV" value={rate(quality.average_clv, locale)} tone={tone(quality.average_clv)} />
           <MetricLine label={locale === "zh-CN" ? "Brier vs 市场" : "Brier vs market"} value={decimal(quality.market_comparison.brier_improvement_vs_market, 3)} tone={tone(quality.market_comparison.brier_improvement_vs_market)} />
           <MetricLine label={locale === "zh-CN" ? "平均仓位 / 现金" : "Avg stake / cash"} value={rate(quality.average_stake_pct_of_available_cash, locale)} />
           <MetricLine label={locale === "zh-CN" ? "最长连败" : "Longest losing streak"} value={`${quality.longest_losing_streak}`} />
@@ -640,10 +640,6 @@ function signedMoney(value: number, locale: string): string {
 
 function rate(value: number | null, locale: string): string {
   return value == null ? "—" : new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 1 }).format(value);
-}
-
-function percentPoints(value: number | null): string {
-  return value == null ? "—" : `${value > 0 ? "+" : ""}${(value * 100).toFixed(2)}pp`;
 }
 
 function decimal(value: number | null, digits: number): string {
