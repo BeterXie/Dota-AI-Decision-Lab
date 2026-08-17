@@ -22,7 +22,7 @@ async def _fixture():
             email="inviter@example.com",
             email_verified_at=now,
             last_login_at=now,
-            created_at=now - timedelta(days=30),
+            created_at=now,
         )
         invited = UserAccountRecord(
             email="invited@example.com",
