@@ -2,6 +2,8 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from uuid import uuid4
 
+import pytest
+
 from app.models import AiDecisionRecord, DecisionEvaluationRecord, DecisionSnapshotRecord
 from app.web.performance import _build_experiment_groups, _decision_trace_payload
 
@@ -61,7 +63,12 @@ def _decision(
     )
 
 
-def _evaluation(decision: AiDecisionRecord, *, correct: bool, unit_pnl: str) -> DecisionEvaluationRecord:
+def _evaluation(
+    decision: AiDecisionRecord,
+    *,
+    correct: bool,
+    unit_pnl: str,
+) -> DecisionEvaluationRecord:
     return DecisionEvaluationRecord(
         id=uuid4(),
         ai_decision_id=decision.id,
@@ -111,13 +118,13 @@ def test_experiment_metrics_use_settled_buys_and_one_unit_pnl() -> None:
     assert group["failed"] == 1
     assert group["settled_buy_decisions"] == 2
     assert group["correct_buy_decisions"] == 1
-    assert group["buy_accuracy"] == 0.5
-    assert group["unit_pnl"] == 0.2
-    assert group["unit_roi"] == 0.1
-    assert group["average_brier"] == 0.12
-    assert group["average_log_loss"] == 0.41
-    assert group["average_latency_seconds"] == 2.0
-    assert group["cached_input_ratio"] == 0.7
+    assert group["buy_accuracy"] == pytest.approx(0.5)
+    assert group["unit_pnl"] == pytest.approx(0.2)
+    assert group["unit_roi"] == pytest.approx(0.1)
+    assert group["average_brier"] == pytest.approx(0.12)
+    assert group["average_log_loss"] == pytest.approx(0.41)
+    assert group["average_latency_seconds"] == pytest.approx(2.0)
+    assert group["cached_input_ratio"] == pytest.approx(0.7)
 
 
 def test_decision_trace_exposes_reproducible_identity_and_latency_chain() -> None:
@@ -147,9 +154,9 @@ def test_decision_trace_exposes_reproducible_identity_and_latency_chain() -> Non
     assert payload["decision_policy_version"] == "policy-v3"
     assert payload["ai_view_version"] == "ai-view-v2"
     assert payload["primary_reasons"] == ["draft edge", "market gap"]
-    assert payload["trace"]["queue_seconds"] == 1.0
-    assert payload["trace"]["input_prepare_seconds"] == 0.5
-    assert payload["trace"]["provider_latency_seconds"] == 2.0
-    assert payload["trace"]["end_to_end_seconds"] == 4.5
+    assert payload["trace"]["queue_seconds"] == pytest.approx(1.0)
+    assert payload["trace"]["input_prepare_seconds"] == pytest.approx(0.5)
+    assert payload["trace"]["provider_latency_seconds"] == pytest.approx(2.0)
+    assert payload["trace"]["end_to_end_seconds"] == pytest.approx(4.5)
     assert payload["tokens"]["cached_input"] == 700
-    assert payload["evaluation"]["unit_pnl"] == 1.2
+    assert payload["evaluation"]["unit_pnl"] == pytest.approx(1.2)
