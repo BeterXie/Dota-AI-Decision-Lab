@@ -114,7 +114,10 @@ class NotificationCenterService(BaseNotificationCenterService):
         async with self._session_factory() as session:
             return await session.scalar(
                 select(NotificationBindingRecord.user_id)
-                .join(UserAccountRecord, UserAccountRecord.id == NotificationBindingRecord.user_id)
+                .join(
+                    UserAccountRecord,
+                    UserAccountRecord.id == NotificationBindingRecord.user_id,
+                )
                 .where(
                     NotificationBindingRecord.channel == normalized_channel,
                     NotificationBindingRecord.destination_key == destination_key,
@@ -141,7 +144,10 @@ class NotificationCenterService(BaseNotificationCenterService):
             (
                 await session.scalars(
                     select(NotificationBindingRecord)
-                    .join(UserAccountRecord, UserAccountRecord.id == NotificationBindingRecord.user_id)
+                    .join(
+                        UserAccountRecord,
+                        UserAccountRecord.id == NotificationBindingRecord.user_id,
+                    )
                     .where(
                         NotificationBindingRecord.channel == normalized_channel,
                         NotificationBindingRecord.status == "ACTIVE",
@@ -254,9 +260,7 @@ class NotificationCenterService(BaseNotificationCenterService):
                 canonical_map_id=canonical_map_id,
             ):
                 delivery.status = "CANCELLED"
-                delivery.last_error = (
-                    "binding, preference, account, or scoped realtime entitlement is no longer active"
-                )
+                delivery.last_error = "binding, preference, account, or scoped realtime entitlement is no longer active"
                 return None
             delivery.status = "SENDING"
             delivery.attempt_count += 1
