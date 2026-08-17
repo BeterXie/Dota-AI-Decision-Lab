@@ -78,9 +78,7 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["referral_code_id"], ["referral_codes.id"], ondelete="RESTRICT"
         ),
-        sa.UniqueConstraint(
-            "invited_user_id", name="uq_referral_attributions_invited_user"
-        ),
+        sa.UniqueConstraint("invited_user_id", name="uq_referral_attributions_invited_user"),
         sa.UniqueConstraint(
             "qualified_provider",
             "qualified_payment_ref",
@@ -175,9 +173,7 @@ def downgrade() -> None:
     op.drop_table("referral_codes")
     op.drop_index("ix_user_entitlements_campaign", table_name="user_entitlements")
     op.drop_index("ix_user_entitlements_scoped_access", table_name="user_entitlements")
-    op.drop_constraint(
-        "ck_user_entitlements_scope", "user_entitlements", type_="check"
-    )
+    op.drop_constraint("ck_user_entitlements_scope", "user_entitlements", type_="check")
     op.drop_column("user_entitlements", "campaign_key")
     op.drop_column("user_entitlements", "scope_ref")
     op.drop_column("user_entitlements", "scope_type")
