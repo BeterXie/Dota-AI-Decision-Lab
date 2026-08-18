@@ -41,6 +41,11 @@ class FakeTeamRegistryClient:
         )
 
 
+class ConflictingTeamRegistryClient(FakeTeamRegistryClient):
+    async def get_team_players(self, team_id: str | int) -> TimedPayload:
+        raise AssertionError("conflicting identity must not fetch or attach roster data")
+
+
 @pytest.mark.asyncio
 async def test_population_fills_missing_profile_and_roster_without_guessing_assets() -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
@@ -144,6 +149,61 @@ async def test_population_preserves_manually_maintained_profile_fields() -> None
     assert profile.logo_source == "official-manual"
     assert profile.source_url == "https://www.dota2.com/esports"
     assert profile.valve_team_id == 7654321
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_population_skips_conflicting_maintained_valve_identity() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory.begin() as session:
+        team = CanonicalTeam(name="Team Example")
+        session.add(team)
+        await session.flush()
+        session.add_all(
+            (
+                ProviderTeamMapping(
+                    provider="opendota",
+                    provider_team_id="7654321",
+                    canonical_team_id=team.id,
+                    observed_name="Team Example",
+                ),
+                TeamProfile(
+                    canonical_team_id=team.id,
+                    slug="team-example",
+                    valve_team_id=1111111,
+                    source_url="https://www.dota2.com/esports",
+                    observed_at=datetime(2026, 8, 17, 3, 0, tzinfo=UTC),
+                ),
+            )
+        )
+
+    async with factory.begin() as session:
+        results = await TeamRegistryPopulationService(RawEventRepository()).populate(
+            session,
+            ConflictingTeamRegistryClient(),
+            canonical_team_ids=[team.id],
+        )
+
+    assert results[0].skipped is True
+    assert results[0].valve_team_id == 1111111
+    assert results[0].roster is None
+
+    async with factory() as session:
+        membership_count = len(
+            list(
+                (
+                    await session.scalars(
+                        select(TeamRosterMembership).where(TeamRosterMembership.team_id == team.id)
+                    )
+                ).all()
+            )
+        )
+    assert membership_count == 0
 
     await engine.dispose()
 
