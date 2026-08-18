@@ -131,6 +131,16 @@
   height: 36px;
 }
 
+.match-team-hero > .team-crest {
+  width: 64px;
+  height: 64px;
+  border-radius: 16px;
+}
+.match-team-hero > .team-crest img {
+  width: 84%;
+  height: 84%;
+}
+
 .home-match-row > time {
   display: flex;
   align-items: center;
@@ -159,6 +169,11 @@
   .event-directory-focus strong {
     flex-wrap: wrap;
   }
+  .match-team-hero > .team-crest {
+    width: 48px;
+    height: 48px;
+    border-radius: 13px;
+  }
 }
 
 @media (max-width: 480px) {
@@ -169,5 +184,10 @@
   .event-team-name.is-large > .team-crest {
     width: 30px;
     height: 30px;
+  }
+  .match-team-hero > .team-crest {
+    width: 42px;
+    height: 42px;
+    border-radius: 12px;
   }
 }
