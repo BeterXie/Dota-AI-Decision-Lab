@@ -45,9 +45,7 @@ async def test_raybet_reuses_liquipedia_series_and_event_identity() -> None:
     async with factory.begin() as session:
         await projector.project_series(session, [observation])
         liquipedia_mapping = await session.scalar(
-            select(ProviderMatchMapping).where(
-                ProviderMatchMapping.provider == "liquipedia"
-            )
+            select(ProviderMatchMapping).where(ProviderMatchMapping.provider == "liquipedia")
         )
         assert liquipedia_mapping is not None
         canonical_series_id = liquipedia_mapping.canonical_series_id
