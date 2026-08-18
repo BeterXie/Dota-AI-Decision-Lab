@@ -21,9 +21,17 @@ Dota AI Decision Lab 2.0 uses an **official-first** policy for tournament and te
 
 The same official artwork is used for event names that clearly identify The International, including names such as `TI15 国际邀请赛`.
 
+### DreamLeague
+
+- Organizer: ESL
+- Verified official event page: `https://pro.eslgaming.com/dreamleague/`
+- Registered artwork: none yet
+
+The organizer-owned event page is recorded as the provenance target, but the product deliberately keeps the fallback event badge until a stable organizer-owned logo/image asset URL is verified. This prevents a temporary CMS image, search-result copy, or third-party mirror from silently becoming a permanent product dependency.
+
 ### Other tournaments
 
-Until an exact organizer-owned image URL has been verified, the UI deliberately uses the product fallback event badge. For example, DreamLeague remains a fallback badge until an ESL/DreamHack-owned event mark is explicitly registered here rather than guessed from a third-party result.
+Until an exact organizer-owned image URL has been verified, the UI deliberately uses the product fallback event badge. New tournament artwork should be added only together with its official provenance here and in the visual asset registry.
 
 ## Team logos
 
