@@ -4,15 +4,15 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.config import Settings
-from app.db import Base
-from app.events.outbox import EventRepository
-from app.market.discovery import RayBetDiscoveryService
-from app.models import CanonicalSeries, ProviderRawEvent
-from app.providers.common import TimedPayload
-from app.providers.liquipedia.fetch import FetchedPage
-from app.providers.liquipedia.runtime import LiquipediaRuntimeSeeder
-from app.repositories.raw import RawEventRepository
+import app.config
+import app.db
+import app.events.outbox
+import app.market.discovery
+import app.models
+import app.providers.common
+import app.providers.liquipedia.fetch
+import app.providers.liquipedia.runtime
+import app.repositories.raw
 
 
 SCHEDULE_HTML = """
@@ -46,11 +46,11 @@ class FakeLiquipediaClient:
     def __init__(self) -> None:
         self.calls: list[str] = []
 
-    async def parse_page(self, page_name: str) -> FetchedPage:
+    async def parse_page(self, page_name: str) -> app.providers.liquipedia.fetch.FetchedPage:
         self.calls.append(page_name)
         now = datetime(2026, 8, 18, 5, 0, tzinfo=UTC)
         html = SCHEDULE_HTML if page_name == "Liquipedia:Matches" else TOURNAMENT_HTML
-        return FetchedPage(
+        return app.providers.liquipedia.fetch.FetchedPage(
             page_name=page_name,
             display_title=page_name,
             revision_id=len(self.calls),
@@ -74,9 +74,13 @@ class FailingSeeder:
 
 
 class EmptyRayBetClient:
-    async def get_matches(self, _match_type: int, _page: int = 1) -> TimedPayload:
+    async def get_matches(self, _match_type: int, _page: int = 1) -> app.providers.common.TimedPayload:
         now = datetime(2026, 8, 18, 5, 0, tzinfo=UTC)
-        return TimedPayload(payload={"result": []}, request_started_at=now, received_at=now)
+        return app.providers.common.TimedPayload(
+            payload={"result": []},
+            request_started_at=now,
+            received_at=now,
+        )
 
 
 async def _noop_identity(_session, _match) -> None:
@@ -87,11 +91,11 @@ async def _noop_identity(_session, _match) -> None:
 async def test_runtime_seeder_refreshes_schedule_first_then_tournament_directory() -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
+        await connection.run_sync(app.db.Base.metadata.create_all)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     client = FakeLiquipediaClient()
-    seeder = LiquipediaRuntimeSeeder(
-        RawEventRepository(),
+    seeder = app.providers.liquipedia.runtime.LiquipediaRuntimeSeeder(
+        app.repositories.raw.RawEventRepository(),
         client=client,  # type: ignore[arg-type]
         schedule_refresh_seconds=3_600,
         tournament_refresh_seconds=21_600,
@@ -112,12 +116,12 @@ async def test_runtime_seeder_refreshes_schedule_first_then_tournament_directory
     assert third.source is None
     assert client.calls == ["Liquipedia:Matches", "Liquipedia:Tournaments"]
     async with factory() as session:
-        assert await session.scalar(select(func.count()).select_from(CanonicalSeries)) == 1
+        assert await session.scalar(select(func.count()).select_from(app.models.CanonicalSeries)) == 1
         raw_types = set(
             (
                 await session.scalars(
-                    select(ProviderRawEvent.event_type).where(
-                        ProviderRawEvent.provider == "liquipedia"
+                    select(app.models.ProviderRawEvent.event_type).where(
+                        app.models.ProviderRawEvent.provider == "liquipedia"
                     )
                 )
             ).all()
@@ -133,15 +137,15 @@ async def test_runtime_seeder_refreshes_schedule_first_then_tournament_directory
 async def test_liquipedia_seed_failure_does_not_block_raybet_discovery_transaction() -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
+        await connection.run_sync(app.db.Base.metadata.create_all)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     client = EmptyRayBetClient()
-    discovery = RayBetDiscoveryService(
-        settings=Settings(_env_file=None, raybet_match_types="0"),
+    discovery = app.market.discovery.RayBetDiscoveryService(
+        settings=app.config.Settings(_env_file=None, raybet_match_types="0"),
         client=client,
         fallback_client=client,
-        raw_events=RawEventRepository(),
-        events=EventRepository(),
+        raw_events=app.repositories.raw.RawEventRepository(),
+        events=app.events.outbox.EventRepository(),
         on_match=_noop_identity,
         liquipedia_seeder=FailingSeeder(),  # type: ignore[arg-type]
     )
@@ -153,13 +157,13 @@ async def test_liquipedia_seed_failure_does_not_block_raybet_discovery_transacti
     async with factory() as session:
         raybet_raw = await session.scalar(
             select(func.count())
-            .select_from(ProviderRawEvent)
-            .where(ProviderRawEvent.provider == "raybet")
+            .select_from(app.models.ProviderRawEvent)
+            .where(app.models.ProviderRawEvent.provider == "raybet")
         )
         liquipedia_raw = await session.scalar(
             select(func.count())
-            .select_from(ProviderRawEvent)
-            .where(ProviderRawEvent.provider == "liquipedia")
+            .select_from(app.models.ProviderRawEvent)
+            .where(app.models.ProviderRawEvent.provider == "liquipedia")
         )
     assert raybet_raw == 1
     assert liquipedia_raw == 0
