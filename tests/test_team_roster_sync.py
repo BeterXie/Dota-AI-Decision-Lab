@@ -19,7 +19,7 @@ class FakeOpenDotaClient:
         self.payloads = payloads
         self.calls = 0
 
-    async def get_team_players(self, team_id: int) -> TimedPayload:
+    async def get_team_players(self, team_id: str | int) -> TimedPayload:
         payload = self.payloads[self.calls]
         received_at = datetime(2026, 8, 18, 2, 0, tzinfo=UTC) + timedelta(hours=self.calls)
         self.calls += 1
@@ -30,13 +30,7 @@ class FakeOpenDotaClient:
         )
 
 
-@pytest.mark.asyncio
-async def test_roster_sync_creates_and_closes_only_discovered_player_memberships() -> None:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-
+async def _mapped_team(factory: async_sessionmaker) -> CanonicalTeam:
     async with factory.begin() as session:
         team = CanonicalTeam(name="Roster Team")
         session.add(team)
@@ -49,6 +43,16 @@ async def test_roster_sync_creates_and_closes_only_discovered_player_memberships
                 observed_name="Roster Team",
             )
         )
+    return team
+
+
+@pytest.mark.asyncio
+async def test_roster_sync_creates_and_closes_only_discovered_player_memberships() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    team = await _mapped_team(factory)
 
     client = FakeOpenDotaClient(
         [
@@ -65,14 +69,14 @@ async def test_roster_sync_creates_and_closes_only_discovered_player_memberships
     service = TeamRosterSyncService(RawEventRepository())
 
     async with factory.begin() as session:
-        first = await service.sync_team(session, client, canonical_team_id=team.id)  # type: ignore[arg-type]
+        first = await service.sync_team(session, client, canonical_team_id=team.id)
     assert first.current_players == 2
     assert first.created_players == 2
     assert first.created_memberships == 2
     assert first.closed_memberships == 0
 
     async with factory.begin() as session:
-        second = await service.sync_team(session, client, canonical_team_id=team.id)  # type: ignore[arg-type]
+        second = await service.sync_team(session, client, canonical_team_id=team.id)
     assert second.current_players == 1
     assert second.created_players == 0
     assert second.created_memberships == 0
@@ -92,4 +96,49 @@ async def test_roster_sync_creates_and_closes_only_discovered_player_memberships
     assert len(closed) == 1
     assert all(item.source_name == "opendota" for item in memberships)
 
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_partial_current_roster_does_not_close_known_players() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    team = await _mapped_team(factory)
+    client = FakeOpenDotaClient(
+        [
+            [
+                {"account_id": 101, "name": "Carry", "is_current_team_member": True},
+                {"account_id": 102, "name": "Mid", "is_current_team_member": True},
+            ],
+            [
+                {"account_id": 101, "name": "Carry", "is_current_team_member": True},
+                {"account_id": None, "name": "Unknown support", "is_current_team_member": True},
+            ],
+        ]
+    )
+    service = TeamRosterSyncService(RawEventRepository())
+
+    async with factory.begin() as session:
+        await service.sync_team(session, client, canonical_team_id=team.id)
+    async with factory.begin() as session:
+        partial = await service.sync_team(session, client, canonical_team_id=team.id)
+
+    assert partial.current_players == 1
+    assert partial.closed_memberships == 0
+    async with factory() as session:
+        active_count = len(
+            list(
+                (
+                    await session.scalars(
+                        select(TeamRosterMembership).where(
+                            TeamRosterMembership.team_id == team.id,
+                            TeamRosterMembership.valid_to.is_(None),
+                        )
+                    )
+                ).all()
+            )
+        )
+    assert active_count == 2
     await engine.dispose()
