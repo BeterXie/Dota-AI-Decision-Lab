@@ -165,9 +165,9 @@ class DecisionReadinessService:
             snapshot_rows = list(
                 (
                     await session.execute(
-                        select(DecisionSnapshotRecord.id, DecisionSnapshotRecord.canonical_map_id).where(
-                            DecisionSnapshotRecord.canonical_map_id.in_(map_ids)
-                        )
+                        select(
+                            DecisionSnapshotRecord.id, DecisionSnapshotRecord.canonical_map_id
+                        ).where(DecisionSnapshotRecord.canonical_map_id.in_(map_ids))
                     )
                 ).all()
             )
@@ -225,8 +225,11 @@ class DecisionReadinessService:
             ai_rows = list(
                 (
                     await session.execute(
-                        select(AiDecisionRecord.id, AiDecisionRecord.snapshot_id, AiDecisionRecord.parse_status)
-                        .where(AiDecisionRecord.snapshot_id.in_(snapshot_ids))
+                        select(
+                            AiDecisionRecord.id,
+                            AiDecisionRecord.snapshot_id,
+                            AiDecisionRecord.parse_status,
+                        ).where(AiDecisionRecord.snapshot_id.in_(snapshot_ids))
                     )
                 ).all()
             )
@@ -309,7 +312,9 @@ class DecisionReadinessService:
             series_payload.append(
                 {
                     "canonical_series_id": str(series.id),
-                    "canonical_event_id": str(series.event_id) if series.event_id is not None else None,
+                    "canonical_event_id": str(series.event_id)
+                    if series.event_id is not None
+                    else None,
                     "event_name": row.event_name,
                     "scheduled_at": series.scheduled_at,
                     "team_a": {"id": str(series.team_a_id), "name": row.team_a_name},
