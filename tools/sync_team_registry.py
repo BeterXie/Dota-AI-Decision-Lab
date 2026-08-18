@@ -23,7 +23,10 @@ def parse_args() -> argparse.Namespace:
         "--team-id",
         action="append",
         default=[],
-        help="Canonical team UUID to populate. Repeat for multiple teams; omitted populates all mapped teams.",
+        help=(
+            "Canonical team UUID to populate. Repeat for multiple teams; "
+            "omitted populates all mapped teams."
+        ),
     )
     return parser.parse_args()
 
