@@ -1,6 +1,7 @@
 import React from "react";
 import type { AuthSessionState } from "../authApi";
 import { useI18n } from "../i18n";
+import { UiIcon } from "./VisualIdentity";
 
 export type ProductNavKey = "home" | "events" | "performance" | "review" | "billing";
 
@@ -76,7 +77,7 @@ export const ProductShell: React.FC<ProductShellProps> = ({
             setNavOpen((value) => !value);
           }}
         >
-          <span aria-hidden="true">☰</span>
+          <UiIcon name="menu" size={18} />
         </button>
         <nav className={`product-main-nav ${navOpen ? "is-open" : ""}`} aria-label={locale === "zh-CN" ? "主导航" : "Main navigation"}>
           {navItems.map((item) => (
@@ -106,7 +107,7 @@ export const ProductShell: React.FC<ProductShellProps> = ({
             {signedIn && user?.avatar_url ? (
               <img src={user.avatar_url} alt="" referrerPolicy="no-referrer" />
             ) : (
-              <span aria-hidden="true">{signedIn ? label.slice(0, 1).toUpperCase() : "人"}</span>
+              signedIn ? <span aria-hidden="true">{label.slice(0, 1).toUpperCase()}</span> : <UiIcon name="user" size={17} />
             )}
           </button>
           {signedIn && menuOpen && (
@@ -122,12 +123,12 @@ export const ProductShell: React.FC<ProductShellProps> = ({
               </div>
               <div className="account-menu-section">
                 <a className="account-menu-row" href="/account" role="menuitem">
-                  <span className="account-menu-icon" aria-hidden="true">◎</span>
+                  <span className="account-menu-icon"><UiIcon name="user" size={15} /></span>
                   <div><strong>{locale === "zh-CN" ? "个人信息" : "Account"}</strong><small>{locale === "zh-CN" ? "免费账户 · 赛事 Pass" : "Free access · Competition Passes"}</small></div>
                   <span className="menu-chevron">›</span>
                 </a>
                 <div className="account-menu-row language-row">
-                  <span className="account-menu-icon" aria-hidden="true">文</span>
+                  <span className="account-menu-icon"><UiIcon name="language" size={15} /></span>
                   <strong>{locale === "zh-CN" ? "语言 / Language" : "Language / 语言"}</strong>
                   <div className="account-language-toggle" role="group" aria-label="Language">
                     <button type="button" className={locale === "zh-CN" ? "is-active" : ""} onClick={() => setLocale("zh-CN")}>中文</button>
@@ -135,17 +136,17 @@ export const ProductShell: React.FC<ProductShellProps> = ({
                   </div>
                 </div>
                 <a className="account-menu-row" href="/notifications" role="menuitem">
-                  <span className="account-menu-icon" aria-hidden="true">◌</span>
+                  <span className="account-menu-icon"><UiIcon name="notification" size={15} /></span>
                   <strong>{locale === "zh-CN" ? "通知设置" : "Notifications"}</strong><span className="menu-chevron">›</span>
                 </a>
                 <a className="account-menu-row" href="/billing" role="menuitem">
-                  <span className="account-menu-icon" aria-hidden="true">♔</span>
+                  <span className="account-menu-icon"><UiIcon name="ticket" size={15} /></span>
                   <strong>{locale === "zh-CN" ? "会员中心" : "Membership"}</strong><span className="menu-chevron">›</span>
                 </a>
               </div>
               <div className="account-menu-footer">
                 <button type="button" disabled={logoutBusy} onClick={() => void handleLogout()}>
-                  <span aria-hidden="true">↪</span>{logoutBusy ? "…" : locale === "zh-CN" ? "退出登录" : "Sign out"}
+                  <UiIcon name="logout" size={15} />{logoutBusy ? "…" : locale === "zh-CN" ? "退出登录" : "Sign out"}
                 </button>
                 {logoutError && <span role="alert">{logoutError}</span>}
               </div>

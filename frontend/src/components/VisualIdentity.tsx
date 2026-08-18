@@ -1,4 +1,21 @@
 import React from "react";
+import {
+  Calendar,
+  Checkmark,
+  Group,
+  Layers,
+  Language,
+  Locked,
+  Logout,
+  MagicWand,
+  Menu,
+  Notification,
+  Star,
+  Ticket,
+  Time,
+  Trophy,
+  User
+} from "@carbon/icons-react";
 import type { MapSummary } from "../api";
 import { useTeamDirectory } from "../teamDirectoryApi";
 import { teamHref } from "../teams";
@@ -13,7 +30,23 @@ import {
 type TeamIdentity = MapSummary["team_a"];
 type VisualSize = "sm" | "md" | "lg" | "hero";
 
-type IconName = "calendar" | "clock" | "layers" | "spark" | "trophy" | "users";
+type IconName =
+  | "ai"
+  | "calendar"
+  | "check"
+  | "clock"
+  | "layers"
+  | "language"
+  | "lock"
+  | "logout"
+  | "menu"
+  | "notification"
+  | "spark"
+  | "star"
+  | "ticket"
+  | "trophy"
+  | "user"
+  | "users";
 
 export const TeamCrest: React.FC<{
   team: TeamIdentity;
@@ -105,38 +138,21 @@ export const EventMark: React.FC<{
   );
 };
 
-export const UiIcon: React.FC<{ name: IconName; size?: number }> = ({ name, size = 14 }) => (
-  <svg
-    className={`ui-icon ui-icon-${name}`}
-    width={size}
-    height={size}
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="1.8"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    aria-hidden="true"
-  >
-    {iconPath(name)}
-  </svg>
-);
-
-function iconPath(name: IconName): React.ReactNode {
-  if (name === "calendar") {
-    return <><path d="M6 3v3M18 3v3M4 9h16" /><rect x="4" y="5" width="16" height="15" rx="2" /></>;
-  }
-  if (name === "clock") {
-    return <><circle cx="12" cy="12" r="8.5" /><path d="M12 7v5l3 2" /></>;
-  }
-  if (name === "layers") {
-    return <><path d="m12 4 8 4-8 4-8-4 8-4Z" /><path d="m4 12 8 4 8-4M4 16l8 4 8-4" /></>;
-  }
-  if (name === "spark") {
-    return <><path d="m12 3 1.4 4.2L18 9l-4.6 1.8L12 15l-1.4-4.2L6 9l4.6-1.8L12 3Z" /><path d="m18.5 15 .7 2.1 2.1.7-2.1.7-.7 2.1-.7-2.1-2.1-.7 2.1-.7.7-2.1Z" /></>;
-  }
-  if (name === "trophy") {
-    return <><path d="M8 4h8v4a4 4 0 0 1-8 0V4Z" /><path d="M8 6H5v1a4 4 0 0 0 4 4M16 6h3v1a4 4 0 0 1-4 4M12 12v4M9 20h6M10 16h4" /></>;
-  }
-  return <><circle cx="9" cy="8" r="3" /><circle cx="17" cy="9" r="2.4" /><path d="M3.5 19c.5-3.7 2.4-5.5 5.5-5.5s5 1.8 5.5 5.5M14 14.5c3.5-.5 5.6 1 6.5 4.5" /></>;
-}
+export const UiIcon: React.FC<{ name: IconName; size?: number }> = ({ name, size = 14 }) => {
+  const props = { className: `ui-icon ui-icon-${name}`, size, "aria-hidden": true };
+  if (name === "ai" || name === "spark") return <MagicWand {...props} />;
+  if (name === "calendar") return <Calendar {...props} />;
+  if (name === "check") return <Checkmark {...props} />;
+  if (name === "clock") return <Time {...props} />;
+  if (name === "layers") return <Layers {...props} />;
+  if (name === "language") return <Language {...props} />;
+  if (name === "lock") return <Locked {...props} />;
+  if (name === "logout") return <Logout {...props} />;
+  if (name === "menu") return <Menu {...props} />;
+  if (name === "notification") return <Notification {...props} />;
+  if (name === "star") return <Star {...props} />;
+  if (name === "ticket") return <Ticket {...props} />;
+  if (name === "trophy") return <Trophy {...props} />;
+  if (name === "user") return <User {...props} />;
+  return <Group {...props} />;
+};

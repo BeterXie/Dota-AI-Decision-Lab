@@ -177,10 +177,10 @@
   width: min(720px, 100%);
   padding: clamp(28px, 5vw, 48px);
   border: 1px solid var(--product-border-strong);
-  border-radius: 18px;
+  border-radius: 10px;
   background:
-    radial-gradient(circle at 90% 0%, rgba(139, 93, 208, 0.14), transparent 34%),
-    radial-gradient(circle at 8% 100%, rgba(39, 165, 182, 0.1), transparent 35%),
+    radial-gradient(circle at 90% 0%, rgba(39, 165, 182, 0.12), transparent 34%),
+    radial-gradient(circle at 8% 100%, rgba(177, 125, 66, 0.07), transparent 35%),
     rgba(12, 23, 35, 0.92);
   box-shadow: var(--product-shadow);
   text-align: center;
@@ -212,14 +212,14 @@
   max-width: 610px;
   margin: 14px auto 0;
   color: var(--product-text-2);
-  font-size: 12px;
+  font-size: 14px;
   line-height: 1.8;
 }
 
 .product-access-boundary {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 10px;
+  gap: 14px;
   margin-top: 25px;
   text-align: left;
 }
@@ -231,9 +231,9 @@
   align-content: start;
   gap: 9px;
   padding: 16px;
-  border: 1px solid rgba(142, 166, 188, 0.12);
-  border-radius: 11px;
-  background: rgba(5, 14, 23, 0.38);
+  border: 1px solid rgba(142, 166, 188, 0.08);
+  border-radius: 8px;
+  background: rgba(5, 14, 23, 0.24);
 }
 
 .product-access-boundary i {
@@ -261,12 +261,12 @@
 
 .product-access-boundary strong {
   color: #c9d5de;
-  font-size: 11px;
+  font-size: 14px;
 }
 
 .product-access-boundary small {
   color: #71869a;
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.65;
 }
 
@@ -287,7 +287,7 @@
   border-radius: 8px;
   background: rgba(236, 184, 87, 0.05);
   color: #d1a85c;
-  font-size: 9px;
+  font-size: 12px;
   line-height: 1.5;
 }
 

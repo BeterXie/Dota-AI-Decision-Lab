@@ -1,6 +1,7 @@
 import React, { lazy, Suspense } from "react";
 import type { AuthSessionState } from "../authApi";
 import { useI18n } from "../i18n";
+import { UiIcon } from "./VisualIdentity";
 
 const ReviewPage = lazy(() =>
   import("./ReviewPage").then((module) => ({ default: module.ReviewPage }))
@@ -187,13 +188,13 @@ function ProductAccessGate({
   return (
     <div className="product-access-gate product-container">
       <section className="product-access-card">
-        <div className="product-access-mark" aria-hidden="true">✦</div>
+        <div className="product-access-mark" aria-hidden="true"><UiIcon name="spark" size={22} /></div>
         <span className="home-eyebrow">REALTIME ACCESS</span>
         <h1>{copy.title}</h1>
         <p>{copy.description}</p>
         <div className="product-access-boundary">
-          <div><i aria-hidden="true">✓</i><span><strong>{copy.publicTitle}</strong><small>{copy.publicText}</small></span></div>
-          <div className="is-premium"><i aria-hidden="true">✦</i><span><strong>{copy.premiumTitle}</strong><small>{copy.premiumText}</small></span></div>
+          <div><i aria-hidden="true"><UiIcon name="check" size={14} /></i><span><strong>{copy.publicTitle}</strong><small>{copy.publicText}</small></span></div>
+          <div className="is-premium"><i aria-hidden="true"><UiIcon name="spark" size={14} /></i><span><strong>{copy.premiumTitle}</strong><small>{copy.premiumText}</small></span></div>
         </div>
         {!authEnabled ? (
           <div className="product-access-status is-error" role="status">{copy.disabled}</div>

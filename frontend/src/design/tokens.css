@@ -1,9 +1,9 @@
 :root {
-  --bg: #0B0E13;
-  --surface-1: #11151C;
-  --surface-2: #171C24;
-  --surface-3: #1D2430;
-  --surface-hover: #222A36;
+  --bg: #090D12;
+  --surface-1: #11171D;
+  --surface-2: #171E25;
+  --surface-3: #1E2730;
+  --surface-hover: #253039;
 
   --text-primary: #F5F7FA;
   --text-secondary: #9AA4B2;
@@ -23,8 +23,8 @@
   --ai-accent: #9C82FF;
   --ai-accent-bg: rgba(156, 130, 255, 0.12);
 
-  --radius-card: 16px;
-  --radius-sm: 10px;
+  --radius-card: 10px;
+  --radius-sm: 8px;
   --radius-pill: 9999px;
 
   --gap-section: 24px;
@@ -35,9 +35,9 @@
   --font-ui: "IBM Plex Sans", "Noto Sans SC", system-ui, sans-serif;
   --font-mono: "IBM Plex Mono", "Cascadia Mono", Consolas, monospace;
 
-  --type-caption: 11px;
-  --type-meta: 12px;
-  --type-secondary: 13px;
-  --type-body: 14px;
-  --type-panel-title: 18px;
+  --type-caption: 12px;
+  --type-meta: 13px;
+  --type-secondary: 14px;
+  --type-body: 15px;
+  --type-panel-title: 19px;
 }

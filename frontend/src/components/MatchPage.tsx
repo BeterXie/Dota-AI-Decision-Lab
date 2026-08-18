@@ -296,7 +296,7 @@ const AiMatchCard: React.FC<{
         ) : <EmptyCardMessage text={locale === "zh-CN" ? "你的权限已生效，但这场比赛暂时还没有成功的 AI 判断。" : "Your access is active, but this match has no successful AI call yet."} />
       ) : (
         <div className="match-ai-lock">
-          <span aria-hidden="true">✦</span>
+          <span aria-hidden="true"><UiIcon name="lock" size={18} /></span>
           <h3>{!authEnabled ? (locale === "zh-CN" ? "AI 权限当前不可用" : "AI access is unavailable") : !signedIn ? (locale === "zh-CN" ? "登录后查看 AI 判断" : "Sign in to view AI calls") : (locale === "zh-CN" ? "这场比赛的 AI 判断需要对应权限" : "AI calls for this match require access")}</h3>
           <p>{locale === "zh-CN" ? "小组赛 AI 决策免费开放；付费阶段的 AI 决策需要对应赛事或系列赛 Pass。赛事、比分、Draft、Live 和市场信息继续公开。" : "Group-stage AI decisions are free; paid-stage AI decisions require the relevant Event or Series Pass. Event, score, Draft, live and market information remain public."}</p>
           {authEnabled && (!signedIn ? <button className="product-btn product-btn-primary" type="button" onClick={onLogin}>{locale === "zh-CN" ? "登录" : "Sign in"}<span>→</span></button> : <a className="product-btn product-btn-primary" href={billingHref}>{locale === "zh-CN" ? "查看赛事 Pass" : "View competition pass"}<span>→</span></a>)}

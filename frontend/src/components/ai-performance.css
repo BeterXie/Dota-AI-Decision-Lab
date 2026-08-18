@@ -1,9 +1,9 @@
 .performance-page {
   min-height: 100vh;
   background:
-    radial-gradient(circle at 16% -10%, rgba(81, 93, 255, 0.18), transparent 34rem),
+    radial-gradient(circle at 16% -10%, rgba(177, 125, 66, 0.08), transparent 34rem),
     radial-gradient(circle at 88% 12%, rgba(0, 203, 151, 0.09), transparent 30rem),
-    #090d14;
+  #090d12;
   color: #e8edf6;
 }
 
@@ -70,10 +70,10 @@
 .performance-intro::after { content: ""; position: absolute; z-index: 0; top: -100px; right: -20px; width: 620px; height: 280px; background: linear-gradient(90deg, #090d14 0%, transparent 35%), url("/assets/heroes/performance-hero.webp") right center / auto 280px no-repeat; opacity: .36; filter: saturate(.82) contrast(1.08); mask-image: linear-gradient(90deg, transparent, #000 22%, #000); pointer-events: none; }
 .performance-intro > * { position: relative; z-index: 1; }
 .performance-intro h1 { margin: 7px 0 9px; max-width: 980px; font-size: 40px; line-height: 1.15; letter-spacing: 0; }
-.performance-intro p { margin: 0; max-width: 1040px; color: #8f9bb0; line-height: 1.65; font-size: 13px; }
+.performance-intro p { margin: 0; max-width: 1040px; color: #a7b3c0; line-height: 1.65; font-size: 15px; }
 .performance-intro-actions { flex: 0 0 auto; display: flex; align-items: center; gap: 7px; }
 .performance-intro-actions a,
-.performance-intro-actions button { min-height: 34px; display: inline-flex; align-items: center; padding: 0 10px; border: 1px solid rgba(255,255,255,.09); border-radius: 7px; background: rgba(255,255,255,.035); color: #9ea9be; font: inherit; font-size: 10px; text-decoration: none; cursor: pointer; }
+.performance-intro-actions button { min-height: 40px; display: inline-flex; align-items: center; padding: 0 12px; border: 1px solid rgba(255,255,255,.09); border-radius: 7px; background: rgba(255,255,255,.035); color: #b4c0cc; font: inherit; font-size: 13px; text-decoration: none; cursor: pointer; }
 .performance-intro-actions a:hover,
 .performance-intro-actions button:hover { color: #fff; border-color: rgba(77,217,223,.35); }
 .performance-shadow-badge {
@@ -103,13 +103,20 @@
   align-items: center;
   justify-content: center;
   gap: 12px;
-  min-height: 130px;
+  min-height: 180px;
   border: 1px dashed rgba(255,255,255,.12);
   border-radius: 14px;
-  color: #8490a6;
+  color: #a1adba;
+  font-size: 15px;
 }
 .performance-state.error { color: #ff8794; border-color: rgba(255, 94, 113, .25); }
 .performance-state button { border: 0; border-radius: 8px; padding: 8px 10px; color: #fff; background: rgba(124,156,255,.18); cursor: pointer; }
+
+.performance-leaderboard-panel,
+.performance-selected-summary,
+.performance-event-section,
+.performance-detail,
+.performance-panel { border-radius: 10px; }
 
 .performance-overview-grid { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(320px, .75fr); gap: 14px; margin-bottom: 16px; }
 .performance-leaderboard-panel,

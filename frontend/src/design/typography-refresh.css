@@ -444,3 +444,117 @@ textarea {
     font-size: var(--type-caption);
   }
 }
+
+/* Readability and compact-data pass: keep the existing hierarchy, raise the
+   floor for high-frequency copy, and let dense evidence wrap instead of clip. */
+.product-root .product-btn {
+  min-height: 46px;
+  font-size: var(--type-secondary);
+}
+
+.product-root .match-team-result,
+.product-root .match-kill-duration span,
+.product-root .match-score-block > span,
+.product-root .match-series-summary span,
+.product-root .match-series-navigator nav small {
+  font-size: var(--type-caption);
+}
+
+.product-root .match-series-navigator nav span {
+  font-size: var(--type-secondary);
+}
+
+.product-root .match-kill-duration b {
+  font-size: 24px;
+}
+
+.product-root .match-ai-decision > div strong,
+.product-root .match-ai-decision > b {
+  font-size: var(--type-secondary);
+}
+
+.product-root .match-ai-decision > div span,
+.product-root .match-ai-decision > em {
+  font-size: var(--type-caption);
+}
+
+.product-root .match-ai-decision > p {
+  margin-top: 4px;
+  color: var(--text-secondary);
+  font-size: var(--type-secondary);
+  line-height: 1.65;
+}
+
+.product-root .rosh-direction-metric span,
+.product-root .rosh-direction-metric strong,
+.product-root .player-market-meta,
+.product-root .player-market-closed-note {
+  font-size: var(--type-caption);
+}
+
+.product-root .rosh-direction-metric strong {
+  overflow: visible;
+  line-height: 1.35;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 680px) {
+  .product-root .match-team-hero h1 {
+    font-size: 18px;
+    line-height: 1.2;
+  }
+
+  .product-root .match-kill-score > strong {
+    font-size: 30px;
+  }
+
+  .product-root .match-kill-duration b {
+    font-size: 17px;
+  }
+
+  .product-root .match-ai-decision > p {
+    font-size: 14px;
+  }
+}
+
+@media (max-width: 430px) {
+  .product-root .match-versus {
+    grid-template-columns: minmax(0, 1fr) 118px minmax(0, 1fr);
+    gap: 6px;
+  }
+
+  .product-root .match-team-hero {
+    gap: 6px;
+  }
+
+  .product-root .match-team-hero > .team-crest {
+    display: grid;
+    width: 40px;
+    height: 40px;
+    border-radius: 10px;
+  }
+
+  .product-root .match-team-hero h1 {
+    font-size: 15px;
+    line-height: 1.25;
+  }
+
+  .product-root .match-kill-score > strong {
+    font-size: 30px;
+  }
+
+  .product-root .match-kill-duration b {
+    font-size: 16px;
+  }
+
+  .product-root .match-kill-duration span,
+  .product-root .match-score-block > span {
+    font-size: 10px;
+  }
+
+  .product-root .match-ai-decision > p {
+    font-size: 13px;
+  }
+}
