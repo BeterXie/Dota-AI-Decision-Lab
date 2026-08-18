@@ -122,6 +122,16 @@ def create_team_router(
                 "roster_history": roster,
             }
 
+    @router.get("/by-slug/{slug}")
+    async def team_detail_by_slug(slug: str) -> dict:
+        async with session_factory() as session:
+            team_id = await session.scalar(
+                select(TeamProfile.canonical_team_id).where(TeamProfile.slug == slug)
+            )
+        if team_id is None:
+            raise HTTPException(status_code=404, detail="team not found")
+        return await team_detail(team_id)
+
     return router
 
 
