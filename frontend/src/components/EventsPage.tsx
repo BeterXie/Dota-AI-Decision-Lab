@@ -5,12 +5,14 @@ import {
   buildSeriesSummaries,
   eventHref,
   eventNameFromPath,
+  eventSlug,
   type EventSeriesSummary,
   type EventStatus,
   type EventSummary
 } from "../events";
 import { useI18n } from "../i18n";
 import { matchHref } from "../matches";
+import { EventMark, TeamCrest, UiIcon } from "./VisualIdentity";
 
 type EventFilter = "ALL" | "LIVE" | "UPCOMING" | "COMPLETED";
 
@@ -24,10 +26,12 @@ interface EventsPageProps {
 export const EventsPage: React.FC<EventsPageProps> = ({ matches, loading, pathname, hasPro }) => {
   const { locale } = useI18n();
   const events = React.useMemo(() => buildEventSummaries(matches), [matches]);
-  const selectedName = eventNameFromPath(pathname);
+  const selectedKey = eventNameFromPath(pathname);
 
-  if (selectedName) {
-    const selected = events.find((event) => event.name === selectedName) ?? null;
+  if (selectedKey) {
+    const selected = events.find(
+      (event) => event.name === selectedKey || eventSlug(event.name) === selectedKey
+    ) ?? null;
     return <EventDetail event={selected} loading={loading} locale={locale} hasPro={hasPro} />;
   }
 
@@ -150,11 +154,13 @@ const EventDetail: React.FC<{
       </section>
 
       <section className="product-container event-detail-hero">
-        <div className="event-detail-emblem" aria-hidden="true">{eventInitial(event.name)}</div>
+        <div className="event-detail-emblem event-detail-emblem-rich">
+          <EventMark eventName={event.name} size="lg" />
+        </div>
         <div className="event-detail-heading">
           <StatusPill status={event.status} locale={locale} />
           <h1>{event.name}</h1>
-          <p>{eventDateRange(event, locale)}</p>
+          <p><UiIcon name="calendar" size={12} />{eventDateRange(event, locale)}</p>
         </div>
         <div className="event-detail-stats">
           <EventHeroStat value={event.seriesCount} label={locale === "zh-CN" ? "系列赛" : "Series"} />
@@ -170,11 +176,11 @@ const EventDetail: React.FC<{
             {featured.phase === "LIVE" ? (locale === "zh-CN" ? "正在进行" : "Live now") : (locale === "zh-CN" ? "下一场比赛" : "Next match")}
           </div>
           <div className="event-featured-main">
-            <time>{featured.scheduled_at ? formatDateTime(featured.scheduled_at, locale) : "—"}</time>
+            <time><UiIcon name="clock" size={12} />{featured.scheduled_at ? formatDateTime(featured.scheduled_at, locale) : "—"}</time>
             <TeamPair match={featured} locale={locale} />
             <div className="event-featured-meta">
-              <span>{featured.round || (locale === "zh-CN" ? "赛程" : "Schedule")}</span>
-              {featured.best_of ? <span>BO{featured.best_of}</span> : null}
+              <span><UiIcon name="layers" size={11} />{featured.round || (locale === "zh-CN" ? "赛程" : "Schedule")}</span>
+              {featured.best_of ? <span><UiIcon name="trophy" size={11} />BO{featured.best_of}</span> : null}
             </div>
             <a className="product-btn product-btn-secondary" href={matchHref(featured)}>
               {locale === "zh-CN" ? "查看比赛" : "View match"}<span>→</span>
@@ -223,7 +229,7 @@ const EventDirectoryCard: React.FC<{ event: EventSummary; index: number; locale:
   return (
     <article className={`event-directory-card event-tone-${index % 3}`}>
       <div className="event-directory-top">
-        <div className="event-directory-emblem" aria-hidden="true">{eventInitial(event.name)}</div>
+        <div className="event-directory-emblem event-directory-emblem-rich"><EventMark eventName={event.name} size="md" /></div>
         <StatusPill status={event.status} locale={locale} />
       </div>
       <div className="event-directory-copy">
@@ -231,14 +237,14 @@ const EventDirectoryCard: React.FC<{ event: EventSummary; index: number; locale:
         <p>{event.stages.slice(0, 2).join(" · ") || (locale === "zh-CN" ? "赛事" : "Event")}</p>
       </div>
       <div className="event-directory-numbers">
-        <span><strong>{event.seriesCount}</strong>{locale === "zh-CN" ? "系列赛" : "Series"}</span>
-        <span><strong>{event.teamCount}</strong>{locale === "zh-CN" ? "队伍" : "Teams"}</span>
+        <span><UiIcon name="trophy" size={11} /><strong>{event.seriesCount}</strong>{locale === "zh-CN" ? "系列赛" : "Series"}</span>
+        <span><UiIcon name="users" size={11} /><strong>{event.teamCount}</strong>{locale === "zh-CN" ? "队伍" : "Teams"}</span>
       </div>
       {focus ? (
         <div className="event-directory-focus">
           <small>{focus.phase === "LIVE" ? (locale === "zh-CN" ? "正在进行" : "Live") : event.status === "COMPLETED" ? (locale === "zh-CN" ? "最近赛果" : "Latest") : (locale === "zh-CN" ? "下一场" : "Next")}</small>
-          <strong>{focus.team_a?.name || (locale === "zh-CN" ? "待定" : "TBD")} <em>vs</em> {focus.team_b?.name || (locale === "zh-CN" ? "待定" : "TBD")}</strong>
-          <span>{focus.scheduled_at ? formatDateTime(focus.scheduled_at, locale) : "—"}</span>
+          <strong><TeamCrest team={focus.team_a} fallbackName={focus.team_a?.name} size="sm" />{focus.team_a?.name || (locale === "zh-CN" ? "待定" : "TBD")} <em>vs</em> <TeamCrest team={focus.team_b} fallbackName={focus.team_b?.name} size="sm" />{focus.team_b?.name || (locale === "zh-CN" ? "待定" : "TBD")}</strong>
+          <span><UiIcon name="clock" size={10} />{focus.scheduled_at ? formatDateTime(focus.scheduled_at, locale) : "—"}</span>
         </div>
       ) : <div className="event-directory-focus is-empty">{locale === "zh-CN" ? "等待确认对阵" : "Awaiting confirmed matchup"}</div>}
       <a className="event-directory-link" href={eventHref(event.name)}>{locale === "zh-CN" ? "查看赛事" : "View event"}<span>→</span></a>
@@ -251,7 +257,7 @@ const SeriesRow: React.FC<{ series: EventSeriesSummary; locale: string }> = ({ s
   const showScore = Boolean(score && (series.phase === "LIVE" || series.phase === "POSTMATCH" || series.phase === "AWAITING_RESULT"));
   return (
     <article className="event-series-row">
-      <div className="event-series-time"><time>{series.scheduledAt ? formatDateTime(series.scheduledAt, locale) : "—"}</time><PhasePill phase={series.phase} locale={locale} /></div>
+      <div className="event-series-time"><time><UiIcon name="clock" size={10} />{series.scheduledAt ? formatDateTime(series.scheduledAt, locale) : "—"}</time><PhasePill phase={series.phase} locale={locale} /></div>
       <div className="event-series-teams">
         <TeamName team={series.teamA} locale={locale} />
         <strong className={showScore ? "is-score" : undefined}>{showScore ? `${score?.team_a ?? 0} : ${score?.team_b ?? 0}` : "VS"}</strong>
@@ -273,7 +279,7 @@ const TeamPair: React.FC<{ match: MapSummary; locale: string }> = ({ match, loca
 
 const TeamName: React.FC<{ team: MapSummary["team_a"]; locale: string; large?: boolean }> = ({ team, locale, large }) => {
   const name = team?.name || (locale === "zh-CN" ? "待定" : "TBD");
-  return <span className={`event-team-name ${large ? "is-large" : ""}`}><i aria-hidden="true">{teamInitial(name)}</i><b>{name}</b></span>;
+  return <span className={`event-team-name ${large ? "is-large" : ""}`}><TeamCrest team={team} fallbackName={name} size={large ? "md" : "sm"} /><b>{name}</b></span>;
 };
 
 const EventHeroStat: React.FC<{ value: number; label: string; accent?: boolean }> = ({ value, label, accent }) => (
@@ -327,14 +333,4 @@ function formatDate(value: string, locale: string): string {
 
 function formatDateTime(value: string, locale: string): string {
   return new Intl.DateTimeFormat(locale === "zh-CN" ? "zh-CN" : "en-US", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(value));
-}
-
-function eventInitial(name: string): string {
-  const ti = name.match(/TI\s*\d+/i);
-  return ti ? ti[0].replace(/\s+/g, "").toUpperCase() : name.replace(/[^A-Za-z0-9\u4e00-\u9fff]/g, "").slice(0, 2).toUpperCase();
-}
-
-function teamInitial(name: string): string {
-  const parts = name.trim().split(/\s+/);
-  return parts.map((part) => part[0]).join("").slice(0, 2).toUpperCase();
 }
