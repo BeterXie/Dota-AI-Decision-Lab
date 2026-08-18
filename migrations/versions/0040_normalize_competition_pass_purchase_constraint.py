@@ -21,15 +21,13 @@ _NEW_NAME = "ck_competition_pass_purchases_pass_scope"
 
 def upgrade() -> None:
     statement = (
-        "ALTER TABLE competition_pass_purchases "
-        f'RENAME CONSTRAINT "{_OLD_NAME}" TO "{_NEW_NAME}"'
+        f'ALTER TABLE competition_pass_purchases RENAME CONSTRAINT "{_OLD_NAME}" TO "{_NEW_NAME}"'
     )
     op.execute(sa.text(statement))
 
 
 def downgrade() -> None:
     statement = (
-        "ALTER TABLE competition_pass_purchases "
-        f'RENAME CONSTRAINT "{_NEW_NAME}" TO "{_OLD_NAME}"'
+        f'ALTER TABLE competition_pass_purchases RENAME CONSTRAINT "{_NEW_NAME}" TO "{_OLD_NAME}"'
     )
     op.execute(sa.text(statement))

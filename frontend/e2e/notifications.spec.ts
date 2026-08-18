@@ -65,10 +65,10 @@ test("keeps Notification Center locked for signed-in users without realtime enti
   await page.goto("/notifications?e2e=free-notifications");
 
   await expect(
-    page.getByRole("heading", { name: "Notifications require active paid access" })
+    page.getByRole("heading", { name: "Notifications require an active Competition Pass" })
   ).toBeVisible();
   await expect(
-    page.getByText("This account does not have active notification access.")
+    page.getByText("This account does not have an active Event or Series Pass.")
   ).toBeVisible();
   expect(notificationRequests()).toBe(0);
 });

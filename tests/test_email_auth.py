@@ -330,12 +330,8 @@ async def test_auth_disabled_preserves_public_access_but_closes_protected_apis(t
             }
             assert (await client.get("/api/matches")).status_code == 200
             assert (await client.get("/metrics")).status_code == 503
-            premium = await client.get(
-                f"/api/maps/{unfinished_map_id}/ai-decisions"
-            )
+            premium = await client.get(f"/api/maps/{unfinished_map_id}/ai-decisions")
             assert premium.status_code == 401
-            assert premium.json() == {
-                "detail": "authentication required"
-            }
+            assert premium.json() == {"detail": "authentication required"}
     finally:
         await engine.dispose()

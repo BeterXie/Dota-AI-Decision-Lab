@@ -11,9 +11,11 @@ from app.evaluation.portfolio_models import (
     TournamentPortfolioAccountRecord,
     TournamentPortfolioPositionRecord,
 )
-from app.models import CanonicalEvent
+from app.models import AiDecisionRecord, CanonicalEvent
 
 _ZERO = Decimal("0")
+_RUNTIME_CONFIG_MARKER = "@cfg:"
+_LEGACY_EXECUTION_SIGNATURE = "LEGACY_UNFINGERPRINTED"
 ExperimentKey = tuple[str, str, str, str, str]
 
 
@@ -44,6 +46,7 @@ class TournamentLeaderboardService:
                 "scope": "ALL_CANONICAL_EVENTS",
                 "ranking": "REALIZED_ROI_THEN_PNL",
                 "experiments": [],
+                "excluded_runtime_config_mixes": [],
             }
 
         account_ids = [account.id for account, _ in account_rows]
@@ -60,15 +63,52 @@ class TournamentLeaderboardService:
         for position in positions:
             positions_by_account[position.portfolio_account_id].append(position)
 
+        decision_ids = [position.ai_decision_id for position in positions]
+        model_version_by_decision: dict[Any, str] = {}
+        if decision_ids:
+            decision_rows = list(
+                (
+                    await session.execute(
+                        select(AiDecisionRecord.id, AiDecisionRecord.model_version).where(
+                            AiDecisionRecord.id.in_(decision_ids)
+                        )
+                    )
+                ).all()
+            )
+            model_version_by_decision = {
+                decision_id: model_version for decision_id, model_version in decision_rows
+            }
+
         grouped: dict[
             ExperimentKey, list[tuple[TournamentPortfolioAccountRecord, CanonicalEvent]]
         ] = defaultdict(list)
         for account, event in account_rows:
             grouped[_experiment_key(account)].append((account, event))
 
-        experiments = [
-            _aggregate_experiment(rows, positions_by_account) for rows in grouped.values()
-        ]
+        experiments = []
+        excluded = []
+        for rows in grouped.values():
+            signatures = _runtime_position_config_signatures(
+                rows,
+                positions_by_account,
+                model_version_by_decision,
+            )
+            if len(signatures) > 1:
+                excluded.append(
+                    {
+                        "experiment": _experiment_payload(rows[0][0]),
+                        "execution_signatures": sorted(signatures),
+                        "reason": "MIXED_RUNTIME_EXECUTION_CONFIG",
+                    }
+                )
+                continue
+            row = _aggregate_experiment(rows, positions_by_account)
+            row["execution_config"] = {
+                "signatures": sorted(signatures),
+                "mixed": False,
+            }
+            experiments.append(row)
+
         experiments.sort(
             key=lambda row: (
                 -float(row["realized_roi"]),
@@ -84,6 +124,7 @@ class TournamentLeaderboardService:
             "scope": "ALL_CANONICAL_EVENTS",
             "ranking": "REALIZED_ROI_THEN_PNL",
             "experiments": experiments,
+            "excluded_runtime_config_mixes": excluded,
         }
 
 
@@ -143,13 +184,7 @@ def _aggregate_experiment(
 
     return {
         "rank": None,
-        "experiment": {
-            "provider": first.provider,
-            "model": first.model,
-            "prompt_version": first.prompt_version,
-            "decision_policy_version": first.decision_policy_version,
-            "ai_view_version": first.ai_view_version,
-        },
+        "experiment": _experiment_payload(first),
         "event_count": len(rows),
         "total_initial_bankroll": float(initial),
         "cash_balance": float(cash),
@@ -172,6 +207,32 @@ def _aggregate_experiment(
         "turnover": float(turnover),
         "profit_factor": float(gross_profit / gross_loss) if gross_loss > 0 else None,
         "events": event_breakdown,
+    }
+
+
+def _runtime_position_config_signatures(
+    rows: list[tuple[TournamentPortfolioAccountRecord, CanonicalEvent]],
+    positions_by_account: dict[Any, list[TournamentPortfolioPositionRecord]],
+    model_version_by_decision: dict[Any, str],
+) -> set[str]:
+    signatures = set()
+    for account, _ in rows:
+        for position in positions_by_account.get(account.id, ()):
+            model_version = model_version_by_decision.get(position.ai_decision_id)
+            if not model_version or _RUNTIME_CONFIG_MARKER not in model_version:
+                signatures.add(_LEGACY_EXECUTION_SIGNATURE)
+                continue
+            signatures.add(model_version.rsplit(_RUNTIME_CONFIG_MARKER, 1)[1])
+    return signatures
+
+
+def _experiment_payload(account: TournamentPortfolioAccountRecord) -> dict[str, str]:
+    return {
+        "provider": account.provider,
+        "model": account.model,
+        "prompt_version": account.prompt_version,
+        "decision_policy_version": account.decision_policy_version,
+        "ai_view_version": account.ai_view_version,
     }
 
 

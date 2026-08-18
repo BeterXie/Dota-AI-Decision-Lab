@@ -281,28 +281,21 @@ def _public_ai_decisions_payload(payload: dict) -> dict:
     latest = payload.get("latest_snapshot")
     public_latest = None
     if isinstance(latest, dict):
-        public_latest = {
-            key: latest[key] for key in _PUBLIC_SNAPSHOT_FIELDS if key in latest
-        }
+        public_latest = {key: latest[key] for key in _PUBLIC_SNAPSHOT_FIELDS if key in latest}
         for key in ("quality", "market_quality"):
             value = public_latest.get(key)
             if isinstance(value, dict):
                 public_latest[key] = {
-                    field: value[field]
-                    for field in _PUBLIC_QUALITY_FIELDS
-                    if field in value
+                    field: value[field] for field in _PUBLIC_QUALITY_FIELDS if field in value
                 }
 
     return {
         "canonical_map_id": payload["canonical_map_id"],
         "canonical_series_id": payload["canonical_series_id"],
         "latest_snapshot": public_latest,
-        "decisions": [
-            _public_decision_payload(item) for item in payload.get("decisions", [])
-        ],
+        "decisions": [_public_decision_payload(item) for item in payload.get("decisions", [])],
         "checkpoint_decisions": [
-            _public_decision_payload(item)
-            for item in payload.get("checkpoint_decisions", [])
+            _public_decision_payload(item) for item in payload.get("checkpoint_decisions", [])
         ],
         "snapshot_payload": None,
         "future_odds": [],

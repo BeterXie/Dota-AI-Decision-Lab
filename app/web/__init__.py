@@ -17,16 +17,19 @@ from app.entitlements import EntitlementService
 from app.promotions import PromotionService
 from app.promotions.config import PromotionSettings
 from app.runtime.health import HealthRegistry
+from app.runtime_config import RuntimeConfigurationService, RuntimePolicyService
 from app.web.access import create_access_router
 from app.web.api import create_app as create_api_app
 from app.web.auth import register_auth
 from app.web.billing import create_billing_router
+from app.web.feature_flags import RuntimeFeatureFlagMiddleware
 from app.web.notifications import create_notification_router
 from app.web.player_hero_recent import register_player_hero_recent_routes
 from app.web.premium import create_premium_router
 from app.web.promotions import create_promotion_router
 from app.web.public_boundary import PublicMatchDataBoundaryMiddleware
 from app.web.quality import create_quality_router
+from app.web.runtime_admin import create_runtime_admin_router
 from app.web.server import WebServerWorker
 from app.web.spa import spa_file_response
 from app.web.teams import create_team_router
@@ -83,6 +86,17 @@ def create_app(
 
     promotions = promotion_settings or PromotionSettings()
     entitlement_service = EntitlementService(session_factory)
+    control_plane_settings = runtime_settings.model_copy(
+        update={"auth_enabled": bool(auth_enabled)}
+    )
+    runtime_config = RuntimeConfigurationService(
+        session_factory,
+        settings=control_plane_settings,
+    )
+    runtime_policy = RuntimePolicyService(
+        session_factory,
+        settings=control_plane_settings,
+    )
     promotion_service = PromotionService(
         session_factory,
         referral_enabled=promotions.referral_enabled,
@@ -93,8 +107,6 @@ def create_app(
         max_rewards_per_inviter=promotions.referral_max_rewards_per_inviter,
     )
 
-    # Build API routes first without the SPA catch-all, so detail-scoped
-    # extension routes remain reachable before the frontend fallback route.
     app = create_api_app(
         session_factory,
         health,
@@ -118,6 +130,7 @@ def create_app(
     app.include_router(create_notification_router(session_factory))
     app.include_router(create_promotion_router(promotion_service))
     app.include_router(create_quality_router(session_factory))
+    app.include_router(create_runtime_admin_router(runtime_config, runtime_policy))
     app.include_router(
         create_billing_router(
             session_factory,
@@ -133,9 +146,11 @@ def create_app(
         enabled=auth_enabled,
         cookie_secure=auth_cookie_secure,
         development_grant_emails=development_grant_emails,
+        runtime_config=runtime_config,
     )
-    # This is deliberately independent of frontend behavior: even a hand-written
-    # HTTP client cannot extract premium decision payloads from public match APIs.
+    app.router.add_event_handler("startup", runtime_config.ensure_seeded)
+    app.router.add_event_handler("startup", runtime_policy.ensure_seeded)
+    app.add_middleware(RuntimeFeatureFlagMiddleware, policy=runtime_policy)
     app.add_middleware(PublicMatchDataBoundaryMiddleware)
     if owns_auth_service and auth_service is not None:
         app.router.add_event_handler("shutdown", auth_service.close)

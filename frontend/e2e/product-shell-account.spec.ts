@@ -21,7 +21,7 @@ test("keeps account, language, membership and notifications reachable at 390px",
           grants: [],
           providers: { email: true, google: false, steam: true }
         }
-      : path === "/api/maps"
+      : path === "/api/matches"
         ? []
         : null;
     await route.fulfill({
@@ -39,7 +39,6 @@ test("keeps account, language, membership and notifications reachable at 390px",
   await expect(page.getByRole("menuitem", { name: /个人信息/ })).toHaveAttribute("href", "/account");
   await expect(page.getByRole("menuitem", { name: /通知设置/ })).toHaveAttribute("href", "/notifications");
   await expect(page.getByRole("menuitem", { name: /会员中心/ })).toHaveAttribute("href", "/billing");
-  await expect(page.getByRole("menuitem", { name: /订阅 Pro/ })).toHaveAttribute("href", "/billing");
   await expect(menu.getByRole("button", { name: "中文", exact: true })).toBeVisible();
   await expect(menu.getByRole("button", { name: "EN", exact: true })).toBeVisible();
   await expect(menu.getByRole("button", { name: "退出登录" })).toBeVisible();

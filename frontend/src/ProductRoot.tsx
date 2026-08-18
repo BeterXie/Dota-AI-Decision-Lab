@@ -4,6 +4,7 @@ import { App } from "./App";
 import { fetchMaps } from "./api";
 import { fetchAuthSession, logout, type AuthSessionState } from "./authApi";
 import { AccountPage } from "./components/AccountPage";
+import { AdminRuntimePage } from "./components/AdminRuntimePage";
 import { EventsPage } from "./components/EventsPage";
 import { HomePage } from "./components/HomePage";
 import { LoginDialog } from "./components/LoginDialog";
@@ -27,11 +28,12 @@ function ProductExperience({ pathname }: { pathname: string }) {
   const queryClient = useQueryClient();
   const [loginOpen, setLoginOpen] = React.useState(false);
   const premiumSurface = premiumSurfaceForPath(pathname);
+  const adminRoute = pathname === "/admin/runtime" || pathname.startsWith("/admin/runtime/");
   const accountRoute = pathname === "/account" || pathname.startsWith("/account/");
   const isHome = pathname === "/";
   const matchRouteId = matchIdFromPath(pathname);
   const teamRouteSlug = teamSlugFromPath(pathname);
-  const needsMatchDirectory = premiumSurface === null && !accountRoute;
+  const needsMatchDirectory = premiumSurface === null && !accountRoute && !adminRoute;
   const auth = useQuery({
     queryKey: authSessionKey,
     queryFn: fetchAuthSession,
@@ -65,6 +67,27 @@ function ProductExperience({ pathname }: { pathname: string }) {
       providers: session?.providers
     });
   };
+
+  if (adminRoute) {
+    return (
+      <>
+        <AdminRuntimePage
+          pathname={pathname}
+          session={session}
+          authLoading={auth.isLoading}
+          onLogin={() => setLoginOpen(true)}
+          onLogout={handleLogout}
+        />
+        {loginOpen && session?.enabled !== false && (
+          <LoginDialog
+            session={session}
+            onClose={() => setLoginOpen(false)}
+            onAuthenticated={handleAuthenticated}
+          />
+        )}
+      </>
+    );
+  }
 
   let page: React.ReactNode;
   if (accountRoute) {
@@ -173,6 +196,8 @@ function isProductRoute(pathname: string): boolean {
     pathname.startsWith("/teams/") ||
     pathname === "/account" ||
     pathname.startsWith("/account/") ||
+    pathname === "/admin/runtime" ||
+    pathname.startsWith("/admin/runtime/") ||
     premiumSurfaceForPath(pathname) !== null
   );
 }

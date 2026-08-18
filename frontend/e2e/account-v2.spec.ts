@@ -54,10 +54,10 @@ test("account center groups identity, membership, notifications and language", a
   await expect(page.getByRole("heading", { name: "账户", exact: true })).toBeVisible();
   await expect(page.getByText("free@example.com", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("免费", { exact: true })).toBeVisible();
-  await expect(page.getByText("赛事 / 单场 Pass", { exact: true })).toBeVisible();
+  await expect(page.getByText("赛事 / 系列赛 Pass", { exact: true })).toBeVisible();
   await expect(page.getByText("未开放", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "中文", exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: /查看 Pro 与赛事 Pass/ })).toHaveAttribute("href", "/billing");
+  await expect(page.getByRole("link", { name: /查看赛事 Pass/ })).toHaveAttribute("href", "/billing");
   expect(matchDirectoryRequests()).toBe(0);
 
   const noOverflow = await page.evaluate(
