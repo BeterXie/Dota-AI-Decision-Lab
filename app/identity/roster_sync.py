@@ -75,10 +75,21 @@ class TeamRosterSyncService:
             received_at=response.received_at,
             parser_version=client.normalizer_version,
         )
-        # An empty roster can mean a source-side coverage gap. Do not close a
-        # previously known roster solely because one discovery response is empty.
+        # Empty or partially unidentified rosters are discovery gaps, not proof
+        # that known players left the team. We may add valid incoming players,
+        # but only close stale memberships when every current row has a usable
+        # Dota account id.
         if not current_players:
             return RosterSyncResult(canonical_team_id, source_team_id, 0, 0, 0, 0, skipped=True)
+        valid_current_players = [
+            item
+            for item in current_players
+            if isinstance(item.get("account_id"), int)
+            and not isinstance(item.get("account_id"), bool)
+        ]
+        if not valid_current_players:
+            return RosterSyncResult(canonical_team_id, source_team_id, 0, 0, 0, 0, skipped=True)
+        roster_identity_complete = len(valid_current_players) == len(current_players)
 
         active = list(
             (
@@ -95,10 +106,8 @@ class TeamRosterSyncService:
         incoming_player_ids: set[UUID] = set()
         created_players = created_memberships = 0
 
-        for item in current_players:
-            account_id = item.get("account_id")
-            if not isinstance(account_id, int) or isinstance(account_id, bool):
-                continue
+        for item in valid_current_players:
+            account_id = item["account_id"]
             player = await session.scalar(
                 select(CanonicalPlayer).where(CanonicalPlayer.account_id == account_id)
             )
@@ -135,15 +144,16 @@ class TeamRosterSyncService:
                 membership.observed_at = response.received_at
 
         closed_memberships = 0
-        for membership in active:
-            if (
-                membership.source_name == "opendota"
-                and membership.player_id is not None
-                and membership.player_id not in incoming_player_ids
-            ):
-                membership.valid_to = response.received_at
-                membership.observed_at = response.received_at
-                closed_memberships += 1
+        if roster_identity_complete:
+            for membership in active:
+                if (
+                    membership.source_name == "opendota"
+                    and membership.player_id is not None
+                    and membership.player_id not in incoming_player_ids
+                ):
+                    membership.valid_to = response.received_at
+                    membership.observed_at = response.received_at
+                    closed_memberships += 1
 
         return RosterSyncResult(
             canonical_team_id,
