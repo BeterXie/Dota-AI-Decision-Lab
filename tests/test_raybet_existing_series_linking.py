@@ -192,7 +192,9 @@ async def test_raybet_linker_fails_closed_when_two_existing_series_are_equally_p
 
 
 @pytest.mark.asyncio
-async def test_raybet_linker_leaves_creation_to_existing_resolver_when_schedule_is_unknown() -> None:
+async def test_raybet_linker_leaves_creation_to_existing_resolver_when_schedule_is_unknown() -> (
+    None
+):
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
