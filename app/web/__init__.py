@@ -85,9 +85,12 @@ def create_app(
 
     promotions = promotion_settings or PromotionSettings()
     entitlement_service = EntitlementService(session_factory)
+    control_plane_settings = runtime_settings.model_copy(
+        update={"auth_enabled": bool(auth_enabled)}
+    )
     runtime_config = RuntimeConfigurationService(
         session_factory,
-        settings=runtime_settings,
+        settings=control_plane_settings,
     )
     promotion_service = PromotionService(
         session_factory,
