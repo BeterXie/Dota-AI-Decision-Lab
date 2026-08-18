@@ -48,9 +48,11 @@ class IdentityResolver:
         self._start_time_window = start_time_window
 
     async def observe_raybet_match(self, session: AsyncSession, match: ProviderMatch) -> UUID:
-        existing = await self._match_mapping(session, "raybet", str(match.provider_match_id))
+        provider_match_id = str(match.provider_match_id)
+        existing = await self._match_mapping(session, "raybet", provider_match_id)
         if existing is not None and existing.canonical_series_id is not None:
             return existing.canonical_series_id
+
         team_a_id = await self._resolve_team(
             session,
             provider="raybet",
@@ -63,6 +65,45 @@ class IdentityResolver:
             provider_team_id=str(match.team_b_id),
             name=match.team_b_name,
         )
+        if team_a_id == team_b_id:
+            raise IdentityAmbiguousError("RAYBET_SERIES_SAME_TEAM")
+
+        best_of = _parse_best_of(match.round)
+        candidates = await self._liquipedia_series_candidates(
+            session,
+            team_a_id=team_a_id,
+            team_b_id=team_b_id,
+            scheduled_at=match.scheduled_at,
+            best_of=best_of,
+        )
+        if len(candidates) > 1:
+            raise IdentityAmbiguousError("RAYBET_LIQUIPEDIA_SERIES_AMBIGUOUS")
+        if candidates:
+            series = candidates[0]
+            await self._bind_provider_event(
+                session,
+                provider="raybet",
+                provider_event_id=(
+                    str(match.tournament_id) if match.tournament_id is not None else None
+                ),
+                canonical_event_id=series.event_id,
+            )
+            exact_best_of = best_of is not None and series.best_of == best_of
+            self._set_match_mapping(
+                session,
+                existing=existing,
+                provider="raybet",
+                provider_match_id=provider_match_id,
+                canonical_series_id=series.id,
+                resolved_by=(
+                    "LIQUIPEDIA_TEAMS_TIME_BO"
+                    if exact_best_of
+                    else "LIQUIPEDIA_TEAMS_TIME"
+                ),
+                confidence=0.99 if exact_best_of else 0.97,
+            )
+            return series.id
+
         event_id = await self._resolve_event(
             session,
             provider="raybet",
@@ -75,19 +116,19 @@ class IdentityResolver:
             event_id=event_id,
             team_a_id=team_a_id,
             team_b_id=team_b_id,
-            best_of=_parse_best_of(match.round),
+            best_of=best_of,
             scheduled_at=match.scheduled_at,
         )
         session.add(series)
         await session.flush()
-        session.add(
-            ProviderMatchMapping(
-                provider="raybet",
-                provider_match_id=str(match.provider_match_id),
-                canonical_series_id=series.id,
-                resolved_by="PROVIDER_DISCOVERY",
-                confidence=1.0,
-            )
+        self._set_match_mapping(
+            session,
+            existing=existing,
+            provider="raybet",
+            provider_match_id=provider_match_id,
+            canonical_series_id=series.id,
+            resolved_by="PROVIDER_DISCOVERY",
+            confidence=1.0,
         )
         return series.id
 
@@ -346,6 +387,101 @@ class IdentityResolver:
             )
         )
         return event.id
+
+    async def _liquipedia_series_candidates(
+        self,
+        session: AsyncSession,
+        *,
+        team_a_id: UUID,
+        team_b_id: UUID,
+        scheduled_at,
+        best_of: int | None,
+    ) -> list[CanonicalSeries]:
+        if scheduled_at is None:
+            return []
+        liquipedia_mapping_exists = (
+            select(ProviderMatchMapping.id)
+            .where(
+                ProviderMatchMapping.provider == "liquipedia",
+                ProviderMatchMapping.canonical_series_id == CanonicalSeries.id,
+            )
+            .exists()
+        )
+        statement = select(CanonicalSeries).where(
+            liquipedia_mapping_exists,
+            or_(
+                and_(
+                    CanonicalSeries.team_a_id == team_a_id,
+                    CanonicalSeries.team_b_id == team_b_id,
+                ),
+                and_(
+                    CanonicalSeries.team_a_id == team_b_id,
+                    CanonicalSeries.team_b_id == team_a_id,
+                ),
+            ),
+            CanonicalSeries.scheduled_at.is_not(None),
+            CanonicalSeries.scheduled_at >= scheduled_at - self._start_time_window,
+            CanonicalSeries.scheduled_at <= scheduled_at + self._start_time_window,
+        )
+        if best_of is not None:
+            statement = statement.where(
+                or_(CanonicalSeries.best_of.is_(None), CanonicalSeries.best_of == best_of)
+            )
+        return list((await session.scalars(statement)).all())
+
+    async def _bind_provider_event(
+        self,
+        session: AsyncSession,
+        *,
+        provider: str,
+        provider_event_id: str | None,
+        canonical_event_id: UUID | None,
+    ) -> None:
+        if provider_event_id is None or canonical_event_id is None:
+            return
+        mapping = await session.scalar(
+            select(ProviderEventMapping).where(
+                ProviderEventMapping.provider == provider,
+                ProviderEventMapping.provider_event_id == provider_event_id,
+            )
+        )
+        if mapping is not None:
+            if mapping.canonical_event_id != canonical_event_id:
+                raise IdentityAmbiguousError("PROVIDER_EVENT_IDENTITY_CONFLICT")
+            return
+        session.add(
+            ProviderEventMapping(
+                provider=provider,
+                provider_event_id=provider_event_id,
+                canonical_event_id=canonical_event_id,
+            )
+        )
+
+    def _set_match_mapping(
+        self,
+        session: AsyncSession,
+        *,
+        existing: ProviderMatchMapping | None,
+        provider: str,
+        provider_match_id: str,
+        canonical_series_id: UUID,
+        resolved_by: str,
+        confidence: float,
+    ) -> None:
+        if existing is not None:
+            existing.canonical_series_id = canonical_series_id
+            existing.resolved_by = resolved_by
+            existing.confidence = confidence
+            return
+        session.add(
+            ProviderMatchMapping(
+                provider=provider,
+                provider_match_id=provider_match_id,
+                canonical_series_id=canonical_series_id,
+                resolved_by=resolved_by,
+                confidence=confidence,
+            )
+        )
 
     async def _series_candidates(
         self,
