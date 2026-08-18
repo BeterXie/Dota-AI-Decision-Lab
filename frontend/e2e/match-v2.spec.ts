@@ -17,6 +17,14 @@ const publicMatch = {
   provider_observed_at: "2026-08-18T09:20:00Z",
   team_a: { id: "liquid", name: "Team Liquid" },
   team_b: { id: "spirit", name: "Team Spirit" },
+  side_identity: {
+    status: "RESOLVED",
+    radiant_team_id: "liquid",
+    dire_team_id: "spirit",
+    source: "DLTV",
+    confidence: 1,
+    observed_at: "2026-08-18T09:20:00Z"
+  },
   best_of: 3,
   series_score: { team_a: 1, team_b: 1 },
   market: [],
