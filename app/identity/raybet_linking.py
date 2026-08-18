@@ -40,6 +40,8 @@ class RayBetExistingSeriesLinker:
         )
         if existing is not None:
             return existing.canonical_series_id
+        if match.scheduled_at is None:
+            return None
 
         team_a_id = await self._existing_team_identity(
             session,
@@ -63,6 +65,13 @@ class RayBetExistingSeriesLinker:
             team_b_id=team_b_id,
             scheduled_at=match.scheduled_at,
         )
+        best_of = _parse_best_of(match.round)
+        if best_of is not None:
+            candidates = [
+                candidate
+                for candidate in candidates
+                if candidate.best_of is None or candidate.best_of == best_of
+            ]
         if event_mapping is not None:
             candidates = [
                 candidate
@@ -86,7 +95,7 @@ class RayBetExistingSeriesLinker:
         series = candidates[0]
         await self._attach_event_mapping(session, match, series)
         if series.best_of is None:
-            series.best_of = _parse_best_of(match.round)
+            series.best_of = best_of
         if series.scheduled_at is None:
             series.scheduled_at = match.scheduled_at
         session.add(
@@ -158,14 +167,11 @@ class RayBetExistingSeriesLinker:
                     CanonicalSeries.team_a_id == team_b_id,
                     CanonicalSeries.team_b_id == team_a_id,
                 ),
-            )
+            ),
+            CanonicalSeries.scheduled_at.is_not(None),
+            CanonicalSeries.scheduled_at >= scheduled_at - self._start_time_window,
+            CanonicalSeries.scheduled_at <= scheduled_at + self._start_time_window,
         )
-        if scheduled_at is not None:
-            statement = statement.where(
-                CanonicalSeries.scheduled_at.is_not(None),
-                CanonicalSeries.scheduled_at >= scheduled_at - self._start_time_window,
-                CanonicalSeries.scheduled_at <= scheduled_at + self._start_time_window,
-            )
         return list((await session.scalars(statement)).all())
 
     async def _raybet_event_mapping(
