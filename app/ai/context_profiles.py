@@ -4,7 +4,13 @@ Production ``ai-view-v6`` is immutable. These profiles derive alternate views
 from the same immutable :class:`DecisionSnapshot` so model, prompt, decision
 policy and source evidence can stay fixed while one context group changes.
 
-The first challenger also repairs a discovered projection mismatch: snapshot
+Historical replay uses a dedicated production-view control. Its provider-facing
+match context is identical to ``ai-view-v6``; only the stored experiment label
+changes. This lets replay compare context profiles under the same contemporaneous
+model serving and the same neutral bankroll/prior-decision control instead of
+pretending a model call made after settlement reproduces the historical runtime.
+
+The schema-aligned challenger repairs a discovered projection mismatch: snapshot
 history stores player ``base_strength``, ``recent_form`` and flattened
 ``player_hero_*`` fields, while production ``ai-view-v6`` looks for legacy
 ``recent_5/10/20`` and nested ``player_hero`` fields. We intentionally do NOT
@@ -20,6 +26,7 @@ from app.ai.versions import AI_VIEW_VERSION
 from app.ai.view import build_ai_view
 from app.domain.snapshot import DecisionSnapshot
 
+REPLAY_PRODUCTION_CONTEXT_VERSION = "ctx-replay-production-v1"
 SCHEMA_ALIGNED_CONTEXT_VERSION = "ctx-history-schema-aligned-v1"
 NO_ROSTER_CONTEXT_VERSION = "ctx-ablation-no-roster-v1"
 NO_PLAYER_FORM_CONTEXT_VERSION = "ctx-ablation-no-player-form-v1"
@@ -39,10 +46,16 @@ class AiContextProfile:
 
 
 _CONTEXT_PROFILES = {
+    REPLAY_PRODUCTION_CONTEXT_VERSION: AiContextProfile(
+        ai_view_version=REPLAY_PRODUCTION_CONTEXT_VERSION,
+        label="Matched replay production-view control",
+        reference_ai_view_version=AI_VIEW_VERSION,
+        schema_aligned_history=False,
+    ),
     SCHEMA_ALIGNED_CONTEXT_VERSION: AiContextProfile(
         ai_view_version=SCHEMA_ALIGNED_CONTEXT_VERSION,
         label="History schema aligned full context",
-        reference_ai_view_version=AI_VIEW_VERSION,
+        reference_ai_view_version=REPLAY_PRODUCTION_CONTEXT_VERSION,
     ),
     NO_ROSTER_CONTEXT_VERSION: AiContextProfile(
         ai_view_version=NO_ROSTER_CONTEXT_VERSION,
