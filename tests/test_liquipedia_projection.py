@@ -90,13 +90,13 @@ async def test_liquipedia_reuses_existing_raybet_team_aliases_and_nearby_series(
                 TeamAlias(
                     canonical_team_id=liquid.id,
                     name="Team Liquid",
-                    normalized_name="teamliquid",
+                    normalized_name="team liquid",
                     provider="raybet",
                 ),
                 TeamAlias(
                     canonical_team_id=spirit.id,
                     name="Team Spirit",
-                    normalized_name="teamspirit",
+                    normalized_name="team spirit",
                     provider="raybet",
                 ),
                 ProviderTeamMapping(
