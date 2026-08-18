@@ -28,6 +28,7 @@ BASELINE_DECISION_POLICY_VERSION = "shadow-tournament-portfolio-v3"
 BASELINE_AI_VIEW_VERSION = "ai-view-v6"
 CALIBRATION_POLICY_VERSION = "ece-equal-width-10-v1"
 CALIBRATION_BIN_COUNT = 10
+_RUNTIME_CONFIG_MARKER = "@cfg:"
 
 # These are intentionally frozen repository defaults from BASELINE_FROZEN_AT_COMMIT.
 # Do not import current Settings defaults here: future model changes are challengers,
@@ -192,11 +193,13 @@ class AiBaselineBenchmarkService:
             row["baseline_reference"] = (
                 baseline["experiment"] if baseline is not None and baseline is not row else None
             )
-            row["delta_vs_baseline"] = (
-                _comparison_delta(baseline, row)
-                if baseline is not None and baseline is not row
-                else None
+            comparable = bool(
+                baseline is not None
+                and baseline is not row
+                and baseline["execution_config"]["comparison_eligible"]
+                and row["execution_config"]["comparison_eligible"]
             )
+            row["delta_vs_baseline"] = _comparison_delta(baseline, row) if comparable else None
 
         experiments.sort(
             key=lambda row: (
@@ -224,6 +227,9 @@ class AiBaselineBenchmarkService:
                 "latency": "AI_PROVIDER_HTTP_LATENCY_SECONDS_ALL_ATTEMPTS",
                 "market_comparison": "VIG_REMOVED_TWO_WAY_PROBABILITY_AT_DECISION_SNAPSHOT",
                 "significance": "DESCRIPTIVE_ONLY_NO_STATISTICAL_SIGNIFICANCE_CLAIM",
+                "runtime_config_guard": (
+                    "MIXED_EXECUTION_FINGERPRINTS_DISABLE_METRIC_AND_BASELINE_COMPARISON"
+                ),
             },
             "experiments": experiments,
         }
@@ -254,10 +260,23 @@ class AiBaselineBenchmarkService:
         )
         abstentions = sum(acc.action_counts[action] for action in ("NO_BUY", "INSUFFICIENT_DATA"))
         action_total = sum(acc.action_counts.values())
-        portfolio_metrics = _portfolio_metrics(portfolio)
+        fingerprints = _runtime_config_fingerprints(acc.model_versions)
+        mixed_execution_config = len(fingerprints) > 1
+        comparison_eligible = not mixed_execution_config
+        portfolio_metrics = _portfolio_metrics(None if mixed_execution_config else portfolio)
         return {
             "experiment": _identity_dict(key),
             "observed_model_versions": sorted(acc.model_versions),
+            "execution_config": {
+                "runtime_fingerprints": fingerprints,
+                "mixed": mixed_execution_config,
+                "comparison_eligible": comparison_eligible,
+                "blocker": (
+                    "MIXED_RUNTIME_EXECUTION_CONFIG"
+                    if mixed_execution_config
+                    else None
+                ),
+            },
             "baseline_role": "BASELINE" if _is_baseline_key(key) else "CHALLENGER",
             "samples": {
                 "attempts": acc.attempts,
@@ -270,23 +289,39 @@ class AiBaselineBenchmarkService:
                 "market_comparison_maps": len(comparable),
             },
             "quality": {
-                "forecast_accuracy": accuracy,
-                "average_brier_score": _average(briers),
-                "average_log_loss": _average(log_losses),
-                "calibration_error": _expected_calibration_error(probabilities, outcomes),
-                "average_clv": _average(list(acc.clv_by_map.values())),
-                "market_brier_improvement": _difference(
-                    _average(market_briers),
-                    _average(comparable_ai_briers),
+                "forecast_accuracy": accuracy if comparison_eligible else None,
+                "average_brier_score": _average(briers) if comparison_eligible else None,
+                "average_log_loss": _average(log_losses) if comparison_eligible else None,
+                "calibration_error": (
+                    _expected_calibration_error(probabilities, outcomes)
+                    if comparison_eligible
+                    else None
                 ),
-                "abstention_rate": abstentions / action_total if action_total else None,
+                "average_clv": (
+                    _average(list(acc.clv_by_map.values())) if comparison_eligible else None
+                ),
+                "market_brier_improvement": (
+                    _difference(
+                        _average(market_briers),
+                        _average(comparable_ai_briers),
+                    )
+                    if comparison_eligible
+                    else None
+                ),
+                "abstention_rate": (
+                    abstentions / action_total
+                    if action_total and comparison_eligible
+                    else None
+                ),
                 "action_counts": dict(sorted(acc.action_counts.items())),
                 "parse_status_counts": dict(sorted(acc.parse_statuses.items())),
             },
             "latency": {
                 "sample_count": len(acc.latencies),
-                "average_seconds": _average(acc.latencies),
-                "p95_seconds": _percentile(acc.latencies, 0.95),
+                "average_seconds": _average(acc.latencies) if comparison_eligible else None,
+                "p95_seconds": (
+                    _percentile(acc.latencies, 0.95) if comparison_eligible else None
+                ),
             },
             "portfolio": portfolio_metrics,
             "baseline_reference": None,
@@ -352,6 +387,15 @@ def _baseline_key_for_provider(provider: str) -> ExperimentKey | None:
 def _is_baseline_key(key: ExperimentKey) -> bool:
     baseline = _baseline_key_for_provider(key[0])
     return baseline == key
+
+
+def _runtime_config_fingerprints(model_versions: set[str]) -> list[str]:
+    fingerprints = {
+        value.rsplit(_RUNTIME_CONFIG_MARKER, 1)[1]
+        for value in model_versions
+        if _RUNTIME_CONFIG_MARKER in value
+    }
+    return sorted(fingerprints)
 
 
 def _portfolio_metrics(portfolio: dict[str, Any] | None) -> dict[str, Any]:

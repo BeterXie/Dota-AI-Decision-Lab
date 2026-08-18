@@ -62,6 +62,7 @@ def upgrade() -> None:
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.PrimaryKeyConstraint("id"),
         sa.UniqueConstraint("provider", "slot", name="uq_ai_provider_config_slot"),
+        sa.UniqueConstraint("provider", "model", name="uq_ai_provider_config_model"),
     )
     op.create_table(
         "runtime_config_audit",

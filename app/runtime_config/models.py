@@ -42,7 +42,10 @@ class RuntimeSecretRecord(Base):
 
 class AiProviderConfigRecord(Base):
     __tablename__ = "ai_provider_configs"
-    __table_args__ = (UniqueConstraint("provider", "slot", name="uq_ai_provider_config_slot"),)
+    __table_args__ = (
+        UniqueConstraint("provider", "slot", name="uq_ai_provider_config_slot"),
+        UniqueConstraint("provider", "model", name="uq_ai_provider_config_model"),
+    )
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     provider: Mapped[str] = mapped_column(String(32), nullable=False)

@@ -2,8 +2,10 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
+from sqlalchemy.exc import IntegrityError
 
 from app.runtime_config import RuntimeConfigurationService, RuntimePolicyService
+from app.runtime_config.provider_safety import validate_provider_base_url
 
 
 class RuntimeSettingUpdate(BaseModel):
@@ -83,9 +85,21 @@ def create_runtime_admin_router(
         if not changes:
             raise HTTPException(status_code=422, detail="at least one provider field is required")
         try:
-            return await service.upsert_ai_provider(provider, slot, changes, actor=actor)
+            guarded = await _validated_provider_changes(
+                service,
+                _require_policy(policy),
+                provider,
+                slot,
+                changes,
+            )
+            return await service.upsert_ai_provider(provider, slot, guarded, actor=actor)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
+        except IntegrityError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="AI provider identity conflicts with another configured slot",
+            ) from exc
 
     @router.put("/secrets/{key:path}")
     async def replace_secret(
@@ -112,6 +126,67 @@ def create_runtime_admin_router(
         return {"items": await service.audit_payload(limit=limit)}
 
     return router
+
+
+async def _validated_provider_changes(
+    service: RuntimeConfigurationService,
+    policy: RuntimePolicyService,
+    provider: str,
+    slot: str,
+    changes: dict[str, object],
+) -> dict[str, object]:
+    config = await service.public_payload()
+    providers = list(config.get("ai_providers", []))
+    current = next(
+        (
+            item
+            for item in providers
+            if item.get("provider") == provider and item.get("slot") == slot
+        ),
+        None,
+    )
+    if current is None:
+        raise ValueError(f"unknown AI provider slot: {provider}/{slot}")
+
+    prospective_model = str(changes.get("model", current.get("model", ""))).strip()
+    if not prospective_model:
+        raise ValueError("model must be a non-empty string")
+    for item in providers:
+        if item is current:
+            continue
+        if (
+            item.get("provider") == provider
+            and item.get("slot") != slot
+            and str(item.get("model", "")).strip() == prospective_model
+        ):
+            raise ValueError(
+                f"provider/model identity already belongs to another slot: "
+                f"{provider}/{prospective_model}"
+            )
+
+    prospective_base_url = str(changes.get("base_url", current.get("base_url", "")))
+    normalized_base_url = validate_provider_base_url(provider, prospective_base_url)
+    if "base_url" in changes:
+        changes = {**changes, "base_url": normalized_base_url}
+
+    prospective_enabled = bool(changes.get("enabled", current.get("enabled", False)))
+    prospective_decisions = bool(
+        changes.get("decisions_enabled", current.get("decisions_enabled", False))
+    )
+    if prospective_decisions and not prospective_enabled:
+        raise ValueError("decisions_enabled requires the provider to be enabled")
+    if prospective_decisions:
+        secret_key = current.get("api_key_secret_key")
+        statuses = await policy.secret_status_payload()
+        secret = next(
+            (item for item in statuses.get("items", []) if item.get("key") == secret_key),
+            None,
+        )
+        if secret is None or not bool(secret.get("operational")):
+            raise ValueError(
+                f"AI provider credential is not operational: {provider}/{slot}"
+            )
+    return changes
 
 
 def _admin_actor(request: Request, service: RuntimeConfigurationService) -> str:

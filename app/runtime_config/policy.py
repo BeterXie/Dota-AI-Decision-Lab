@@ -4,18 +4,27 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import select
+from sqlalchemy import select, text
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.ai.base import AI_VIEW_VERSION, DECISION_POLICY_VERSION, PROMPT_VERSION
+from app.ai.base import (
+    AI_VIEW_VERSION,
+    DECISION_POLICY_VERSION,
+    PROMPT_VERSION,
+    ai_experiment_key,
+)
 from app.auth.social import SocialAuthSettings
 from app.config import Settings, get_settings
 from app.runtime_config.models import (
+    AiProviderConfigRecord,
     RuntimeConfigAuditRecord,
     RuntimeSecretRecord,
     RuntimeSettingRecord,
 )
-from app.runtime_config.service import AUTH_SECRET_KEY, active_ai_experiments
+from app.runtime_config.provider_safety import provider_base_url_is_allowed
+import app.runtime_config.service as runtime_service
+from app.runtime_config.service import AUTH_SECRET_KEY, RuntimeControlSettings
 
 AI_DECISION_SETTING_KEYS = frozenset(
     {
@@ -158,27 +167,28 @@ class RuntimePolicyService:
         return bool(self._defaults()[key])
 
     async def secret_status_payload(self) -> dict[str, Any]:
+        bootstrap = RuntimeControlSettings()
+        bootstrap_keys = self._bootstrap_secret_keys()
         async with self._session_factory() as session:
             db_keys = set((await session.scalars(select(RuntimeSecretRecord.key))).all())
-        bootstrap_keys = self._bootstrap_secret_keys()
-        items = []
-        for key, label, category in _SECRET_CATALOG:
-            if key in db_keys:
-                storage = "DATABASE_ENCRYPTED"
-            elif key in bootstrap_keys:
-                storage = "BOOTSTRAP_FALLBACK"
-            else:
-                storage = "NOT_CONFIGURED"
-            items.append(
-                {
-                    "key": key,
-                    "label": label,
-                    "category": category,
-                    "configured": storage != "NOT_CONFIGURED",
-                    "storage": storage,
-                    "runtime_hot": True,
-                }
-            )
+            items = []
+            for key, label, category in _SECRET_CATALOG:
+                status = await _secret_runtime_status(
+                    session,
+                    key,
+                    db_keys=db_keys,
+                    bootstrap_keys=bootstrap_keys,
+                    bootstrap=bootstrap,
+                )
+                items.append(
+                    {
+                        "key": key,
+                        "label": label,
+                        "category": category,
+                        **status,
+                        "runtime_hot": True,
+                    }
+                )
         return {"items": items}
 
     def _defaults(self) -> dict[str, object]:
@@ -191,22 +201,7 @@ class RuntimePolicyService:
         }
 
     def _bootstrap_secret_keys(self) -> set[str]:
-        settings = self._settings
-        keys = {
-            key
-            for key, value in {
-                "ai.openai.api_key": settings.openai_api_key,
-                "ai.local_openai.api_key": settings.local_openai_api_key,
-                "ai.anthropic.api_key": settings.anthropic_api_key,
-                "ai.gemini.api_key": settings.gemini_api_key,
-                "ai.deepseek.api_key": settings.deepseek_api_key,
-                "ai.kimi.api_key": settings.kimi_api_key,
-            }.items()
-            if value is not None
-        }
-        if self._social.google_client_secret is not None:
-            keys.add(AUTH_SECRET_KEY)
-        return keys
+        return _bootstrap_secret_keys(self._settings, self._social)
 
     def _lifecycle_features(self) -> list[dict[str, object]]:
         settings = self._settings
@@ -254,8 +249,148 @@ async def active_runtime_ai_experiments(
 ) -> tuple[tuple[str, str, str, str, str], ...]:
     policy = await ai_decision_policy_snapshot(session)
     if not policy.enabled:
-        return ()
-    return await active_ai_experiments(session, fallback)
+        return _remember_active_experiments(())
+
+    any_row = await session.scalar(select(AiProviderConfigRecord.id).limit(1))
+    if any_row is None:
+        return _remember_active_experiments(fallback)
+
+    rows = list(
+        (
+            await session.scalars(
+                select(AiProviderConfigRecord)
+                .where(
+                    AiProviderConfigRecord.enabled.is_(True),
+                    AiProviderConfigRecord.decisions_enabled.is_(True),
+                )
+                .order_by(AiProviderConfigRecord.provider, AiProviderConfigRecord.slot)
+            )
+        ).all()
+    )
+    db_keys = set((await session.scalars(select(RuntimeSecretRecord.key))).all())
+    bootstrap = RuntimeControlSettings()
+    settings = get_settings()
+    social = SocialAuthSettings()
+    bootstrap_keys = _bootstrap_secret_keys(settings, social)
+    require_secret_check = session.get_bind().dialect.name == "postgresql"
+
+    experiments = []
+    for row in rows:
+        if not provider_base_url_is_allowed(row.provider, row.base_url):
+            continue
+        if require_secret_check and not await _secret_is_operational(
+            session,
+            row.api_key_secret_key,
+            db_keys=db_keys,
+            bootstrap_keys=bootstrap_keys,
+            bootstrap=bootstrap,
+        ):
+            continue
+        experiments.append(ai_experiment_key(row.provider, row.model))
+    return _remember_active_experiments(tuple(experiments))
+
+
+async def _secret_runtime_status(
+    session: AsyncSession,
+    key: str,
+    *,
+    db_keys: set[str],
+    bootstrap_keys: set[str],
+    bootstrap: RuntimeControlSettings,
+) -> dict[str, object]:
+    db_configured = key in db_keys
+    fallback_available = key in bootstrap_keys
+    database_decryptable = False
+    if db_configured:
+        database_decryptable = await _database_secret_decryptable(session, key, bootstrap)
+    operational = database_decryptable or (not db_configured and fallback_available)
+    if db_configured and not database_decryptable and fallback_available:
+        # Runtime secret resolution only falls back to process configuration when
+        # DB decryption is not attempted. A configured-but-unreadable DB secret is
+        # therefore an error, not a silent fallback.
+        operational = False
+    storage = (
+        "DATABASE_ENCRYPTED"
+        if db_configured
+        else "BOOTSTRAP_FALLBACK"
+        if fallback_available
+        else "NOT_CONFIGURED"
+    )
+    return {
+        "configured": db_configured or fallback_available,
+        "storage": storage,
+        "decryptable": database_decryptable if db_configured else fallback_available,
+        "operational": operational,
+        "fallback_available": fallback_available,
+    }
+
+
+async def _secret_is_operational(
+    session: AsyncSession,
+    secret_key: str | None,
+    *,
+    db_keys: set[str],
+    bootstrap_keys: set[str],
+    bootstrap: RuntimeControlSettings,
+) -> bool:
+    if not secret_key:
+        return False
+    if secret_key not in db_keys:
+        return secret_key in bootstrap_keys
+    if bootstrap.config_master_key is None:
+        return secret_key in bootstrap_keys
+    if session.get_bind().dialect.name != "postgresql":
+        return secret_key in bootstrap_keys
+    return await _database_secret_decryptable(session, secret_key, bootstrap)
+
+
+async def _database_secret_decryptable(
+    session: AsyncSession,
+    key: str,
+    bootstrap: RuntimeControlSettings,
+) -> bool:
+    if bootstrap.config_master_key is None or session.get_bind().dialect.name != "postgresql":
+        return False
+    master = bootstrap.config_master_key.get_secret_value()
+    if len(master.encode("utf-8")) < 32:
+        return False
+    try:
+        async with session.begin_nested():
+            value = await session.scalar(
+                text(
+                    "SELECT pgp_sym_decrypt(ciphertext, :master) IS NOT NULL "
+                    "FROM runtime_secrets WHERE key = :key"
+                ),
+                {"master": master, "key": key},
+            )
+    except SQLAlchemyError:
+        return False
+    return bool(value)
+
+
+def _bootstrap_secret_keys(settings: Settings, social: SocialAuthSettings) -> set[str]:
+    keys = {
+        key
+        for key, value in {
+            "ai.openai.api_key": settings.openai_api_key,
+            "ai.local_openai.api_key": settings.local_openai_api_key,
+            "ai.anthropic.api_key": settings.anthropic_api_key,
+            "ai.gemini.api_key": settings.gemini_api_key,
+            "ai.deepseek.api_key": settings.deepseek_api_key,
+            "ai.kimi.api_key": settings.kimi_api_key,
+        }.items()
+        if value is not None
+    }
+    if social.google_client_secret is not None:
+        keys.add(AUTH_SECRET_KEY)
+    return keys
+
+
+def _remember_active_experiments(
+    experiments: tuple[tuple[str, str, str, str, str], ...],
+) -> tuple[tuple[str, str, str, str, str], ...]:
+    runtime_service._ACTIVE_EXPERIMENT_CACHE = experiments
+    return experiments
 
 
 def _setting_payload(row: RuntimeSettingRecord) -> dict[str, object]:
