@@ -52,11 +52,7 @@ _ACTIVE_EXPERIMENT_CACHE: tuple[tuple[str, str, str, str, str], ...] | None = No
 
 
 class RuntimeControlSettings(BaseSettings):
-    """Bootstrap-only control-plane settings.
-
-    The database cannot safely contain the key required to decrypt itself. The
-    master key and admin allowlist therefore remain process bootstrap settings.
-    """
+    """Bootstrap-only configuration needed to operate the DB control plane."""
 
     model_config = SettingsConfigDict(
         env_file=".env",
@@ -151,7 +147,9 @@ class RuntimeConfigurationService:
             rows = list(
                 (
                     await session.scalars(
-                        select(RuntimeSettingRecord).where(RuntimeSettingRecord.key.in_(AUTH_SETTING_KEYS))
+                        select(RuntimeSettingRecord).where(
+                            RuntimeSettingRecord.key.in_(AUTH_SETTING_KEYS)
+                        )
                     )
                 ).all()
             )
@@ -337,7 +335,13 @@ class RuntimeConfigurationService:
                         updated_at = :now
                     """
                 ),
-                {"key": key, "value": value, "master": master, "actor": actor, "now": now},
+                {
+                    "key": key,
+                    "value": value,
+                    "master": master,
+                    "actor": actor,
+                    "now": now,
+                },
             )
             session.add(
                 RuntimeConfigAuditRecord(
@@ -453,7 +457,13 @@ class RuntimeConfigurationService:
                     VALUES (:key, pgp_sym_encrypt(:value, :master, 'cipher-algo=aes256'), 1, :actor, :now)
                     """
                 ),
-                {"key": key, "value": value, "master": master, "actor": actor, "now": now},
+                {
+                    "key": key,
+                    "value": value,
+                    "master": master,
+                    "actor": actor,
+                    "now": now,
+                },
             )
 
     async def _read_secret(
@@ -469,8 +479,7 @@ class RuntimeConfigurationService:
             return fallback
         result = await session.scalar(
             text(
-                "SELECT pgp_sym_decrypt(ciphertext, :master) "
-                "FROM runtime_secrets WHERE key = :key"
+                "SELECT pgp_sym_decrypt(ciphertext, :master) FROM runtime_secrets WHERE key = :key"
             ),
             {"master": self._master_key(), "key": key},
         )
@@ -585,11 +594,7 @@ class RuntimeConfigurationService:
             "ai.deepseek.api_key": settings.deepseek_api_key,
             "ai.kimi.api_key": settings.kimi_api_key,
         }
-        return {
-            key: value.get_secret_value()
-            for key, value in pairs.items()
-            if value is not None
-        }
+        return {key: value.get_secret_value() for key, value in pairs.items() if value is not None}
 
     @staticmethod
     def _setting_payload(row: RuntimeSettingRecord) -> dict[str, object]:
@@ -686,12 +691,11 @@ async def resolve_ai_provider(
     if row is None or not row.enabled or not row.decisions_enabled:
         raise ValueError(f"AI provider experiment is disabled or superseded: {provider}/{model}")
 
-    settings = get_settings()
     api_key = await _runtime_secret_or_environment(
         session,
         row.api_key_secret_key,
         bootstrap=RuntimeControlSettings(),
-        settings=settings,
+        settings=get_settings(),
     )
     if not api_key:
         raise ValueError(f"AI provider secret is not configured: {provider}/{row.slot}")
