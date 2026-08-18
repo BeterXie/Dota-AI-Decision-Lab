@@ -320,18 +320,12 @@ def _lifecycle(key: str, label: str, enabled: bool) -> dict[str, object]:
         "label": label,
         "enabled": bool(enabled),
         "hot_mutable": False,
-        "reason": (
-            "Requires dynamic supervisor lifecycle management before "
-            "no-restart toggling is safe."
-        ),
+        "reason": "Needs Dynamic Supervisor before no-restart worker toggling is safe.",
     }
 
 
 _DESCRIPTIONS = {
-    "ai.decisions.enabled": (
-        "Schedule new AI decision provider jobs. "
-        "Existing prepared inference is not interrupted."
-    ),
+    "ai.decisions.enabled": "Schedule new AI jobs; prepared inference continues.",
     "ai.max_live_data_lag_seconds": "Maximum delayed live-data lag included in new AI inputs.",
     "ai.prior_decisions_limit": (
         "Maximum recent prior decisions included in each new AI provider input."
