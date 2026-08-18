@@ -1,9 +1,11 @@
 import React from "react";
 import type { MapSummary } from "../api";
+import { useTeamDirectory } from "../teamDirectoryApi";
 import {
   eventAbbreviation,
   getOfficialEventArtwork,
   getOfficialTeamLogoUrl,
+  getValveTeamLogoUrl,
   teamAbbreviation
 } from "../utils/officialVisuals";
 
@@ -18,13 +20,28 @@ export const TeamCrest: React.FC<{
   size?: Exclude<VisualSize, "hero">;
 }> = ({ team, fallbackName, size = "md" }) => {
   const [failed, setFailed] = React.useState(false);
-  const logo = getOfficialTeamLogoUrl(team);
+  const directory = useTeamDirectory();
+  const profile = team ? directory.data?.find((item) => item.id === team.id) : undefined;
+  const registryLogo = profile?.logo_url || getValveTeamLogoUrl(profile?.valve_team_id);
+  const compatibilityLogo = getOfficialTeamLogoUrl(team);
+  const logo = registryLogo || compatibilityLogo;
+  const logoSource = profile?.logo_url
+    ? profile.logo_source || "team-registry"
+    : profile?.valve_team_id
+      ? "valve-steam"
+      : compatibilityLogo
+        ? "valve-steam-compat"
+        : "fallback";
   const name = team?.name || fallbackName || "TBD";
+
+  React.useEffect(() => {
+    setFailed(false);
+  }, [logo]);
 
   return (
     <span
       className={`team-crest team-crest-${size} ${logo && !failed ? "has-image" : "is-fallback"}`}
-      data-team-logo-source={logo && !failed ? "valve-steam" : "fallback"}
+      data-team-logo-source={logo && !failed ? logoSource : "fallback"}
       title={name}
     >
       {logo && !failed ? (

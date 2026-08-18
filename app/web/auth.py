@@ -474,7 +474,8 @@ def _http_access_requirement(path: str) -> tuple[str, str | None]:
     if path == "/metrics" or path == "/api/jobs/summary" or path.startswith("/api/account/"):
         return "AUTHENTICATED", None
     if (
-        path in {"/health", "/ready", "/api/runtime", "/api/matches"}
+        path in {"/health", "/ready", "/api/runtime", "/api/matches", "/api/teams"}
+        or path.startswith("/api/teams/")
         or path == "/api/auth"
         or path.startswith("/api/auth/")
         or _is_public_map_path(path)
