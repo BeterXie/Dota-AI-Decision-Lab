@@ -14,10 +14,7 @@ from app.providers.common import create_system_ssl_context
 
 LIQUIPEDIA_MEDIAWIKI_API_URL = "https://liquipedia.net/dota2/api.php"
 LIQUIPEDIA_PARSE_INTERVAL_SECONDS = 30.0
-DEFAULT_USER_AGENT = (
-    "Dota-AI-Decision-Lab/0.1.0 "
-    "(https://github.com/BeterXie/Dota-AI-Decision-Lab)"
-)
+DEFAULT_USER_AGENT = "Dota-AI-Decision-Lab/0.1.0 (https://github.com/BeterXie/Dota-AI-Decision-Lab)"
 
 
 @dataclass(frozen=True, slots=True)
