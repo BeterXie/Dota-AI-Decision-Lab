@@ -327,7 +327,13 @@ class RuntimeConfigurationService:
                 text(
                     """
                     INSERT INTO runtime_secrets (key, ciphertext, revision, updated_by, updated_at)
-                    VALUES (:key, pgp_sym_encrypt(:value, :master, 'cipher-algo=aes256'), 1, :actor, :now)
+                    VALUES (
+                        :key,
+                        pgp_sym_encrypt(:value, :master, 'cipher-algo=aes256'),
+                        1,
+                        :actor,
+                        :now
+                    )
                     ON CONFLICT (key) DO UPDATE SET
                         ciphertext = pgp_sym_encrypt(:value, :master, 'cipher-algo=aes256'),
                         revision = runtime_secrets.revision + 1,
@@ -454,7 +460,13 @@ class RuntimeConfigurationService:
                 text(
                     """
                     INSERT INTO runtime_secrets (key, ciphertext, revision, updated_by, updated_at)
-                    VALUES (:key, pgp_sym_encrypt(:value, :master, 'cipher-algo=aes256'), 1, :actor, :now)
+                    VALUES (
+                        :key,
+                        pgp_sym_encrypt(:value, :master, 'cipher-algo=aes256'),
+                        1,
+                        :actor,
+                        :now
+                    )
                     """
                 ),
                 {
@@ -700,8 +712,8 @@ async def resolve_ai_provider(
     if not api_key:
         raise ValueError(f"AI provider secret is not configured: {provider}/{row.slot}")
     resolved = _build_provider(row, api_key)
-    setattr(resolved, "runtime_config_managed", True)
-    setattr(resolved, "runtime_timeout_seconds", float(row.timeout_seconds))
+    resolved.runtime_config_managed = True
+    resolved.runtime_timeout_seconds = float(row.timeout_seconds)
     return resolved
 
 
