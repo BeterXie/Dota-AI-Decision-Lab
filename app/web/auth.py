@@ -32,7 +32,8 @@ class RequestLoginCodePayload(BaseModel):
 
 
 class VerifyLoginCodePayload(BaseModel):
-    email: str = Field(min_length=1, max_length=20)
+    email: str = Field(min_length=3, max_length=320)
+    code: str = Field(min_length=1, max_length=20)
 
 
 class AuthGuardMiddleware:
