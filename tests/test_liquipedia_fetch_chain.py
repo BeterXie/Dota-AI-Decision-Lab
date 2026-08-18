@@ -3,8 +3,8 @@ from datetime import UTC, datetime
 import pytest
 
 from app.providers.liquipedia.fetch import (
-    FetchedApiResponse,
     LIQUIPEDIA_PARSE_INTERVAL_SECONDS,
+    FetchedApiResponse,
     LiquipediaMediaWikiClient,
 )
 
