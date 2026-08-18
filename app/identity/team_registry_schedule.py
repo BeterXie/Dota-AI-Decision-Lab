@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.jobs import JobType
 from app.jobs.repository import JobRepository
 from app.models import CanonicalEvent, CanonicalSeries, ProviderEventMapping
+from app.time import ensure_utc
 
 
 @dataclass(frozen=True, slots=True)
@@ -43,8 +44,8 @@ async def schedule_discovered_event_team_registry_refreshes(
 ) -> TeamRegistryScheduleResult:
     """Schedule one registry refresh when a RayBet event is first discovered."""
 
-    observed_at = now or datetime.now(UTC)
-    events = await _raybet_event_teams(session, created_after=discovered_after)
+    observed_at = ensure_utc(now or datetime.now(UTC))
+    events = await _raybet_event_teams(session, created_after=ensure_utc(discovered_after))
     enqueued = 0
     for event in events:
         if not event.team_ids:
@@ -75,7 +76,7 @@ async def schedule_prestart_event_team_registry_refreshes(
 
     if refresh_seconds <= 0:
         raise ValueError("refresh_seconds must be positive")
-    observed_at = now or datetime.now(UTC)
+    observed_at = ensure_utc(now or datetime.now(UTC))
     events = await _raybet_event_teams(session)
     enqueued = 0
     for event in events:
@@ -134,13 +135,15 @@ async def _raybet_event_teams(
         state = grouped.setdefault(
             event_id,
             _MutableEventTeams(
-                created_at=created_at,
-                explicit_started_at=explicit_started_at,
+                created_at=ensure_utc(created_at),
+                explicit_started_at=(
+                    ensure_utc(explicit_started_at) if explicit_started_at is not None else None
+                ),
             ),
         )
         state.team_ids.update((team_a_id, team_b_id))
         if scheduled_at is not None:
-            state.scheduled.append(scheduled_at)
+            state.scheduled.append(ensure_utc(scheduled_at))
 
     result: list[_EventTeams] = []
     for event_id, state in grouped.items():
