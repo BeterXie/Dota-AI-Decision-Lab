@@ -69,7 +69,7 @@ export const TopBar: React.FC<TopBarProps> = ({
         </a>
         <a className="topbar-subscription-btn" href="/billing">
           <span className="topbar-subscription-mark" aria-hidden="true">✦</span>
-          {locale === "zh-CN" ? "订阅 Pro" : "Get Pro"}
+          {locale === "zh-CN" ? "查看赛事 Pass" : "View passes"}
         </a>
 
         {authenticated ? (

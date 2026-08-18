@@ -17,7 +17,7 @@ class UserEntitlementRecord(Base):
     Historical rows used this table as a global entitlement ledger. Scope and
     campaign metadata extend the same source-isolated model without creating a
     second authorization system: GLOBAL grants behave exactly as before while
-    SERIES/MAP grants unlock only the referenced resource.
+    EVENT/SERIES/MAP grants unlock only the referenced resource scope.
     """
 
     __tablename__ = "user_entitlements"
@@ -30,7 +30,7 @@ class UserEntitlementRecord(Base):
         ),
         CheckConstraint(
             "(scope_type = 'GLOBAL' AND scope_ref IS NULL) OR "
-            "(scope_type IN ('SERIES', 'MAP') AND scope_ref IS NOT NULL)",
+            "(scope_type IN ('EVENT', 'SERIES', 'MAP') AND scope_ref IS NOT NULL)",
             name="ck_user_entitlements_scope",
         ),
         Index(

@@ -1,4 +1,5 @@
 import asyncio
+from collections import defaultdict
 from collections.abc import Sequence
 from datetime import UTC, datetime
 from pathlib import Path
@@ -10,10 +11,10 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
 from fastapi.staticfiles import StaticFiles
 from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
-from sqlalchemy import and_, func, or_, select
+from sqlalchemy import and_, func, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.history.service import HistoricalIntelligenceService
+from app.history.scoring import sample_confidence
 from app.market.current import evaluate_current_market_pair, map_market_stages
 from app.market.fair_probability import remove_vig
 from app.models import (
@@ -40,6 +41,8 @@ from app.models import (
     PlayerHeroSnapshotRecord,
     ProviderMatchMapping,
     RayBetMatch,
+    TeamFormSnapshotRecord,
+    TeamRatingSnapshotRecord,
 )
 from app.runtime.health import HealthRegistry
 from app.time import elapsed_seconds, ensure_utc
@@ -100,6 +103,18 @@ def create_app(
     async def matches() -> list[dict]:
         async with session_factory() as session:
             live_providers = ("raybet", "dltv")
+            provider_map_ids = select(ProviderMatchMapping.canonical_map_id).where(
+                ProviderMatchMapping.provider.in_(live_providers),
+                ProviderMatchMapping.canonical_map_id.is_not(None),
+            )
+            provider_series_ids = select(ProviderMatchMapping.canonical_series_id).where(
+                ProviderMatchMapping.provider.in_(live_providers),
+                ProviderMatchMapping.canonical_series_id.is_not(None),
+            )
+            dltv_map_ids = select(DltvLiveObservationRecord.canonical_map_id)
+            snapshot_map_ids = select(DecisionSnapshotRecord.canonical_map_id).where(
+                DecisionSnapshotRecord.canonical_map_id.is_not(None),
+            )
             map_records = list(
                 (
                     await session.scalars(
@@ -107,24 +122,10 @@ def create_app(
                         .outerjoin(CanonicalSeries, CanonicalSeries.id == CanonicalMap.series_id)
                         .where(
                             or_(
-                                select(ProviderMatchMapping.id)
-                                .where(
-                                    ProviderMatchMapping.provider.in_(live_providers),
-                                    or_(
-                                        ProviderMatchMapping.canonical_map_id == CanonicalMap.id,
-                                        ProviderMatchMapping.canonical_series_id
-                                        == CanonicalMap.series_id,
-                                    ),
-                                )
-                                .exists(),
-                                select(DltvLiveObservationRecord.id)
-                                .where(
-                                    DltvLiveObservationRecord.canonical_map_id == CanonicalMap.id
-                                )
-                                .exists(),
-                                select(DecisionSnapshotRecord.id)
-                                .where(DecisionSnapshotRecord.canonical_map_id == CanonicalMap.id)
-                                .exists(),
+                                CanonicalMap.id.in_(provider_map_ids),
+                                CanonicalMap.series_id.in_(provider_series_ids),
+                                CanonicalMap.id.in_(dltv_map_ids),
+                                CanonicalMap.id.in_(snapshot_map_ids),
                             )
                         )
                         # Maps resolved from DLTV identity usually carry no
@@ -144,15 +145,12 @@ def create_app(
                     await session.scalars(
                         select(CanonicalSeries)
                         .where(
-                            ~select(CanonicalMap.id)
-                            .where(CanonicalMap.series_id == CanonicalSeries.id)
-                            .exists(),
-                            select(ProviderMatchMapping.id)
-                            .where(
-                                ProviderMatchMapping.provider.in_(live_providers),
-                                ProviderMatchMapping.canonical_series_id == CanonicalSeries.id,
-                            )
-                            .exists(),
+                            ~CanonicalSeries.id.in_(
+                                select(CanonicalMap.series_id).where(
+                                    CanonicalMap.series_id.is_not(None),
+                                )
+                            ),
+                            CanonicalSeries.id.in_(provider_series_ids),
                         )
                         .order_by(CanonicalSeries.scheduled_at.desc().nulls_last())
                         .limit(100)
@@ -166,15 +164,14 @@ def create_app(
                 live_market_max_age_seconds=live_market_max_age_seconds,
                 market_max_pair_skew_seconds=market_max_pair_skew_seconds,
             )
-            for series in pending_series:
-                payload = await _pending_series_payload(
+            payloads.extend(
+                await _pending_series_payloads(
                     session,
-                    series,
+                    pending_series,
                     live_market_max_age_seconds=live_market_max_age_seconds,
                     market_max_pair_skew_seconds=market_max_pair_skew_seconds,
                 )
-                if payload is not None:
-                    payloads.append(payload)
+            )
             payloads.sort(
                 key=lambda item: (
                     ensure_utc(item["scheduled_at"])
@@ -609,6 +606,8 @@ async def _map_summary_payloads(
                 "identity_status": "RESOLVED",
                 "id": canonical_map.id,
                 "series_id": canonical_map.series_id,
+                "canonical_event_id": series.event_id if series is not None else None,
+                "stage_key": series.stage_key if series is not None else "UNKNOWN",
                 "canonical_map_id": canonical_map.id,
                 "map_number": canonical_map.map_number,
                 "valve_match_id": canonical_map.valve_match_id,
@@ -928,21 +927,18 @@ async def _map_payload(
         if draft is not None
         else []
     )
+    draft_slot_payloads = await _draft_slot_payloads(session, draft_slots)
     player_form_ready_count = 0
     player_hero_ready_count = 0
     player_feature_cutoffs: list[datetime] = []
-    historical = HistoricalIntelligenceService()
     history_as_of = datetime.now(UTC)
-    team_a_history = (
-        await historical.get_team_payload(session, series.team_a_id, as_of=history_as_of)
-        if series is not None
-        else None
+    history_by_team = await _batch_team_history_payloads(
+        session,
+        [series.team_a_id, series.team_b_id] if series is not None else [],
+        as_of=history_as_of,
     )
-    team_b_history = (
-        await historical.get_team_payload(session, series.team_b_id, as_of=history_as_of)
-        if series is not None
-        else None
-    )
+    team_a_history = history_by_team.get(series.team_a_id) if series is not None else None
+    team_b_history = history_by_team.get(series.team_b_id) if series is not None else None
     team_histories = (
         (team_a_history, team_b_history)
         if team_a_history is not None and team_b_history is not None
@@ -951,36 +947,80 @@ async def _map_payload(
     for team_history in team_histories:
         if team_history["knowledge_cutoff"] is not None:
             player_feature_cutoffs.append(team_history["knowledge_cutoff"])
-    for slot in draft_slots:
-        if slot.canonical_player_id is None:
-            continue
-        player_form = await session.scalar(
-            select(PlayerFormSnapshotRecord)
-            .where(
-                PlayerFormSnapshotRecord.canonical_player_id == slot.canonical_player_id,
-                PlayerFormSnapshotRecord.position == slot.position,
-            )
-            .order_by(PlayerFormSnapshotRecord.knowledge_cutoff.desc())
-            .limit(1)
+    player_form_keys = {
+        (slot.canonical_player_id, slot.position)
+        for slot in draft_slots
+        if slot.canonical_player_id is not None
+    }
+    if player_form_keys:
+        player_form_cutoffs = list(
+            (
+                await session.execute(
+                    select(
+                        PlayerFormSnapshotRecord.canonical_player_id,
+                        PlayerFormSnapshotRecord.position,
+                        func.max(PlayerFormSnapshotRecord.knowledge_cutoff),
+                    )
+                    .where(
+                        tuple_(
+                            PlayerFormSnapshotRecord.canonical_player_id,
+                            PlayerFormSnapshotRecord.position,
+                        ).in_(player_form_keys),
+                        PlayerFormSnapshotRecord.knowledge_cutoff <= history_as_of,
+                    )
+                    .group_by(
+                        PlayerFormSnapshotRecord.canonical_player_id,
+                        PlayerFormSnapshotRecord.position,
+                    )
+                )
+            ).all()
         )
-        if player_form is not None:
-            player_form_ready_count += 1
-            player_feature_cutoffs.append(player_form.knowledge_cutoff)
-        if slot.hero_id is None:
-            continue
-        player_hero = await session.scalar(
-            select(PlayerHeroSnapshotRecord)
-            .where(
-                PlayerHeroSnapshotRecord.canonical_player_id == slot.canonical_player_id,
-                PlayerHeroSnapshotRecord.hero_id == slot.hero_id,
-                PlayerHeroSnapshotRecord.position == slot.position,
-            )
-            .order_by(PlayerHeroSnapshotRecord.knowledge_cutoff.desc())
-            .limit(1)
+        available_player_forms = {(row[0], row[1]) for row in player_form_cutoffs}
+        player_form_ready_count = sum(
+            (slot.canonical_player_id, slot.position) in available_player_forms
+            for slot in draft_slots
+            if slot.canonical_player_id is not None
         )
-        if player_hero is not None:
-            player_hero_ready_count += 1
-            player_feature_cutoffs.append(player_hero.knowledge_cutoff)
+        player_feature_cutoffs.extend(row[2] for row in player_form_cutoffs)
+
+    player_hero_keys = {
+        (slot.canonical_player_id, slot.hero_id, slot.position)
+        for slot in draft_slots
+        if slot.canonical_player_id is not None and slot.hero_id is not None
+    }
+    if player_hero_keys:
+        player_hero_cutoffs = list(
+            (
+                await session.execute(
+                    select(
+                        PlayerHeroSnapshotRecord.canonical_player_id,
+                        PlayerHeroSnapshotRecord.hero_id,
+                        PlayerHeroSnapshotRecord.position,
+                        func.max(PlayerHeroSnapshotRecord.knowledge_cutoff),
+                    )
+                    .where(
+                        tuple_(
+                            PlayerHeroSnapshotRecord.canonical_player_id,
+                            PlayerHeroSnapshotRecord.hero_id,
+                            PlayerHeroSnapshotRecord.position,
+                        ).in_(player_hero_keys),
+                        PlayerHeroSnapshotRecord.knowledge_cutoff <= history_as_of,
+                    )
+                    .group_by(
+                        PlayerHeroSnapshotRecord.canonical_player_id,
+                        PlayerHeroSnapshotRecord.hero_id,
+                        PlayerHeroSnapshotRecord.position,
+                    )
+                )
+            ).all()
+        )
+        available_player_heroes = {(row[0], row[1], row[2]) for row in player_hero_cutoffs}
+        player_hero_ready_count = sum(
+            (slot.canonical_player_id, slot.hero_id, slot.position) in available_player_heroes
+            for slot in draft_slots
+            if slot.canonical_player_id is not None and slot.hero_id is not None
+        )
+        player_feature_cutoffs.extend(row[3] for row in player_hero_cutoffs)
     curve = (
         await session.scalar(
             select(DraftMinuteCurveRecord)
@@ -1089,6 +1129,12 @@ async def _map_payload(
     observed_at = datetime.now(UTC)
     snapshot_market = snapshot.canonical_payload.get("market", {}) if snapshot is not None else {}
     snapshot_quality = snapshot.canonical_payload.get("quality", {}) if snapshot is not None else {}
+    snapshot_identity = (
+        snapshot.canonical_payload.get("identity", {}) if snapshot is not None else {}
+    )
+    side_identity = (
+        snapshot_identity.get("side_identity") if isinstance(snapshot_identity, dict) else None
+    )
     scheduled_at = (
         canonical_map.scheduled_at
         or (series.scheduled_at if series is not None else None)
@@ -1115,6 +1161,8 @@ async def _map_payload(
         "identity_status": "RESOLVED",
         "id": canonical_map.id,
         "series_id": canonical_map.series_id,
+        "canonical_event_id": series.event_id if series is not None else None,
+        "stage_key": series.stage_key if series is not None else "UNKNOWN",
         "canonical_map_id": canonical_map.id,
         "map_number": canonical_map.map_number,
         "valve_match_id": canonical_map.valve_match_id,
@@ -1149,6 +1197,7 @@ async def _map_payload(
             current_market_view.get("quality") if current_market_view is not None else None
         ),
         "current_market_view": current_market_view,
+        "side_identity": side_identity,
         "snapshot_market_quality": (
             snapshot_market.get("quality") if isinstance(snapshot_market, dict) else None
         ),
@@ -1164,7 +1213,7 @@ async def _map_payload(
                 "data_version": curve.data_version if curve else None,
                 "roster_ready_count": sum(slot.account_id is not None for slot in draft_slots),
                 "hero_ready_count": sum(slot.hero_id is not None for slot in draft_slots),
-                "slots": [await _draft_slot_payload(session, slot) for slot in draft_slots],
+                "slots": draft_slot_payloads,
             }
             if draft
             else None
@@ -1326,24 +1375,56 @@ def _match_phase(
     return "UNKNOWN"
 
 
-async def _draft_slot_payload(session: AsyncSession, slot: DraftSlotRecord) -> dict:
-    player = (
-        await session.get(CanonicalPlayer, slot.canonical_player_id)
-        if slot.canonical_player_id is not None
-        else None
-    )
-    hero = await session.get(CanonicalHero, slot.hero_id) if slot.hero_id is not None else None
-    return {
-        "side": slot.side,
-        "position": slot.position,
-        "account_id": slot.account_id,
-        "canonical_player_id": str(slot.canonical_player_id)
-        if slot.canonical_player_id is not None
-        else None,
-        "player_name": player.name if player is not None else None,
-        "hero_id": slot.hero_id,
-        "hero_name": hero.name if hero is not None else None,
+async def _draft_slot_payloads(
+    session: AsyncSession,
+    slots: Sequence[DraftSlotRecord],
+) -> list[dict]:
+    player_ids = {
+        slot.canonical_player_id for slot in slots if slot.canonical_player_id is not None
     }
+    hero_ids = {slot.hero_id for slot in slots if slot.hero_id is not None}
+    players = (
+        list(
+            (
+                await session.scalars(
+                    select(CanonicalPlayer).where(CanonicalPlayer.id.in_(player_ids))
+                )
+            ).all()
+        )
+        if player_ids
+        else []
+    )
+    heroes = (
+        list(
+            (
+                await session.scalars(
+                    select(CanonicalHero).where(CanonicalHero.hero_id.in_(hero_ids))
+                )
+            ).all()
+        )
+        if hero_ids
+        else []
+    )
+    player_by_id = {player.id: player for player in players}
+    hero_by_id = {hero.hero_id: hero for hero in heroes}
+    return [
+        {
+            "side": slot.side,
+            "position": slot.position,
+            "account_id": slot.account_id,
+            "canonical_player_id": (
+                str(slot.canonical_player_id) if slot.canonical_player_id is not None else None
+            ),
+            "player_name": (
+                player_by_id[slot.canonical_player_id].name
+                if slot.canonical_player_id in player_by_id
+                else None
+            ),
+            "hero_id": slot.hero_id,
+            "hero_name": hero_by_id[slot.hero_id].name if slot.hero_id in hero_by_id else None,
+        }
+        for slot in slots
+    ]
 
 
 async def _pending_series_payload(
@@ -1353,152 +1434,404 @@ async def _pending_series_payload(
     live_market_max_age_seconds: float,
     market_max_pair_skew_seconds: float,
 ) -> dict | None:
-    raybet_match = await _latest_raybet_match(session, series.id)
-    team_a = await session.get(CanonicalTeam, series.team_a_id)
-    team_b = await session.get(CanonicalTeam, series.team_b_id)
-    event = await session.get(CanonicalEvent, series.event_id) if series.event_id else None
-    odds = list(
-        (
-            await session.scalars(
-                select(OddsObservationRecord)
-                .where(OddsObservationRecord.canonical_series_id == series.id)
-                .order_by(OddsObservationRecord.received_at.desc())
-                .limit(64)
-            )
-        ).all()
-    )
-    latest_odds: dict[int, OddsObservationRecord] = {}
-    for observation in odds:
-        latest_odds.setdefault(observation.odds_id, observation)
-    team_order = {
-        team_id: index for index, team_id in enumerate((series.team_a_id, series.team_b_id))
-    }
-    current_market = sorted(
-        _series_market_rows(latest_odds.values()),
-        key=lambda item: (team_order.get(item.selection_team_id, 2), item.odds_id),
-    )
-    snapshot = await session.scalar(
-        select(DecisionSnapshotRecord)
-        .where(
-            DecisionSnapshotRecord.canonical_map_id.is_(None),
-            DecisionSnapshotRecord.canonical_payload["identity"]["series_id"].as_string()
-            == str(series.id),
-        )
-        .order_by(DecisionSnapshotRecord.decision_at.desc())
-        .limit(1)
-    )
-    snapshot_history = snapshot.canonical_payload.get("history", {}) if snapshot else {}
-    snapshot_market = snapshot.canonical_payload.get("market", {}) if snapshot else {}
-    snapshot_quality = snapshot.canonical_payload.get("quality", {}) if snapshot else {}
-    historical = HistoricalIntelligenceService()
-    history_as_of = datetime.now(UTC)
-    team_a_history = await historical.get_team_payload(
-        session, series.team_a_id, as_of=history_as_of
-    )
-    team_b_history = await historical.get_team_payload(
-        session, series.team_b_id, as_of=history_as_of
-    )
-    history_cutoffs = [
-        item["knowledge_cutoff"]
-        for item in (team_a_history, team_b_history)
-        if item["knowledge_cutoff"] is not None
-    ]
-    observed_at = datetime.now(UTC)
-    scheduled_at = series.scheduled_at or (raybet_match.scheduled_at if raybet_match else None)
-    current_market_view, selected_legs = _current_market_payload(
-        current_market,
-        series=series,
-        canonical_map_id=None,
-        observed_at=observed_at,
+    payloads = await _pending_series_payloads(
+        session,
+        [series],
         live_market_max_age_seconds=live_market_max_age_seconds,
         market_max_pair_skew_seconds=market_max_pair_skew_seconds,
     )
-    display_market = list(selected_legs) if selected_legs is not None else current_market
-    return {
-        "entity_type": "SERIES",
-        "identity_status": "PENDING_MAP_IDENTITY",
-        "id": series.id,
-        "series_id": series.id,
-        "canonical_map_id": None,
-        "map_number": None,
-        "valve_match_id": None,
-        "best_of": series.best_of,
-        "series_score": {"team_a": 0, "team_b": 0},
-        "series_maps": [],
-        "scheduled_at": scheduled_at,
-        "phase": (
-            "PREMATCH"
-            if scheduled_at is not None and ensure_utc(scheduled_at) >= ensure_utc(observed_at)
-            else "UNKNOWN"
-        ),
-        "provider_match_id": raybet_match.provider_match_id if raybet_match else None,
-        "tournament_name": raybet_match.tournament_name
-        if raybet_match
-        else (event.name if event else None),
-        "round": raybet_match.round
-        if raybet_match
-        else (f"BO{series.best_of}" if series.best_of else None),
-        "raw_status": raybet_match.raw_status if raybet_match else None,
-        "provider_observed_at": raybet_match.observed_at if raybet_match else None,
-        "team_a": {"id": team_a.id, "name": team_a.name} if team_a else None,
-        "team_b": {"id": team_b.id, "name": team_b.name} if team_b else None,
-        "market": [
+    return payloads[0] if payloads else None
+
+
+async def _pending_series_payloads(
+    session: AsyncSession,
+    series_rows: Sequence[CanonicalSeries],
+    *,
+    live_market_max_age_seconds: float,
+    market_max_pair_skew_seconds: float,
+) -> list[dict]:
+    """Build pending-series cards with set-based reads.
+
+    Pending series used to call the detail loader once per row, which multiplied
+    team, mapping, market, snapshot, and history queries by the number of cards.
+    Keep the response shape but load each relation once for the complete page.
+    """
+
+    if not series_rows:
+        return []
+    series_ids = [item.id for item in series_rows]
+    team_ids = list(
+        {team_id for item in series_rows for team_id in (item.team_a_id, item.team_b_id)}
+    )
+    teams = list(
+        (await session.scalars(select(CanonicalTeam).where(CanonicalTeam.id.in_(team_ids)))).all()
+    )
+    team_by_id = {item.id: item for item in teams}
+    event_ids = list({item.event_id for item in series_rows if item.event_id is not None})
+    events = (
+        list(
+            (
+                await session.scalars(
+                    select(CanonicalEvent).where(CanonicalEvent.id.in_(event_ids))
+                )
+            ).all()
+        )
+        if event_ids
+        else []
+    )
+    event_by_id = {item.id: item for item in events}
+
+    mappings = list(
+        (
+            await session.scalars(
+                select(ProviderMatchMapping)
+                .where(
+                    ProviderMatchMapping.provider == "raybet",
+                    ProviderMatchMapping.canonical_series_id.in_(series_ids),
+                )
+                .order_by(ProviderMatchMapping.id)
+            )
+        ).all()
+    )
+    provider_match_by_series: dict[UUID, int] = {}
+    for mapping in mappings:
+        if mapping.canonical_series_id is None:
+            continue
+        try:
+            provider_match_by_series.setdefault(
+                mapping.canonical_series_id,
+                int(mapping.provider_match_id),
+            )
+        except TypeError, ValueError:
+            continue
+    provider_match_ids = list(set(provider_match_by_series.values()))
+    raybet_by_id: dict[int, RayBetMatch] = {}
+    if provider_match_ids:
+        latest_raybet_times = (
+            select(
+                RayBetMatch.provider_match_id,
+                func.max(RayBetMatch.observed_at).label("latest_observed_at"),
+            )
+            .where(RayBetMatch.provider_match_id.in_(provider_match_ids))
+            .group_by(RayBetMatch.provider_match_id)
+            .subquery()
+        )
+        raybet_rows = list(
+            (
+                await session.scalars(
+                    select(RayBetMatch).join(
+                        latest_raybet_times,
+                        and_(
+                            RayBetMatch.provider_match_id
+                            == latest_raybet_times.c.provider_match_id,
+                            RayBetMatch.observed_at == latest_raybet_times.c.latest_observed_at,
+                        ),
+                    )
+                )
+            ).all()
+        )
+        raybet_by_id = {item.provider_match_id: item for item in raybet_rows}
+
+    latest_odds_times = (
+        select(
+            OddsObservationRecord.canonical_series_id,
+            OddsObservationRecord.odds_id,
+            func.max(OddsObservationRecord.received_at).label("latest_received_at"),
+        )
+        .where(OddsObservationRecord.canonical_series_id.in_(series_ids))
+        .group_by(OddsObservationRecord.canonical_series_id, OddsObservationRecord.odds_id)
+        .subquery()
+    )
+    odds_rows = list(
+        (
+            await session.scalars(
+                select(OddsObservationRecord).join(
+                    latest_odds_times,
+                    and_(
+                        OddsObservationRecord.canonical_series_id
+                        == latest_odds_times.c.canonical_series_id,
+                        OddsObservationRecord.odds_id == latest_odds_times.c.odds_id,
+                        OddsObservationRecord.received_at == latest_odds_times.c.latest_received_at,
+                    ),
+                )
+            )
+        ).all()
+    )
+    odds_by_series: dict[UUID, list[OddsObservationRecord]] = defaultdict(list)
+    for item in odds_rows:
+        if item.canonical_series_id is not None:
+            odds_by_series[item.canonical_series_id].append(item)
+
+    series_id_strings = [str(item) for item in series_ids]
+    snapshots = list(
+        (
+            await session.scalars(
+                select(DecisionSnapshotRecord)
+                .where(
+                    DecisionSnapshotRecord.canonical_map_id.is_(None),
+                    DecisionSnapshotRecord.canonical_payload["identity"]["series_id"]
+                    .as_string()
+                    .in_(series_id_strings),
+                )
+                .order_by(DecisionSnapshotRecord.decision_at.desc())
+            )
+        ).all()
+    )
+    snapshot_by_series: dict[str, DecisionSnapshotRecord] = {}
+    for snapshot in snapshots:
+        identity = snapshot.canonical_payload.get("identity")
+        series_id = identity.get("series_id") if isinstance(identity, dict) else None
+        if isinstance(series_id, str):
+            snapshot_by_series.setdefault(series_id, snapshot)
+
+    history_by_team = await _batch_team_history_payloads(session, team_ids)
+    observed_at = datetime.now(UTC)
+    payloads: list[dict] = []
+    for series in series_rows:
+        team_a = team_by_id.get(series.team_a_id)
+        team_b = team_by_id.get(series.team_b_id)
+        event = event_by_id.get(series.event_id) if series.event_id is not None else None
+        provider_match_id = provider_match_by_series.get(series.id)
+        raybet_match = raybet_by_id.get(provider_match_id)
+        latest_odds = odds_by_series.get(series.id, [])
+        team_order = {
+            team_id: index for index, team_id in enumerate((series.team_a_id, series.team_b_id))
+        }
+        current_market = sorted(
+            latest_odds,
+            key=lambda item: (team_order.get(item.selection_team_id, 2), item.odds_id),
+        )
+        snapshot = snapshot_by_series.get(str(series.id))
+        snapshot_history = snapshot.canonical_payload.get("history", {}) if snapshot else {}
+        snapshot_market = snapshot.canonical_payload.get("market", {}) if snapshot else {}
+        snapshot_quality = snapshot.canonical_payload.get("quality", {}) if snapshot else {}
+        team_a_history = history_by_team.get(series.team_a_id, _empty_team_history_payload())
+        team_b_history = history_by_team.get(series.team_b_id, _empty_team_history_payload())
+        history_cutoffs = [
+            item["knowledge_cutoff"]
+            for item in (team_a_history, team_b_history)
+            if item["knowledge_cutoff"] is not None
+        ]
+        scheduled_at = series.scheduled_at or (
+            raybet_match.scheduled_at if raybet_match is not None else None
+        )
+        current_market_view, selected_legs = _current_market_payload(
+            current_market,
+            series=series,
+            canonical_map_id=None,
+            observed_at=observed_at,
+            live_market_max_age_seconds=live_market_max_age_seconds,
+            market_max_pair_skew_seconds=market_max_pair_skew_seconds,
+        )
+        display_market = list(selected_legs) if selected_legs is not None else current_market
+        payloads.append(
             {
-                "odds_id": item.odds_id,
-                "selection_team_id": item.selection_team_id,
-                "price": item.price,
-                "fair_probability": item.fair_probability,
-                "raw_status": item.raw_status,
-                "received_at": item.received_at,
-                "normalized_status": item.normalized_status,
-                "metadata_version": item.metadata_version,
-                "provider_updated_at": item.provider_updated_at,
-                "age_seconds": elapsed_seconds(observed_at, item.received_at),
-                "market_type": item.market_type,
-                "match_stage": item.match_stage,
-            }
-            for item in display_market
-        ],
-        "market_quality": (
-            current_market_view.get("quality") if current_market_view is not None else None
-        ),
-        "current_market_view": current_market_view,
-        "snapshot_market_quality": (
-            snapshot_market.get("quality") if isinstance(snapshot_market, dict) else None
-        ),
-        "draft": None,
-        "live": None,
-        "sync": None,
-        "latest_snapshot": (
-            {
-                "id": snapshot.id,
-                "decision_at": snapshot.decision_at,
-                "created_at": snapshot.created_at,
-                "mode": snapshot.mode,
-                "snapshot_hash": snapshot.snapshot_hash,
-                "quality": snapshot_quality,
+                "entity_type": "SERIES",
+                "identity_status": "PENDING_MAP_IDENTITY",
+                "id": series.id,
+                "series_id": series.id,
+                "canonical_event_id": series.event_id,
+                "stage_key": series.stage_key,
+                "canonical_map_id": None,
+                "map_number": None,
+                "valve_match_id": None,
+                "best_of": series.best_of,
+                "series_score": {"team_a": 0, "team_b": 0},
+                "series_maps": [],
+                "scheduled_at": scheduled_at,
+                "phase": (
+                    "PREMATCH"
+                    if scheduled_at is not None
+                    and ensure_utc(scheduled_at) >= ensure_utc(observed_at)
+                    else "UNKNOWN"
+                ),
+                "provider_match_id": raybet_match.provider_match_id if raybet_match else None,
+                "tournament_name": raybet_match.tournament_name
+                if raybet_match
+                else (event.name if event else None),
+                "round": raybet_match.round
+                if raybet_match
+                else (f"BO{series.best_of}" if series.best_of else None),
+                "raw_status": raybet_match.raw_status if raybet_match else None,
+                "provider_observed_at": raybet_match.observed_at if raybet_match else None,
+                "team_a": {"id": team_a.id, "name": team_a.name} if team_a else None,
+                "team_b": {"id": team_b.id, "name": team_b.name} if team_b else None,
+                "market": [
+                    {
+                        "odds_id": item.odds_id,
+                        "selection_team_id": item.selection_team_id,
+                        "price": item.price,
+                        "fair_probability": item.fair_probability,
+                        "raw_status": item.raw_status,
+                        "received_at": item.received_at,
+                        "normalized_status": item.normalized_status,
+                        "metadata_version": item.metadata_version,
+                        "provider_updated_at": item.provider_updated_at,
+                        "age_seconds": elapsed_seconds(observed_at, item.received_at),
+                        "market_type": item.market_type,
+                        "match_stage": item.match_stage,
+                    }
+                    for item in display_market
+                ],
                 "market_quality": (
+                    current_market_view.get("quality") if current_market_view is not None else None
+                ),
+                "current_market_view": current_market_view,
+                "snapshot_market_quality": (
                     snapshot_market.get("quality") if isinstance(snapshot_market, dict) else None
                 ),
-                "history_coverage": (
-                    snapshot_history.get("coverage") if isinstance(snapshot_history, dict) else None
+                "draft": None,
+                "live": None,
+                "sync": None,
+                "latest_snapshot": (
+                    {
+                        "id": snapshot.id,
+                        "decision_at": snapshot.decision_at,
+                        "created_at": snapshot.created_at,
+                        "mode": snapshot.mode,
+                        "snapshot_hash": snapshot.snapshot_hash,
+                        "quality": snapshot_quality,
+                        "market_quality": (
+                            snapshot_market.get("quality")
+                            if isinstance(snapshot_market, dict)
+                            else None
+                        ),
+                        "history_coverage": (
+                            snapshot_history.get("coverage")
+                            if isinstance(snapshot_history, dict)
+                            else None
+                        ),
+                    }
+                    if snapshot
+                    else None
                 ),
+                "decisions": [],
+                "historical_prewarm": {
+                    "team_strength_ready_count": sum(
+                        item.get("base_rating") is not None
+                        for item in (team_a_history, team_b_history)
+                        if item
+                    ),
+                    "player_form_ready_count": 0,
+                    "player_hero_ready_count": 0,
+                    "latest_knowledge_cutoff": max(history_cutoffs) if history_cutoffs else None,
+                },
             }
-            if snapshot
-            else None
-        ),
-        "decisions": [],
-        "historical_prewarm": {
-            "team_strength_ready_count": sum(
-                item.get("base_rating") is not None
-                for item in (team_a_history, team_b_history)
-                if item
-            ),
-            "player_form_ready_count": 0,
-            "player_hero_ready_count": 0,
-            "latest_knowledge_cutoff": max(history_cutoffs) if history_cutoffs else None,
-        },
+        )
+    return payloads
+
+
+def _empty_team_history_payload() -> dict:
+    return {
+        "base_rating": None,
+        "recent_form": None,
+        "recent_form_confidence": None,
+        "last_5": None,
+        "last_10": None,
+        "last_20": None,
+        "roster_stability": None,
+        "exact_roster_maps": None,
+        "knowledge_cutoff": None,
     }
+
+
+async def _batch_team_history_payloads(
+    session: AsyncSession,
+    team_ids: Sequence[UUID],
+    *,
+    as_of: datetime | None = None,
+) -> dict[UUID, dict]:
+    if not team_ids:
+        return {}
+    cutoff = as_of or datetime.now(UTC)
+    latest_rating_times = (
+        select(
+            TeamRatingSnapshotRecord.canonical_team_id,
+            func.max(TeamRatingSnapshotRecord.knowledge_cutoff).label("latest_knowledge_cutoff"),
+        )
+        .where(
+            TeamRatingSnapshotRecord.canonical_team_id.in_(team_ids),
+            TeamRatingSnapshotRecord.knowledge_cutoff <= cutoff,
+        )
+        .group_by(TeamRatingSnapshotRecord.canonical_team_id)
+        .subquery()
+    )
+    ratings = list(
+        (
+            await session.scalars(
+                select(TeamRatingSnapshotRecord).join(
+                    latest_rating_times,
+                    and_(
+                        TeamRatingSnapshotRecord.canonical_team_id
+                        == latest_rating_times.c.canonical_team_id,
+                        TeamRatingSnapshotRecord.knowledge_cutoff
+                        == latest_rating_times.c.latest_knowledge_cutoff,
+                    ),
+                )
+            )
+        ).all()
+    )
+    latest_form_times = (
+        select(
+            TeamFormSnapshotRecord.canonical_team_id,
+            func.max(TeamFormSnapshotRecord.knowledge_cutoff).label("latest_knowledge_cutoff"),
+        )
+        .where(
+            TeamFormSnapshotRecord.canonical_team_id.in_(team_ids),
+            TeamFormSnapshotRecord.knowledge_cutoff <= cutoff,
+        )
+        .group_by(TeamFormSnapshotRecord.canonical_team_id)
+        .subquery()
+    )
+    forms = list(
+        (
+            await session.scalars(
+                select(TeamFormSnapshotRecord).join(
+                    latest_form_times,
+                    and_(
+                        TeamFormSnapshotRecord.canonical_team_id
+                        == latest_form_times.c.canonical_team_id,
+                        TeamFormSnapshotRecord.knowledge_cutoff
+                        == latest_form_times.c.latest_knowledge_cutoff,
+                    ),
+                )
+            )
+        ).all()
+    )
+    rating_by_team: dict[UUID, TeamRatingSnapshotRecord] = {}
+    for item in ratings:
+        rating_by_team.setdefault(item.canonical_team_id, item)
+    form_by_team: dict[UUID, TeamFormSnapshotRecord] = {}
+    for item in forms:
+        form_by_team.setdefault(item.canonical_team_id, item)
+
+    def record(form: TeamFormSnapshotRecord | None, wins_field: str, maps_field: str) -> str | None:
+        if form is None:
+            return None
+        wins = getattr(form, wins_field)
+        return f"{wins}-{getattr(form, maps_field) - wins}"
+
+    payloads: dict[UUID, dict] = {}
+    for team_id in team_ids:
+        rating = rating_by_team.get(team_id)
+        form = form_by_team.get(team_id)
+        payloads[team_id] = {
+            "base_rating": rating.rating if rating is not None else None,
+            "recent_form": form.recent_form if form is not None else None,
+            "recent_form_confidence": (
+                sample_confidence(form.last_20_maps) if form is not None else None
+            ),
+            "last_5": record(form, "last_5_wins", "last_5_maps"),
+            "last_10": record(form, "last_10_wins", "last_10_maps"),
+            "last_20": record(form, "last_20_wins", "last_20_maps"),
+            "roster_stability": form.roster_stability if form is not None else None,
+            "exact_roster_maps": form.exact_roster_maps if form is not None else None,
+            "knowledge_cutoff": max(
+                (item.knowledge_cutoff for item in (rating, form) if item is not None),
+                default=None,
+            ),
+        }
+    return payloads
 
 
 async def _latest_raybet_match(session: AsyncSession, series_id: UUID | None) -> RayBetMatch | None:

@@ -7,6 +7,7 @@ from uuid import UUID
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.domain.competition import classify_stage
 from app.identity.aliases import equivalent_team_aliases, normalize_alias
 from app.identity.resolver import IdentityAmbiguousError
 from app.models import (
@@ -138,6 +139,7 @@ class LiquipediaCanonicalProjector:
                 team_a_id=team_a_id,
                 team_b_id=team_b_id,
                 best_of=observation.best_of,
+                stage_key=classify_stage(observation.stage),
                 scheduled_at=observation.scheduled_at,
             )
             session.add(series)
@@ -280,5 +282,7 @@ class LiquipediaCanonicalProjector:
 def _apply_schedule(series: CanonicalSeries, observation: LiquipediaSeriesObservation) -> None:
     if observation.best_of is not None:
         series.best_of = observation.best_of
+    if observation.stage is not None:
+        series.stage_key = classify_stage(observation.stage)
     if observation.scheduled_at is not None:
         series.scheduled_at = observation.scheduled_at

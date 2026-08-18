@@ -3,38 +3,36 @@ import type { MapSummary } from "../api";
 type TeamIdentity = MapSummary["team_a"];
 
 const VALVE_TEAM_LOGO_BASE = "https://steamcdn-a.akamaihd.net/apps/dota2/images/team_logos";
+const TI2026_ASSET_BASE = "https://cdn.steamstatic.com/apps/dota2/images/dota_react/international2026";
+const TI2026_TEAM_LOGO_BASE = `${TI2026_ASSET_BASE}/teamlogos`;
 
-const TEAM_NAME_TO_VALVE_ID: Record<string, string> = {
+// Valve's TI2026 page is the authoritative source for the teams competing in
+// this event. Several organizations registered a different team ID this year,
+// so the generic historical CDN path can show an obsolete crest.
+const TI2026_TEAM_NAME_TO_ID: Record<string, string> = {
+  "aurora": "9467224",
+  "aurora gaming": "9467224",
+  "boomboys": "8255888",
+  "gamerlegion": "9964962",
+  "huligani": "10149530",
+  "iron wing": "10150413",
+  "lgd": "10150538",
+  "lgd gaming": "10150538",
+  "nigma": "10136357",
+  "nigma galaxy": "10136357",
+  "og": "2586976",
+  "team falcons": "9247354",
+  "falcons": "9247354",
   "team liquid": "2163",
   liquid: "2163",
-  "team spirit": "711938",
-  spirit: "711938",
-  "gaimin gladiators": "8599101",
-  gladiators: "8599101",
-  "betboom team": "8254400",
-  betboom: "8254400",
-  "xtreme gaming": "8261883",
-  xtreme: "8261883",
-  "aurora gaming": "8894263",
-  aurora: "8894263",
-  "team falcons": "9247354",
-  falcons: "9247354",
-  "tundra esports": "8255888",
-  tundra: "8255888",
-  og: "2586976",
-  parivision: "9579040",
-  "virtus.pro": "1883502",
-  "virtus pro": "1883502",
-  "lgd gaming": "15",
-  lgd: "15",
-  "team secret": "1838315",
-  secret: "1838315",
-  "natus vincere": "36",
-  navi: "36",
-  "azure ray": "8948704",
-  "talon esports": "8567878",
-  talon: "8567878",
-  "boom esports": "7408018"
+  "team resilience": "5017210",
+  "team spirit": "7119388",
+  spirit: "7119388",
+  "team vision": "9572001",
+  "team yandex": "9823272",
+  "vici gaming": "726228",
+  "xtreme": "8261500",
+  "xtreme gaming": "8261500"
 };
 
 export interface OfficialEventArtwork {
@@ -44,10 +42,10 @@ export interface OfficialEventArtwork {
   objectPosition?: string;
 }
 
-const VALVE_AEGIS: OfficialEventArtwork = {
-  src: "https://cdn.steamstatic.com/apps/dota2/images/aegis/aegis_front.jpg",
+const TI2026_ARTWORK: OfficialEventArtwork = {
+  src: `${TI2026_ASSET_BASE}/ti2026_logo.png`,
   sourceName: "Valve / Dota 2",
-  sourceUrl: "https://www.dota2.com/aegisofchampions",
+  sourceUrl: "https://www.dota2.com/esports/ti15/schedule",
   objectPosition: "50% 50%"
 };
 
@@ -60,29 +58,32 @@ export function getValveTeamLogoUrl(teamId: string | number | null | undefined):
 
 export function getOfficialTeamLogoUrl(team: TeamIdentity): string | null {
   if (!team) return null;
+  const current = getOfficialTeamLogoUrlByName(team.name);
+  if (current) return current;
+
   const direct = getValveTeamLogoUrl(team.id);
   if (direct) return direct;
 
-  const normalized = team.name?.trim().toLowerCase();
-  if (!normalized) return null;
-  for (const [name, teamId] of Object.entries(TEAM_NAME_TO_VALVE_ID)) {
-    if (normalized === name || normalized.includes(name)) {
-      return getValveTeamLogoUrl(teamId);
-    }
-  }
   return null;
 }
 
+export function getOfficialTeamLogoUrlByName(
+  teamName: string | null | undefined
+): string | null {
+  const normalized = teamName?.trim().toLowerCase().replace(/\s+/g, " ");
+  if (!normalized) return null;
+  const teamId = TI2026_TEAM_NAME_TO_ID[normalized];
+  return teamId ? `${TI2026_TEAM_LOGO_BASE}/${teamId}.png` : null;
+}
+
 export function getOfficialEventArtwork(eventName: string): OfficialEventArtwork | null {
-  const normalized = eventName.trim().toLowerCase();
-  if (
-    normalized.includes("the international") ||
-    normalized.includes("国际邀请赛") ||
-    /(^|\s|-)ti\s*\d+/i.test(eventName)
-  ) {
-    return VALVE_AEGIS;
-  }
-  return null;
+  return isTheInternational2026(eventName) ? TI2026_ARTWORK : null;
+}
+
+export function getOfficialEventDisplayName(eventName: string): string {
+  const normalized = eventName.trim();
+  if (!normalized) return "Dota 2";
+  return isTheInternational2026(normalized) ? "The International 2026" : normalized;
 }
 
 export function teamAbbreviation(team: TeamIdentity, fallbackName?: string): string {
@@ -95,9 +96,20 @@ export function teamAbbreviation(team: TeamIdentity, fallbackName?: string): str
 }
 
 export function eventAbbreviation(eventName: string): string {
+  if (isTheInternational2026(eventName)) return "TI15";
   const ti = eventName.match(/TI\s*\d+/i);
   if (ti) return ti[0].replace(/\s+/g, "").toUpperCase();
   const words = eventName.match(/[A-Za-z0-9]+/g) ?? [];
   if (words.length >= 2) return words.map((word) => word[0]).join("").slice(0, 4).toUpperCase();
   return eventName.replace(/[^A-Za-z0-9\u4e00-\u9fff]/g, "").slice(0, 3).toUpperCase() || "D2";
+}
+
+function isTheInternational2026(eventName: string): boolean {
+  const normalized = eventName.trim().toLowerCase().replace(/\s+/g, " ");
+  return (
+    normalized.includes("the international 2026") ||
+    normalized.includes("international2026") ||
+    /(^|[^a-z0-9])ti\s*15([^a-z0-9]|$)/i.test(normalized) ||
+    /2026\s*国际邀请赛/.test(normalized)
+  );
 }

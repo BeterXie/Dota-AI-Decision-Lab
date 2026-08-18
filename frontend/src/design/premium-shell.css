@@ -26,7 +26,7 @@
   color: var(--product-text);
   font-size: clamp(30px, 4vw, 46px);
   line-height: 1.12;
-  letter-spacing: -0.045em;
+  letter-spacing: 0;
 }
 
 .premium-product-intro p {
@@ -56,7 +56,6 @@
 
 /* The 2.0 shell owns the first-screen product explanation. Keep the mature
    analytics components below it, but remove their older engineering-heavy intro. */
-.premium-performance .performance-intro,
 .premium-review .review-intro {
   display: none;
 }
@@ -206,7 +205,7 @@
   color: var(--product-text);
   font-size: clamp(28px, 4vw, 42px);
   line-height: 1.15;
-  letter-spacing: -0.04em;
+  letter-spacing: 0;
 }
 
 .product-access-card > p {

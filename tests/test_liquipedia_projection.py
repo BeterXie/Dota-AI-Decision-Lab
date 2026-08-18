@@ -63,6 +63,9 @@ async def test_liquipedia_directory_and_schedule_seed_canonical_identity_idempot
     async with factory() as session:
         assert await session.scalar(select(func.count()).select_from(CanonicalEvent)) == 1
         assert await session.scalar(select(func.count()).select_from(CanonicalSeries)) == 1
+        canonical = await session.scalar(select(CanonicalSeries))
+        assert canonical is not None
+        assert canonical.stage_key == "GROUP_STAGE"
         assert await session.scalar(select(func.count()).select_from(CanonicalTeam)) == 2
         assert await session.scalar(select(func.count()).select_from(ProviderEventMapping)) == 1
         assert await session.scalar(select(func.count()).select_from(ProviderMatchMapping)) == 1
@@ -150,6 +153,7 @@ async def test_liquipedia_reuses_existing_raybet_team_aliases_and_nearby_series(
         canonical = await session.get(CanonicalSeries, existing_series_id)
         assert canonical is not None
         assert canonical.best_of == 3
+        assert canonical.stage_key == "GROUP_STAGE"
         assert canonical.scheduled_at.replace(tzinfo=UTC) == scheduled_at
         raybet_mappings = list(
             (

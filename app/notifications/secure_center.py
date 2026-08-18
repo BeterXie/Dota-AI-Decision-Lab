@@ -12,7 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.models import UserAccountRecord
 from app.entitlements import REALTIME_NOTIFICATIONS_ENTITLEMENT, EntitlementService
-from app.models import CanonicalMap, DecisionSnapshotRecord
+from app.models import CanonicalMap, CanonicalSeries, DecisionSnapshotRecord
 from app.notifications.center import (
     EVENT_AI_DECISION,
     PAIRABLE_CHANNELS,
@@ -135,6 +135,7 @@ class NotificationCenterService(BaseNotificationCenterService):
         *,
         event_type: str = EVENT_AI_DECISION,
         now: datetime | None = None,
+        canonical_event_id: UUID | None = None,
         canonical_series_id: UUID | None = None,
         canonical_map_id: UUID | None = None,
     ) -> list[NotificationBindingRecord]:
@@ -163,6 +164,7 @@ class NotificationCenterService(BaseNotificationCenterService):
             session,
             {item.user_id for item in bindings},
             REALTIME_NOTIFICATIONS_ENTITLEMENT,
+            canonical_event_id=canonical_event_id,
             canonical_series_id=canonical_series_id,
             canonical_map_id=canonical_map_id,
             now=current,
@@ -197,11 +199,14 @@ class NotificationCenterService(BaseNotificationCenterService):
         event_type: str = EVENT_AI_DECISION,
     ) -> list[NotificationDeliveryRecord]:
         normalized_channel = normalize_channel(channel)
-        canonical_series_id, canonical_map_id = await _snapshot_scope(session, snapshot_id)
+        canonical_event_id, canonical_series_id, canonical_map_id = await _snapshot_scope(
+            session, snapshot_id
+        )
         bindings = await self.eligible_bindings(
             session,
             normalized_channel,
             event_type=event_type,
+            canonical_event_id=canonical_event_id,
             canonical_series_id=canonical_series_id,
             canonical_map_id=canonical_map_id,
         )
@@ -248,7 +253,7 @@ class NotificationCenterService(BaseNotificationCenterService):
             if delivery.status in {"SENT", "EXPIRED", "CANCELLED"}:
                 return None
             binding = await session.get(NotificationBindingRecord, delivery.binding_id)
-            canonical_series_id, canonical_map_id = await _snapshot_scope(
+            canonical_event_id, canonical_series_id, canonical_map_id = await _snapshot_scope(
                 session, delivery.snapshot_id
             )
             if binding is None or not await self._binding_is_allowed_for_resource(
@@ -256,6 +261,7 @@ class NotificationCenterService(BaseNotificationCenterService):
                 binding,
                 event_type=delivery.event_type,
                 now=now,
+                canonical_event_id=canonical_event_id,
                 canonical_series_id=canonical_series_id,
                 canonical_map_id=canonical_map_id,
             ):
@@ -303,6 +309,7 @@ class NotificationCenterService(BaseNotificationCenterService):
         *,
         event_type: str,
         now: datetime,
+        canonical_event_id: UUID | None = None,
         canonical_series_id: UUID | None = None,
         canonical_map_id: UUID | None = None,
     ) -> bool:
@@ -322,6 +329,7 @@ class NotificationCenterService(BaseNotificationCenterService):
             session,
             {binding.user_id},
             REALTIME_NOTIFICATIONS_ENTITLEMENT,
+            canonical_event_id=canonical_event_id,
             canonical_series_id=canonical_series_id,
             canonical_map_id=canonical_map_id,
             now=now,
@@ -343,14 +351,23 @@ class NotificationCenterService(BaseNotificationCenterService):
 async def _snapshot_scope(
     session: AsyncSession,
     snapshot_id: UUID,
-) -> tuple[UUID | None, UUID | None]:
+) -> tuple[UUID | None, UUID | None, UUID | None]:
     snapshot = await session.get(DecisionSnapshotRecord, snapshot_id)
     if snapshot is None or snapshot.canonical_map_id is None:
-        return None, None
+        return None, None, None
     canonical_map = await session.get(CanonicalMap, snapshot.canonical_map_id)
     if canonical_map is None:
-        return None, snapshot.canonical_map_id
-    return canonical_map.series_id, canonical_map.id
+        return None, None, snapshot.canonical_map_id
+    canonical_series = (
+        await session.get(CanonicalSeries, canonical_map.series_id)
+        if canonical_map.series_id is not None
+        else None
+    )
+    return (
+        canonical_series.event_id if canonical_series is not None else None,
+        canonical_map.series_id,
+        canonical_map.id,
+    )
 
 
 def _pairing_digest(code: str) -> str:

@@ -24,15 +24,15 @@ export const TeamCrest: React.FC<{
   const [failed, setFailed] = React.useState(false);
   const directory = useTeamDirectory();
   const profile = team ? directory.data?.find((item) => item.id === team.id) : undefined;
+  const officialCompetitionLogo = getOfficialTeamLogoUrl(team);
   const registryLogo = profile?.logo_url || getValveTeamLogoUrl(profile?.valve_team_id);
-  const compatibilityLogo = getOfficialTeamLogoUrl(team);
-  const logo = registryLogo || compatibilityLogo;
-  const logoSource = profile?.logo_url
-    ? profile.logo_source || "team-registry"
-    : profile?.valve_team_id
-      ? "valve-steam"
-      : compatibilityLogo
-        ? "valve-steam-compat"
+  const logo = officialCompetitionLogo || registryLogo;
+  const logoSource = officialCompetitionLogo
+    ? "valve-ti2026"
+    : profile?.logo_url
+      ? profile.logo_source || "team-registry"
+      : profile?.valve_team_id
+        ? "valve-steam"
         : "fallback";
   const name = team?.name || fallbackName || "TBD";
   const href = link ? teamHref(profile?.slug) : null;

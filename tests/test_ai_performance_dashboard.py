@@ -3,9 +3,22 @@ from decimal import Decimal
 from uuid import uuid4
 
 import pytest
+from sqlalchemy import event
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.models import AiDecisionRecord, DecisionEvaluationRecord, DecisionSnapshotRecord
-from app.web.performance import _build_experiment_groups, _decision_trace_payload
+from app.db import Base
+from app.models import (
+    AiDecisionRecord,
+    CanonicalMap,
+    DecisionEvaluationRecord,
+    DecisionSnapshotRecord,
+)
+from app.web.performance import (
+    _build_experiment_groups,
+    _decision_trace_payload,
+    build_ai_performance_payload,
+)
+from app.web.premium import _map_ai_decisions_payload
 
 NOW = datetime(2026, 8, 17, 12, 0, tzinfo=UTC)
 
@@ -159,3 +172,127 @@ def test_decision_trace_exposes_reproducible_identity_and_latency_chain() -> Non
     assert payload["trace"]["end_to_end_seconds"] == pytest.approx(4.5)
     assert payload["tokens"]["cached_input"] == 700
     assert payload["evaluation"]["unit_pnl"] == pytest.approx(1.2)
+
+
+@pytest.mark.asyncio
+async def test_performance_query_pages_without_loading_raw_response() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    first = _decision(prompt_version="prompt-v1")
+    second = _decision(prompt_version="prompt-v2", ai_input_hash="input-hash-b")
+    second.snapshot_id = first.snapshot_id
+    second.snapshot_hash = first.snapshot_hash
+    first.raw_response = {"provider_payload": "large-private-response"}
+    second.raw_response = {"provider_payload": "large-private-response"}
+    snapshot = DecisionSnapshotRecord(
+        id=first.snapshot_id,
+        canonical_map_id=None,
+        decision_at=NOW,
+        created_at=NOW,
+        mode="PREMATCH",
+        canonical_payload={},
+        snapshot_hash=first.snapshot_hash,
+    )
+    async with factory.begin() as session:
+        session.add_all((snapshot, first, second))
+
+    statements: list[str] = []
+
+    def capture(*args) -> None:
+        statement = args[2]
+        if statement.lstrip().upper().startswith("SELECT"):
+            statements.append(statement)
+
+    event.listen(engine.sync_engine, "before_cursor_execute", capture)
+    try:
+        async with factory() as session:
+            payload = await build_ai_performance_payload(session, limit=1)
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", capture)
+
+    decision_select = next(
+        statement for statement in statements if "FROM ai_decisions" in statement
+    )
+    assert "raw_response" not in decision_select
+    assert payload["pagination"] == {
+        "limit": 1,
+        "offset": 0,
+        "returned": 1,
+        "has_more": True,
+        "next_offset": 1,
+    }
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_premium_ai_projection_skips_unrelated_map_detail_tables() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    async with factory.begin() as session:
+        canonical_map = CanonicalMap()
+        session.add(canonical_map)
+        await session.flush()
+
+    statements: list[str] = []
+
+    def capture(*args) -> None:
+        statement = args[2]
+        if statement.lstrip().upper().startswith("SELECT"):
+            statements.append(statement)
+
+    event.listen(engine.sync_engine, "before_cursor_execute", capture)
+    try:
+        async with factory() as session:
+            payload = await _map_ai_decisions_payload(session, canonical_map)
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", capture)
+
+    assert payload["latest_snapshot"] is None
+    assert len(statements) == 1
+    assert "FROM decision_snapshots" in statements[0]
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_public_postmatch_projection_keeps_decisions_but_drops_diagnostics() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    decision = _decision()
+    assert isinstance(decision.normalized_response, dict)
+    decision.normalized_response["stake"] = 2.0
+    canonical_map = CanonicalMap(id=uuid4())
+    snapshot = DecisionSnapshotRecord(
+        id=decision.snapshot_id,
+        canonical_map_id=canonical_map.id,
+        decision_at=NOW,
+        created_at=NOW,
+        mode="LIVE",
+        canonical_payload={
+            "quality": {"eligible": True, "private_quality": "hidden"},
+            "private_input": "hidden",
+        },
+        snapshot_hash=decision.snapshot_hash,
+    )
+    evaluation = _evaluation(decision, correct=True, unit_pnl="1.20")
+    async with factory.begin() as session:
+        session.add_all((canonical_map, snapshot, decision, evaluation))
+
+    async with factory() as session:
+        payload = await _map_ai_decisions_payload(session, canonical_map, public=True)
+
+    public_decision = payload["decisions"][0]
+    assert public_decision["decision"]["action"] == "BUY_A"
+    assert "snapshot_hash" not in public_decision
+    assert "bankroll_before" not in public_decision
+    assert "stake" not in public_decision["decision"]
+    assert "total_tokens" not in public_decision
+    assert payload["snapshot_payload"] is None
+    assert payload["future_odds"] == []
+    assert payload["latest_snapshot"]["quality"] == {"eligible": True}
+    await engine.dispose()

@@ -204,25 +204,21 @@ class ApplicationJobHandlers:
                 )
             cutoff = datetime.now(UTC)
             sync_results = []
-            sync_errors = []
-            for team_id in team_ids:
-                try:
-                    async with session.begin_nested():
-                        sync_results.append(
-                            await self._d.historical_sync.sync_team(
-                                session,
-                                canonical_team_id=team_id,
-                                before=cutoff,
-                                limit=self._d.settings.historical_prewarm_maps,
-                            )
+            try:
+                for team_id in team_ids:
+                    sync_results.append(
+                        await self._d.historical_sync.sync_team(
+                            session,
+                            canonical_team_id=team_id,
+                            before=cutoff,
+                            limit=self._d.settings.historical_prewarm_maps,
                         )
-                except Exception as exc:
-                    sync_errors.append(f"{type(exc).__name__}: {exc}")
-            if not sync_results:
-                message = "; ".join(sync_errors) or "historical sync produced no team result"
+                    )
+            except Exception as exc:
+                message = f"{type(exc).__name__}: {exc}"
                 await self._d.health.dependency("HISTORY", "DEGRADED", message=message)
                 await self._d.health.dependency("STRATZ", "DEGRADED", message=message)
-                return
+                raise RuntimeError(f"historical sync incomplete: {message}") from exc
             coverage = {
                 field: sum(getattr(item, field) for item in sync_results)
                 for field in (
@@ -240,8 +236,7 @@ class ApplicationJobHandlers:
             }
             await self._d.health.dependency(
                 "HISTORY",
-                "DEGRADED" if sync_errors else "READY",
-                message="; ".join(sync_errors) if sync_errors else None,
+                "READY",
                 **coverage,
             )
             if self._d.settings.stratz_token:
@@ -249,8 +244,7 @@ class ApplicationJobHandlers:
                 identity_missing = coverage["identity_missing_count"]
                 await self._d.health.dependency(
                     "STRATZ",
-                    "DEGRADED" if fallback_count or sync_errors else "READY",
-                    message="; ".join(sync_errors) if sync_errors else None,
+                    "DEGRADED" if fallback_count else "READY",
                     provider_fallback_count=fallback_count,
                     identity_missing_count=identity_missing,
                     maps_fetched=coverage["maps_fetched"],
@@ -826,6 +820,10 @@ class ApplicationJobHandlers:
                     response.payload,
                     fetched_at=response.received_at,
                 )
+                if str(bundle.match.provider_match_id) != str(valve_match_id):
+                    raise ValueError(
+                        "postmatch provider match identity does not match requested Valve match"
+                    )
                 if bundle.match.winner_team_id is None:
                     raise ValueError("winner is not published")
                 provider_team_ids = {

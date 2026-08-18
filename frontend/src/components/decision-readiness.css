@@ -39,7 +39,7 @@
   display: block;
   margin-bottom: 4px;
   font-size: 22px;
-  letter-spacing: -0.03em;
+  letter-spacing: 0;
 }
 
 .readiness-summary span {
@@ -96,7 +96,7 @@
   margin-top: 7px;
   margin-right: 5px;
   font-size: 22px;
-  letter-spacing: -0.04em;
+  letter-spacing: 0;
 }
 
 .readiness-stage small {

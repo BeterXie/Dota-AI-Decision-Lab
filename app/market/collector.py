@@ -157,7 +157,7 @@ class RayBetOddsCollector:
                     fair_probability=None,
                     overround=None,
                     raw_status=delta.raw_status,
-                    normalized_status="UNKNOWN",
+                    normalized_status=delta.normalized_status,
                     metadata_version=metadata.refreshed_at.isoformat(),
                     provider_updated_at=delta.provider_updated_at,
                     received_at=received,

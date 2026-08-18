@@ -11,16 +11,15 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.auth.models import UserAccountRecord
-from app.billing.models import BillingCheckoutRecord
 from app.entitlements import (
     ACCESS_SCOPE_GLOBAL,
     PREMIUM_ENTITLEMENTS,
     UserEntitlementRecord,
 )
 from app.promotions.models import (
+    CompetitionPassPurchaseRecord,
     ReferralAttributionRecord,
     ReferralCodeRecord,
-    SeriesPassPurchaseRecord,
 )
 
 REFERRAL_STATUS_CLAIMED = "CLAIMED"
@@ -421,24 +420,13 @@ class PromotionService:
 
     async def _paid_user_for_transaction(self, transaction_ref: str) -> UUID | None:
         async with self._session_factory() as session:
-            global_user = await session.scalar(
-                select(BillingCheckoutRecord.user_id)
-                .where(
-                    BillingCheckoutRecord.provider == "paddle",
-                    BillingCheckoutRecord.checkout_ref == transaction_ref,
-                    BillingCheckoutRecord.status == "COMPLETED",
-                )
-                .limit(1)
-            )
-            if global_user is not None:
-                return global_user
             return await session.scalar(
-                select(SeriesPassPurchaseRecord.user_id)
+                select(CompetitionPassPurchaseRecord.user_id)
                 .where(
-                    SeriesPassPurchaseRecord.provider == "paddle",
-                    SeriesPassPurchaseRecord.transaction_ref == transaction_ref,
-                    SeriesPassPurchaseRecord.status == "ACTIVE",
-                    SeriesPassPurchaseRecord.payment_blocked.is_(False),
+                    CompetitionPassPurchaseRecord.provider == "paddle",
+                    CompetitionPassPurchaseRecord.transaction_ref == transaction_ref,
+                    CompetitionPassPurchaseRecord.status == "ACTIVE",
+                    CompetitionPassPurchaseRecord.payment_blocked.is_(False),
                 )
                 .limit(1)
             )
@@ -454,25 +442,14 @@ class PromotionService:
 
 
 async def _has_prior_paid_purchase(session: AsyncSession, user_id: UUID) -> bool:
-    global_purchase = await session.scalar(
-        select(BillingCheckoutRecord.id)
-        .where(
-            BillingCheckoutRecord.user_id == user_id,
-            BillingCheckoutRecord.provider == "paddle",
-            BillingCheckoutRecord.status == "COMPLETED",
-        )
-        .limit(1)
-    )
-    if global_purchase is not None:
-        return True
     series_purchase = await session.scalar(
-        select(SeriesPassPurchaseRecord.id)
+        select(CompetitionPassPurchaseRecord.id)
         .where(
-            SeriesPassPurchaseRecord.user_id == user_id,
-            SeriesPassPurchaseRecord.provider == "paddle",
+            CompetitionPassPurchaseRecord.user_id == user_id,
+            CompetitionPassPurchaseRecord.provider == "paddle",
             or_(
-                SeriesPassPurchaseRecord.completed_at.is_not(None),
-                SeriesPassPurchaseRecord.status.in_({"ACTIVE", "BLOCKED"}),
+                CompetitionPassPurchaseRecord.completed_at.is_not(None),
+                CompetitionPassPurchaseRecord.status.in_({"ACTIVE", "BLOCKED"}),
             ),
         )
         .limit(1)

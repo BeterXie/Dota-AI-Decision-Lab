@@ -45,32 +45,32 @@ export function NotificationCenterPage({ userEmail }: { userEmail: string | null
   });
 
   if (center.isLoading) {
-    return <main className="notification-page"><div className="notification-loading">Notification Center…</div></main>;
+    return <div className="notification-page"><div className="notification-loading">Notification Center…</div></div>;
   }
   if (center.error || !center.data) {
     return (
-      <main className="notification-page">
+      <div className="notification-page">
         <section className="notification-hero">
           <a className="notification-back" href="/">← {locale === "zh-CN" ? "返回首页" : "Back home"}</a>
           <h1>Notification Center</h1>
           <p role="alert">{locale === "zh-CN" ? "通知设置加载失败，请刷新重试。" : "Failed to load notification settings."}</p>
         </section>
-      </main>
+      </div>
     );
   }
 
   const state = center.data;
   return (
-    <main className="notification-page">
+    <div className="notification-page">
       <section className="notification-hero">
         <div>
           <a className="notification-back" href="/">← {locale === "zh-CN" ? "返回首页" : "Back home"}</a>
-          <div className="notification-eyebrow">REALTIME PRO</div>
+          <div className="notification-eyebrow">REALTIME NOTIFICATIONS</div>
           <h1>Notification Center</h1>
           <p>
             {locale === "zh-CN"
-              ? "选择你希望接收比赛提醒的渠道。发送前会再次检查账号权限，失效的会员不会继续收到付费通知。"
-              : "Choose where match alerts should reach you. Membership is checked again before each paid notification is delivered."}
+              ? "选择你希望接收比赛提醒的渠道。发送前会再次检查账号权限，失效的 Pass 不会继续收到付费通知。"
+              : "Choose where match alerts should reach you. Pass access is checked again before each paid notification is delivered."}
           </p>
         </div>
         <div className="notification-account">
@@ -121,7 +121,7 @@ export function NotificationCenterPage({ userEmail }: { userEmail: string | null
           </div>
         )}
       </section>
-    </main>
+    </div>
   );
 }
 

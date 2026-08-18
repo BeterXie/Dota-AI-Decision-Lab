@@ -3,6 +3,7 @@ import type { MapDetail, MapSummary } from "../api";
 import { useI18n } from "../i18n";
 import { getTeamAbbreviation, getTeamLogoUrl } from "../utils/dotaAssets";
 import { resolveVerifiedMapSides } from "../utils/mapSides";
+import { getOfficialEventDisplayName } from "../utils/officialVisuals";
 import { formatOdds, getMatchDisplayPhase, median, primaryMarketPair } from "../utils/presentation";
 
 interface PlayerMatchHeaderProps {
@@ -17,6 +18,9 @@ export const PlayerMatchHeader: React.FC<PlayerMatchHeaderProps> = ({ match, onS
   const { locale, t } = useI18n();
   const teamA = match.team_a?.name || t("unknownTeam");
   const teamB = match.team_b?.name || t("unknownTeam");
+  const tournamentName = getOfficialEventDisplayName(
+    match.tournament_name || t("unknownTournament")
+  );
   const teamALogo = getTeamLogoUrl(teamA);
   const teamBLogo = getTeamLogoUrl(teamB);
   const pair = primaryMarketPair(match.market, match.team_a?.id, match.team_b?.id);
@@ -60,7 +64,7 @@ export const PlayerMatchHeader: React.FC<PlayerMatchHeaderProps> = ({ match, onS
     <section className="match-hero-header player-match-header">
       <div className="header-meta-row">
         <span className="meta-league">
-          {match.tournament_name || t("unknownTournament")}
+          {tournamentName}
           {bestOf ? ` · BO${bestOf}` : match.round ? ` · ${match.round.toUpperCase()}` : ""}
           {match.series_score ? ` · (系列赛 ${scoreA} - ${scoreB})` : ""}
           {match.map_number ? ` · ${t("map")} ${match.map_number}` : ""}

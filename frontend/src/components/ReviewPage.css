@@ -34,7 +34,7 @@
 }
 
 .review-brand { gap: 18px; }
-.review-brand h1 { margin: 1px 0 0; font-size: 19px; letter-spacing: -0.01em; }
+.review-brand h1 { margin: 1px 0 0; font-size: 19px; letter-spacing: 0; }
 .review-kicker { font-size: 10px; font-weight: 800; letter-spacing: 0.16em; color: #758199; }
 .review-back { color: #aab5ca; text-decoration: none; font-size: 13px; padding: 8px 10px; border-radius: 8px; background: rgba(255,255,255,.045); }
 .review-back:hover { color: #fff; background: rgba(255,255,255,.08); }
@@ -57,7 +57,7 @@
 
 .review-main { width: min(1500px, calc(100% - 48px)); margin: 0 auto; padding: 34px 0 72px; }
 .review-intro { display: flex; align-items: flex-end; justify-content: space-between; gap: 24px; margin-bottom: 22px; }
-.review-intro h2 { margin: 6px 0 9px; font-size: clamp(24px, 3vw, 38px); letter-spacing: -0.035em; max-width: 920px; }
+.review-intro h2 { margin: 6px 0 9px; font-size: clamp(24px, 3vw, 38px); letter-spacing: 0; max-width: 920px; }
 .review-intro p { margin: 0; color: #8f9bb0; max-width: 920px; line-height: 1.65; font-size: 13px; }
 .review-method-pill { flex: 0 0 auto; border: 1px solid rgba(51, 211, 153, .3); color: #6ee7b7; background: rgba(16, 185, 129, .08); border-radius: 999px; padding: 8px 12px; font-size: 11px; font-weight: 700; }
 
@@ -68,7 +68,7 @@
 .review-kpis { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 18px; }
 .review-kpi { padding: 17px 18px; border: 1px solid rgba(255,255,255,.08); border-radius: 14px; background: linear-gradient(180deg, rgba(255,255,255,.045), rgba(255,255,255,.018)); }
 .review-kpi span { display: block; color: #8f9bb0; font-size: 11px; margin-bottom: 8px; }
-.review-kpi strong { display: inline-block; font-size: 25px; letter-spacing: -.035em; }
+.review-kpi strong { display: inline-block; font-size: 25px; letter-spacing: 0; }
 .review-kpi small { margin-left: 9px; color: #a8b5cb; font-weight: 700; }
 
 .review-model-board,

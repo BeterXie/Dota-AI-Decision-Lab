@@ -6,6 +6,7 @@ from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.entitlements.models import UserEntitlementRecord
+from app.models import CanonicalMap, CanonicalSeries
 
 AI_DECISIONS_ENTITLEMENT = "ai_decisions"
 REALTIME_NOTIFICATIONS_ENTITLEMENT = "realtime_notifications"
@@ -16,9 +17,12 @@ PREMIUM_ENTITLEMENTS = frozenset(
     }
 )
 ACCESS_SCOPE_GLOBAL = "GLOBAL"
+ACCESS_SCOPE_EVENT = "EVENT"
 ACCESS_SCOPE_SERIES = "SERIES"
 ACCESS_SCOPE_MAP = "MAP"
-ACCESS_SCOPES = frozenset({ACCESS_SCOPE_GLOBAL, ACCESS_SCOPE_SERIES, ACCESS_SCOPE_MAP})
+ACCESS_SCOPES = frozenset(
+    {ACCESS_SCOPE_GLOBAL, ACCESS_SCOPE_EVENT, ACCESS_SCOPE_SERIES, ACCESS_SCOPE_MAP}
+)
 _DEVELOPMENT_SOURCE = "development"
 
 
@@ -149,6 +153,7 @@ class EntitlementService:
         *,
         canonical_series_id: UUID | None = None,
         canonical_map_id: UUID | None = None,
+        canonical_event_id: UUID | None = None,
         now: datetime | None = None,
     ) -> bool:
         return (
@@ -157,6 +162,7 @@ class EntitlementService:
                 entitlement,
                 canonical_series_id=canonical_series_id,
                 canonical_map_id=canonical_map_id,
+                canonical_event_id=canonical_event_id,
                 now=now,
             )
             is not None
@@ -169,10 +175,17 @@ class EntitlementService:
         *,
         canonical_series_id: UUID | None = None,
         canonical_map_id: UUID | None = None,
+        canonical_event_id: UUID | None = None,
         now: datetime | None = None,
     ) -> str | None:
         current = now or datetime.now(UTC)
         async with self._session_factory() as session:
+            canonical_event_id = await _resolve_event_id(
+                session,
+                canonical_event_id=canonical_event_id,
+                canonical_series_id=canonical_series_id,
+                canonical_map_id=canonical_map_id,
+            )
             scopes = list(
                 (
                     await session.scalars(
@@ -183,12 +196,18 @@ class EntitlementService:
                             _resource_scope_predicate(
                                 canonical_series_id=canonical_series_id,
                                 canonical_map_id=canonical_map_id,
+                                canonical_event_id=canonical_event_id,
                             ),
                         )
                     )
                 ).all()
             )
-        for scope in (ACCESS_SCOPE_GLOBAL, ACCESS_SCOPE_SERIES, ACCESS_SCOPE_MAP):
+        for scope in (
+            ACCESS_SCOPE_GLOBAL,
+            ACCESS_SCOPE_EVENT,
+            ACCESS_SCOPE_SERIES,
+            ACCESS_SCOPE_MAP,
+        ):
             if scope in scopes:
                 return scope
         return None
@@ -201,24 +220,22 @@ class EntitlementService:
         *,
         canonical_series_id: UUID | None = None,
         canonical_map_id: UUID | None = None,
+        canonical_event_id: UUID | None = None,
         now: datetime | None = None,
     ) -> set[UUID]:
         if not user_ids:
             return set()
         current = now or datetime.now(UTC)
-        values = await session.scalars(
-            select(UserEntitlementRecord.user_id)
-            .where(
-                UserEntitlementRecord.user_id.in_(user_ids),
-                UserEntitlementRecord.entitlement == entitlement,
-                *_active_window_predicates(current),
-                _resource_scope_predicate(
-                    canonical_series_id=canonical_series_id,
-                    canonical_map_id=canonical_map_id,
-                ),
-            )
-            .distinct()
+        statement = await _resource_entitlement_statement(
+            session,
+            user_ids=user_ids,
+            entitlement=entitlement,
+            canonical_series_id=canonical_series_id,
+            canonical_map_id=canonical_map_id,
+            canonical_event_id=canonical_event_id,
+            current=current,
         )
+        values = await session.scalars(statement)
         return set(values.all())
 
     async def grant(
@@ -328,6 +345,56 @@ def normalize_access_scope(scope_type: str, scope_ref: UUID | None) -> tuple[str
     return normalized, scope_ref
 
 
+async def _resolve_event_id(
+    session: AsyncSession,
+    *,
+    canonical_event_id: UUID | None,
+    canonical_series_id: UUID | None,
+    canonical_map_id: UUID | None,
+) -> UUID | None:
+    if canonical_event_id is not None:
+        return canonical_event_id
+    if canonical_series_id is not None:
+        return await session.scalar(
+            select(CanonicalSeries.event_id).where(CanonicalSeries.id == canonical_series_id)
+        )
+    if canonical_map_id is not None:
+        return await session.scalar(
+            select(CanonicalSeries.event_id)
+            .join(CanonicalMap, CanonicalMap.series_id == CanonicalSeries.id)
+            .where(CanonicalMap.id == canonical_map_id)
+        )
+    return None
+
+
+async def _resource_entitlement_statement(
+    session: AsyncSession,
+    *,
+    user_ids: set[UUID],
+    entitlement: str,
+    canonical_series_id: UUID | None,
+    canonical_map_id: UUID | None,
+    canonical_event_id: UUID | None,
+    current: datetime,
+):
+    canonical_event_id = await _resolve_event_id(
+        session,
+        canonical_event_id=canonical_event_id,
+        canonical_series_id=canonical_series_id,
+        canonical_map_id=canonical_map_id,
+    )
+    return select(UserEntitlementRecord.user_id).where(
+        UserEntitlementRecord.user_id.in_(user_ids),
+        UserEntitlementRecord.entitlement == entitlement,
+        *_active_window_predicates(current),
+        _resource_scope_predicate(
+            canonical_event_id=canonical_event_id,
+            canonical_series_id=canonical_series_id,
+            canonical_map_id=canonical_map_id,
+        ),
+    ).distinct()
+
+
 def _active_window_predicates(current: datetime) -> tuple:
     return (
         UserEntitlementRecord.status == "ACTIVE",
@@ -344,6 +411,7 @@ def _active_window_predicates(current: datetime) -> tuple:
 
 def _resource_scope_predicate(
     *,
+    canonical_event_id: UUID | None,
     canonical_series_id: UUID | None,
     canonical_map_id: UUID | None,
 ):
@@ -353,6 +421,13 @@ def _resource_scope_predicate(
             UserEntitlementRecord.scope_ref.is_(None),
         )
     ]
+    if canonical_event_id is not None:
+        predicates.append(
+            and_(
+                UserEntitlementRecord.scope_type == ACCESS_SCOPE_EVENT,
+                UserEntitlementRecord.scope_ref == canonical_event_id,
+            )
+        )
     if canonical_series_id is not None:
         predicates.append(
             and_(

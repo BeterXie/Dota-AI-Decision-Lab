@@ -15,6 +15,7 @@ from app.models import (
     CanonicalSeries,
     CanonicalTeam,
     DltvLiveObservationRecord,
+    DomainEventRecord,
     ProviderRawEvent,
 )
 from app.providers.dltv.parser import (
@@ -217,6 +218,60 @@ async def test_duplicate_socket_state_keeps_raw_but_not_normalized_duplicate() -
     assert normalized[0].last_message_received_at == second_at.replace(tzinfo=None)
     assert normalized[0].last_state_change_received_at == first_at.replace(tzinfo=None)
     assert normalized[0].game_time_seconds == 1061
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_series_frame_removal_emits_one_map_ended_event() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    valve_match_id = 8940730389
+    async with factory() as session, session.begin():
+        team_a = CanonicalTeam(name="A")
+        team_b = CanonicalTeam(name="B")
+        session.add_all((team_a, team_b))
+        await session.flush()
+        series = CanonicalSeries(team_a_id=team_a.id, team_b_id=team_b.id)
+        session.add(series)
+        await session.flush()
+        canonical_map = CanonicalMap(series_id=series.id, valve_match_id=valve_match_id)
+        session.add(canonical_map)
+        await session.flush()
+        canonical_map_id = canonical_map.id
+
+    collector = DltvSocketCollector(
+        session_factory=factory,
+        raw_events=RawEventRepository(),
+        events=EventRepository(),
+    )
+    live_at = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
+    ended_at = datetime(2026, 8, 12, 12, 45, tzinfo=UTC)
+    await collector.collect(
+        "__nd2_series",
+        {"live": {str(valve_match_id): 427609}},
+        received_at=live_at,
+    )
+    await collector.collect("__nd2_series", {"live": {}}, received_at=ended_at)
+    await collector.collect("__nd2_series", {"live": {}}, received_at=ended_at)
+
+    async with factory() as session:
+        ended_events = list(
+            (
+                await session.scalars(
+                    select(DomainEventRecord).where(DomainEventRecord.event_type == "MAP_ENDED")
+                )
+            ).all()
+        )
+
+    assert len(ended_events) == 1
+    assert ended_events[0].aggregate_id == str(canonical_map_id)
+    assert ended_events[0].payload == {
+        "canonical_map_id": str(canonical_map_id),
+        "valve_match_id": valve_match_id,
+    }
+    assert ended_events[0].occurred_at == ended_at.replace(tzinfo=None)
     await engine.dispose()
 
 

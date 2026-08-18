@@ -20,7 +20,7 @@ export interface AiAccessState {
   authEnabled: boolean;
   authenticated: boolean;
   entitled: boolean;
-  scope: "GLOBAL" | "SERIES" | "MAP" | null;
+  scope: "GLOBAL" | "EVENT" | "SERIES" | "MAP" | "FREE" | "POSTMATCH" | null;
   loading: boolean;
   upgradeHref: string;
 }

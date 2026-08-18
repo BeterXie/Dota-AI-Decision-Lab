@@ -14,7 +14,11 @@ from app.providers.chat_access import (
     is_notification_resume_command,
 )
 from app.providers.chat_commands import command_reply, render_decision_notification
-from app.providers.wechat_clawbot.models import MESSAGE_TYPE_USER, WeChatInboundMessage
+from app.providers.wechat_clawbot.models import (
+    MESSAGE_TYPE_USER,
+    WeChatAccount,
+    WeChatInboundMessage,
+)
 from app.providers.wechat_clawbot.service import WeChatClawBotService as LegacyWeChatClawBotService
 
 
@@ -114,8 +118,23 @@ class UserScopedWeChatClawBotService(LegacyWeChatClawBotService):
             ) from first
         return sent
 
-    async def _handle_message(self, session, account, message: WeChatInboundMessage) -> None:
-        if message.message_type != MESSAGE_TYPE_USER or not message.from_user_id:
+    async def _handle_message(
+        self,
+        session,
+        account: WeChatAccount,
+        message: WeChatInboundMessage,
+    ) -> None:
+        if (
+            message.message_type != MESSAGE_TYPE_USER
+            or not message.from_user_id
+            or message.group_id is not None
+        ):
+            return
+        bound_user_id = account.user_id
+        # A QR account is not allowed to execute commands on behalf of an
+        # arbitrary sender. Pairing is the sole operation permitted while the
+        # account is unbound; once bound, every direct message must match it.
+        if bound_user_id and message.from_user_id != bound_user_id:
             return
         destination_key = wechat_destination_key(account.account_id, message.from_user_id)
         normalized = message.text.strip().casefold()
@@ -139,10 +158,20 @@ class UserScopedWeChatClawBotService(LegacyWeChatClawBotService):
                         "✅ 微信已绑定到你的 Notification Center，AI 决策通知偏好已开启。"
                         "实际推送仍取决于实时通知权限。"
                     )
+                    self._persist_account_binding(
+                        account,
+                        user_id=message.from_user_id,
+                        context_token=message.context_token,
+                    )
                 except NotificationBindingConflict:
                     reply = "⚠️ 这个微信会话已经绑定到另一个账号。请先在原账号里解除绑定。"
                 except NotificationPairingError:
                     reply = "⚠️ 配对码无效或已过期。请回到 Notification Center 重新生成。"
+        elif not bound_user_id:
+            reply = (
+                "🔒 当前微信会话需要先绑定登录账号。请在网页 Notification Center "
+                "生成配对码，再发送「绑定 <配对码>」。"
+            )
         elif normalized in {"订阅通知", "订阅决策", "订阅"} or is_notification_resume_command(
             message.text
         ):
@@ -207,6 +236,19 @@ class UserScopedWeChatClawBotService(LegacyWeChatClawBotService):
             context_token=message.context_token,
             run_id=message.run_id,
         )
+
+    def _persist_account_binding(
+        self,
+        account: WeChatAccount,
+        *,
+        user_id: str,
+        context_token: str | None,
+    ) -> None:
+        """Persist the sender identity after a successful pairing handshake."""
+        updates: dict[str, object] = {"user_id": user_id}
+        if context_token:
+            updates["context_token"] = context_token
+        self._store.save_account(account.model_copy(update=updates))
 
 
 def _pairing_code_from_text(text: str) -> str | None:

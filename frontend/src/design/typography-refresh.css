@@ -1,0 +1,446 @@
+/* IBM Plex is distributed under the SIL Open Font License 1.1. */
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../../node_modules/@ibm/plex/IBM-Plex-Sans/fonts/split/woff2/IBMPlexSans-Regular-Latin1.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 500;
+  font-display: swap;
+  src: url("../../node_modules/@ibm/plex/IBM-Plex-Sans/fonts/split/woff2/IBMPlexSans-Medium-Latin1.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 600;
+  font-display: swap;
+  src: url("../../node_modules/@ibm/plex/IBM-Plex-Sans/fonts/split/woff2/IBMPlexSans-SemiBold-Latin1.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Sans";
+  font-style: normal;
+  font-weight: 700;
+  font-display: swap;
+  src: url("../../node_modules/@ibm/plex/IBM-Plex-Sans/fonts/split/woff2/IBMPlexSans-Bold-Latin1.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 400;
+  font-display: swap;
+  src: url("../../node_modules/@ibm/plex/IBM-Plex-Mono/fonts/split/woff2/IBMPlexMono-Regular-Latin1.woff2") format("woff2");
+}
+
+@font-face {
+  font-family: "IBM Plex Mono";
+  font-style: normal;
+  font-weight: 500 700;
+  font-display: swap;
+  src: url("../../node_modules/@ibm/plex/IBM-Plex-Mono/fonts/split/woff2/IBMPlexMono-SemiBold-Latin1.woff2") format("woff2");
+}
+
+body,
+button,
+input,
+select,
+textarea {
+  font-family: var(--font-ui);
+}
+
+.product-root {
+  font-family: var(--font-ui);
+  font-size: var(--type-body);
+  line-height: 1.5;
+}
+
+.product-root .mono,
+.product-root code,
+.product-root .team-odds,
+.product-root .score-number,
+.product-root .odds-val,
+.product-root .metric-val,
+.product-root .stat-value,
+.product-root .performance-table-number {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Status chips and terse annotations: never render below 11px. */
+.product-root .event-status,
+.product-root .event-v2-status,
+.product-root .event-featured-kicker,
+.product-root .event-series-phase,
+.product-root .event-stage-title span,
+.product-root .event-series-meta span,
+.product-root .event-series-row > a,
+.product-root .event-aside-title small,
+.product-root .event-team-more,
+.product-root .match-phase-badge,
+.product-root .match-card-kicker,
+.product-root .match-card-kicker span,
+.product-root .match-market-overround span,
+.product-root .match-market-fallback em,
+.product-root .match-panel-heading > em,
+.product-root .match-draft-slots i,
+.product-root .match-ai-decision > div span,
+.product-root .match-ai-decision > p,
+.product-root .match-ai-disclaimer,
+.product-root .player-intelligence-strip span,
+.product-root .section-kicker,
+.product-root .player-status-pill,
+.product-root .player-ai-model span,
+.product-root .player-ai-checkpoint,
+.product-root .player-ai-metrics span,
+.product-root .player-ai-footer,
+.product-root .rosh-verdict span,
+.product-root .rosh-verdict small,
+.product-root .rosh-direction-metric span,
+.product-root .rosh-zone-label,
+.product-root .player-market-odds small,
+.product-root .market-vs,
+.product-root .player-market-meta,
+.product-root .team-roster-badge,
+.product-root .team-match-event time,
+.product-root .performance-summary-guide span,
+.product-root .performance-position-main .position-status,
+.product-root .readiness-stage em,
+.product-root .readiness-reason small,
+.product-root .readiness-series-main > span,
+.product-root .readiness-series-status > span,
+.product-root .readiness-series-main i,
+.product-root .readiness-series-main > small,
+.product-root .readiness-series-status > small,
+.product-root .review-cell-label,
+.product-root .rosh-reference-line span,
+.product-root .rosh-timeline span,
+.product-root .result-cell small,
+.product-root .review-ai-badge span,
+.product-root .review-ai-badge small,
+.product-root .odds-delta,
+.product-root .product-access-boundary small,
+.product-root .product-access-status,
+.product-root .login-divider,
+.product-root .login-dialog-footnote {
+  font-size: var(--type-caption);
+  line-height: 1.4;
+  letter-spacing: 0;
+}
+
+/* Metadata, timestamps, field labels and secondary controls. */
+.product-root .account-menu-head span,
+.product-root .account-menu-head em,
+.product-root .account-menu-row small,
+.product-root .account-language-toggle button,
+.product-root .account-menu-footer > span,
+.product-root .product-section-title a,
+.product-root .home-eyebrow,
+.product-root .event-card-body > p,
+.product-root .event-card-meta,
+.product-root .event-card-action,
+.product-root .home-match-row small,
+.product-root .home-match-row > a,
+.product-root .home-list-empty,
+.product-root .home-capabilities p,
+.product-root .home-access-banner p,
+.product-root .events-hero-stats span,
+.product-root .event-detail-stats span,
+.product-root .events-directory-head > span,
+.product-root .event-panel-title > span,
+.product-root .event-directory-copy p,
+.product-root .event-directory-numbers span,
+.product-root .event-directory-focus small,
+.product-root .event-directory-focus strong em,
+.product-root .event-directory-focus > span,
+.product-root .event-directory-focus.is-empty,
+.product-root .event-directory-link,
+.product-root .event-detail-crumbs,
+.product-root .event-detail-heading p,
+.product-root .event-follow-button,
+.product-root .events-load-error p,
+.product-root .event-detail-tabs button,
+.product-root .event-detail-tabs a,
+.product-root .event-featured-main > time,
+.product-root .event-featured-meta span,
+.product-root .event-series-time time,
+.product-root .event-series-teams > strong,
+.product-root .event-overview-grid span,
+.product-root .event-access-row > i,
+.product-root .event-access-row p,
+.product-root .event-access-card > a,
+.product-root .event-trust-card strong,
+.product-root .event-trust-card p,
+.product-root .match-crumbs,
+.product-root .match-hero-topline > span:not(.match-phase-badge),
+.product-root .match-score-block > span,
+.product-root .match-score-block > em,
+.product-root .match-live-score span,
+.product-root .match-signal-card > p,
+.product-root .match-market-leg span,
+.product-root .match-market-leg small,
+.product-root .match-market-fallback b,
+.product-root .match-state-list span,
+.product-root .match-draft-side h3,
+.product-root .match-draft-slots strong,
+.product-root .match-draft-slots small,
+.product-root .match-ai-decision > div strong,
+.product-root .match-ai-decision > b,
+.product-root .match-ai-decision > em,
+.product-root .match-ai-lock p,
+.product-root .match-empty-message,
+.product-root .match-identity-note p,
+.product-root .match-not-found p,
+.product-root .player-match-group-title,
+.product-root .rail-total-count,
+.product-root .player-market-closed-note,
+.product-root .rosh-direction-metric strong,
+.product-root .chart-empty,
+.product-root .team-staff-row span,
+.product-root .team-staff-row small,
+.product-root .team-match-event a,
+.product-root .team-match-open,
+.product-root .team-match-pair > b,
+.product-root .team-history-row span,
+.product-root .team-history-row small,
+.product-root .premium-product-notes span,
+.product-root .product-access-boundary i,
+.product-root .product-access-boundary strong,
+.product-root .premium-performance .performance-header-actions button,
+.product-root .premium-review .review-header-actions button,
+.product-root .billing-eyebrow,
+.product-root .billing-offer-kind,
+.product-root .billing-status span,
+.product-root .billing-method,
+.product-root .notification-eyebrow,
+.product-root .notification-channel-code,
+.product-root .notification-status,
+.product-root .baseline-frozen-badge,
+.product-root .baseline-contract-grid span,
+.product-root .baseline-metric span,
+.product-root .baseline-delta-strip span,
+.product-root .baseline-reference,
+.product-root .baseline-experiment-card > header small,
+.product-root .baseline-role,
+.product-root .baseline-metric small,
+.product-root .readiness-summary span,
+.product-root .readiness-stage span,
+.product-root .readiness-stage small,
+.product-root .readiness-clear,
+.product-root .readiness-reason span,
+.product-root .readiness-series-status > strong,
+.product-root .review-kicker,
+.product-root .review-method-pill,
+.product-root .review-kpi span,
+.product-root .review-section-heading > span,
+.product-root .review-model-title span,
+.product-root .review-model-metrics span,
+.product-root .review-match-meta,
+.product-root .review-vs,
+.product-root .review-muted,
+.product-root .rosh-timeline b,
+.product-root .review-ai-badge strong,
+.product-root .odds-team-line span,
+.product-root .odds-team-line strong,
+.product-root .performance-kicker,
+.product-root .performance-intro-actions a,
+.product-root .performance-intro-actions button,
+.product-root .performance-shadow-badge,
+.product-root .performance-kpi > div > span,
+.product-root .performance-section-heading > span,
+.product-root .performance-ranking-note,
+.product-root .performance-leader-header,
+.product-root .performance-filter-empty,
+.product-root .performance-model-name small,
+.product-root .performance-table-number,
+.product-root .performance-selected-title small,
+.product-root .performance-rank,
+.product-root .performance-pnl-badge span,
+.product-root .performance-metric span,
+.product-root .performance-metric small,
+.product-root .performance-version-line span,
+.product-root .performance-summary-guide strong,
+.product-root .performance-event-btn > span:not(.performance-event-name),
+.product-root .performance-event-btn small,
+.product-root .performance-event-btn strong,
+.product-root .performance-detail-heading p,
+.product-root .performance-gate-badge span,
+.product-root .performance-panel-heading > span,
+.product-root .performance-chart-loading,
+.product-root .performance-empty-inline,
+.product-root .performance-sample-progress span,
+.product-root .performance-sample-progress strong,
+.product-root .performance-gate-reasons span,
+.product-root .performance-metric-line span,
+.product-root .performance-metric-line strong,
+.product-root .performance-latency-cell strong,
+.product-root .performance-latency-cell span,
+.product-root .performance-latency-cell small,
+.product-root .performance-method-note,
+.product-root .performance-position-action,
+.product-root .performance-position-main b,
+.product-root .performance-position-main small,
+.product-root .performance-position-detail span,
+.product-root .performance-position-detail strong,
+.product-root .email-login-form label,
+.product-root .login-text-action,
+.product-root .login-code-summary,
+.product-root .login-dialog-message {
+  font-size: var(--type-meta);
+  line-height: 1.45;
+  letter-spacing: 0;
+}
+
+/* Readable supporting copy and compact table content. */
+.product-root .account-menu-row,
+.product-root .account-menu-row strong,
+.product-root .account-menu-footer button,
+.product-root .event-team-name b,
+.product-root .event-stage-title h3,
+.product-root .event-access-row strong,
+.product-root .events-empty p,
+.product-root .event-not-found p,
+.product-root .team-title-line b,
+.product-root .team-meta-row span,
+.product-root .team-panel-title small,
+.product-root .team-player-card > div:nth-child(2) > span,
+.product-root .team-player-card p,
+.product-root .team-match-pair > span,
+.product-root .team-history-row p,
+.product-root .team-empty-state p,
+.product-root .account-v2-card-heading p,
+.product-root .account-v2-details dt,
+.product-root .account-v2-membership-row span,
+.product-root .account-v2-note,
+.product-root .account-v2-language button,
+.product-root .account-v2-danger p,
+.product-root .account-v2-danger > span[role="alert"],
+.product-root .notification-account span,
+.product-root .notification-binding-row span,
+.product-root .notification-pairing-code span,
+.product-root .notification-pairing-code small,
+.product-root .notification-toggle,
+.product-root .baseline-contract-grid code,
+.product-root .baseline-delta-strip > div strong,
+.product-root .readiness-reason strong,
+.product-root .review-header-actions button,
+.product-root .review-filter-group button,
+.product-root .review-controls input,
+.product-root .performance-event-name {
+  font-size: var(--type-secondary);
+  line-height: 1.5;
+}
+
+/* Primary row labels and high-frequency controls. */
+.product-root .home-match-row,
+.product-root .match-teams > span,
+.product-root .match-teams b,
+.product-root .event-team-name.is-large b,
+.product-root .event-series-teams .event-team-name b,
+.product-root .match-state-list strong,
+.product-root .match-ai-decision > div strong,
+.product-root .player-ai-action,
+.product-root .performance-model-name strong,
+.product-root .performance-metric strong {
+  font-size: var(--type-body);
+  line-height: 1.4;
+}
+
+.product-root .home-match-row {
+  min-height: 58px;
+  grid-template-columns: 96px minmax(0, 1fr) 62px 76px;
+}
+
+.product-root .event-series-row {
+  min-height: 76px;
+}
+
+.product-root .match-draft-slots > div:not(.match-empty-message) {
+  min-height: 48px;
+}
+
+.product-root .match-ai-decision {
+  min-height: 66px;
+  padding-block: 11px;
+}
+
+.product-root .product-section-title h2,
+.product-root .event-panel-title h2,
+.product-root .match-panel-heading h2,
+.product-root .player-section-heading h3,
+.product-root .performance-section-heading h3 {
+  font-size: var(--type-panel-title);
+  line-height: 1.3;
+  letter-spacing: 0;
+}
+
+@media (max-width: 760px) {
+  .product-root .home-match-row {
+    min-height: 84px;
+    grid-template-columns: minmax(0, 1fr) auto;
+    grid-template-areas:
+      "time action"
+      "teams teams";
+    gap: 8px 12px;
+    padding-block: 10px;
+  }
+
+  .product-root .home-match-row time {
+    grid-area: time;
+    font-size: var(--type-meta);
+  }
+
+  .product-root .home-match-row .match-teams {
+    grid-area: teams;
+    grid-template-columns: minmax(0, 1fr) 34px minmax(0, 1fr);
+    gap: 6px;
+  }
+
+  .product-root .home-match-row > a {
+    grid-area: action;
+  }
+
+  .product-root .match-teams > span {
+    font-size: var(--type-secondary);
+  }
+
+  .product-root .event-card-title {
+    align-items: flex-start;
+  }
+
+  .product-root .event-card-title h3 {
+    overflow: visible;
+    white-space: normal;
+    line-height: 1.3;
+  }
+
+  .product-root .event-series-row {
+    min-height: 104px;
+  }
+
+  .product-root .event-team-name b,
+  .product-root .match-team-hero h1 {
+    font-size: var(--type-secondary);
+  }
+
+  .product-root .event-series-teams .event-team-name b {
+    overflow: visible;
+    font-size: var(--type-meta);
+    line-height: 1.3;
+    text-overflow: clip;
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .product-root .match-score-block > span,
+  .product-root .events-hero-stats span,
+  .product-root .event-detail-stats span {
+    font-size: var(--type-caption);
+  }
+}

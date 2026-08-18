@@ -12,6 +12,8 @@ _PUBLIC_MATCH_SCALAR_FIELDS = frozenset(
         "phase",
         "id",
         "series_id",
+        "canonical_event_id",
+        "stage_key",
         "canonical_map_id",
         "map_number",
         "valve_match_id",
@@ -62,6 +64,26 @@ _DRAFT_FIELDS = frozenset(
         "hero_ready_count",
     }
 )
+_DRAFT_FEATURE_FIELDS = frozenset(
+    {
+        "current_edge",
+        "current_minute",
+        "next_5m_edge",
+        "next_10m_edge",
+        "peak_edge",
+        "peak_minute",
+        "cross_over_minute",
+        "early_average",
+        "mid_average",
+        "late_average",
+        "ultra_late_average",
+        "curve_slope_5m",
+        "curve_slope_10m",
+    }
+)
+_DRAFT_CURVE_POINT_FIELDS = frozenset(
+    {"minute", "pure_radiant_edge", "adjusted_radiant_edge", "confidence", "support"}
+)
 _DRAFT_SLOT_FIELDS = frozenset(
     {
         "side",
@@ -71,6 +93,17 @@ _DRAFT_SLOT_FIELDS = frozenset(
         "player_name",
         "hero_id",
         "hero_name",
+    }
+)
+_MAP_SIDE_IDENTITY_FIELDS = frozenset(
+    {
+        "status",
+        "radiant_team_id",
+        "dire_team_id",
+        "source",
+        "confidence",
+        "observed_at",
+        "blocker",
     }
 )
 _LIVE_FIELDS = frozenset(
@@ -229,6 +262,7 @@ def _sanitize_match_payload(payload: dict) -> dict:
     _copy_projected_list(sanitized, payload, "market", _MARKET_FIELDS)
     _copy_projected_dict(sanitized, payload, "market_quality", _MARKET_QUALITY_FIELDS)
     _copy_current_market_view(sanitized, payload)
+    _copy_projected_dict(sanitized, payload, "side_identity", _MAP_SIDE_IDENTITY_FIELDS)
     _copy_projected_dict(
         sanitized,
         payload,
@@ -313,6 +347,8 @@ def _copy_draft(target: dict, source: dict) -> None:
     if not isinstance(value, dict):
         return
     public = _project_dict(value, _DRAFT_FIELDS)
+    _copy_projected_dict(public, value, "features", _DRAFT_FEATURE_FIELDS)
+    _copy_projected_list(public, value, "curve", _DRAFT_CURVE_POINT_FIELDS)
     slots = value.get("slots")
     if isinstance(slots, list):
         public["slots"] = [

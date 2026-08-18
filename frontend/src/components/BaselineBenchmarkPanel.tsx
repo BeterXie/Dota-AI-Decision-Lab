@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import type { AiBenchmarkExperiment, AiBenchmarkPayload, AiContextExperimentMetadata } from "../benchmarkApi";
+import "./baseline-benchmark.css";
 
 export function BaselineBenchmarkPanel({
   data,

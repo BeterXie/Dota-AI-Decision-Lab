@@ -178,6 +178,63 @@ async def test_postmatch_stays_retryable_when_no_provider_has_a_winner() -> None
 
 
 @pytest.mark.asyncio
+async def test_postmatch_rejects_mismatched_provider_match_identity_and_falls_back() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    team_a_id = uuid4()
+    team_b_id = uuid4()
+    async with factory() as session, session.begin():
+        session.add_all(
+            (
+                CanonicalTeam(id=team_a_id, name="Radiant"),
+                CanonicalTeam(id=team_b_id, name="Dire"),
+                ProviderTeamMapping(
+                    provider="opendota",
+                    provider_team_id="100",
+                    canonical_team_id=team_a_id,
+                ),
+                ProviderTeamMapping(
+                    provider="opendota",
+                    provider_team_id="200",
+                    canonical_team_id=team_b_id,
+                ),
+            )
+        )
+
+    mismatched_bundle = _bundle("stratz", winner_team_id="100")
+    mismatched_bundle = mismatched_bundle.model_copy(
+        update={
+            "match": mismatched_bundle.match.model_copy(update={"provider_match_id": "8940000999"})
+        }
+    )
+    primary = _Provider("stratz", mismatched_bundle)
+    fallback = _Provider("opendota", _bundle("opendota", winner_team_id="100"))
+    handlers = ApplicationJobHandlers(
+        SimpleNamespace(
+            historical_primary=primary,
+            opendota=fallback,
+            session_factory=factory,
+            raw_events=RawEventRepository(),
+            historical_team_resolver=_TeamResolver(),
+        )
+    )
+
+    provider, _response, _bundle_result, _raw_event_id = await handlers._postmatch_response(
+        8940000001,
+        expected_team_ids={team_a_id, team_b_id},
+    )
+
+    assert provider is fallback
+    assert primary.calls == 1
+    assert fallback.calls == 1
+    async with factory() as session:
+        assert await session.scalar(select(func.count()).select_from(ProviderRawEvent)) == 2
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_observed_postmatch_team_ids_resolve_only_by_expected_aliases() -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:

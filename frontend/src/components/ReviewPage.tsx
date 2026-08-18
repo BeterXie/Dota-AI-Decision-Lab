@@ -7,6 +7,7 @@ import {
   type ReviewMatch,
   type ReviewRoshEdge
 } from "../reviewApi";
+import { getOfficialEventDisplayName } from "../utils/officialVisuals";
 import "./ReviewPage.css";
 
 type ReviewFilter = "ALL" | "ROSH_WRONG" | "AI_BUY" | "CLOSING";
@@ -51,7 +52,7 @@ export function ReviewPage() {
         </div>
       </header>
 
-      <main className="review-main">
+      <div className="review-main">
         <section className="review-intro">
           <div>
             <span className="review-kicker">POST-MATCH ANALYTICS</span>
@@ -121,7 +122,7 @@ export function ReviewPage() {
             {!review.isLoading && rows.length === 0 && <div className="review-empty">{t("reviewNoMatches")}</div>}
           </div>
         </section>
-      </main>
+      </div>
     </div>
   );
 }
@@ -153,7 +154,7 @@ function MatchReviewCard({ match, locale }: { match: ReviewMatch; locale: Locale
       <div className="review-match-head">
         <div className="review-match-meta">
           <span>{formatDate(match.settled_at, locale)}</span>
-          {match.tournament_name && <span>{match.tournament_name}</span>}
+          {match.tournament_name && <span>{getOfficialEventDisplayName(match.tournament_name)}</span>}
           {match.map_number != null && <span>MAP {match.map_number}</span>}
         </div>
         <div className="review-versus">

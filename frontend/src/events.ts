@@ -1,9 +1,11 @@
 import type { MapSummary } from "./api";
+import { getOfficialEventDisplayName } from "./utils/officialVisuals";
 
 export type EventStatus = "LIVE" | "UPCOMING" | "SETTLING" | "COMPLETED";
 
 export interface EventSummary {
   name: string;
+  canonicalEventId: string | null;
   matches: MapSummary[];
   status: EventStatus;
   seriesCount: number;
@@ -58,7 +60,7 @@ export function buildSeriesSummaries(event: EventSummary): EventSeriesSummary[] 
 }
 
 export function eventSlug(name: string): string {
-  const normalized = name
+  const normalized = getOfficialEventDisplayName(name)
     .normalize("NFKC")
     .replace(/国际邀请赛/g, " international ")
     .replace(/国际邀请/g, " international ")
@@ -90,7 +92,7 @@ export function eventNameFromPath(pathname: string): string | null {
 }
 
 export function eventName(match: MapSummary): string {
-  return match.tournament_name?.trim() || "Dota 2";
+  return getOfficialEventDisplayName(match.tournament_name || "Dota 2");
 }
 
 function buildEventSummary(name: string, matches: MapSummary[]): EventSummary {
@@ -114,6 +116,7 @@ function buildEventSummary(name: string, matches: MapSummary[]): EventSummary {
 
   return {
     name,
+    canonicalEventId: matches.find((match) => match.canonical_event_id)?.canonical_event_id ?? null,
     matches,
     status: eventStatus(matches),
     seriesCount: seriesIds.size,

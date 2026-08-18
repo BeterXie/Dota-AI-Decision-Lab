@@ -6,6 +6,7 @@ from uuid import uuid4
 import pytest
 from fastapi import WebSocketDisconnect
 from httpx import ASGITransport, AsyncClient
+from sqlalchemy import event
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db import Base
@@ -551,6 +552,63 @@ async def test_match_feed_includes_raybet_series_pending_map_identity() -> None:
 
 
 @pytest.mark.asyncio
+async def test_pending_series_query_count_does_not_grow_with_card_count() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async def add_pending_series(start: int, count: int) -> None:
+        async with factory.begin() as session:
+            for index in range(start, start + count):
+                team_a = CanonicalTeam(name=f"Batch A {index}")
+                team_b = CanonicalTeam(name=f"Batch B {index}")
+                session.add_all((team_a, team_b))
+                await session.flush()
+                series = CanonicalSeries(team_a_id=team_a.id, team_b_id=team_b.id)
+                session.add(series)
+                await session.flush()
+                session.add(
+                    ProviderMatchMapping(
+                        provider="raybet",
+                        provider_match_id=str(40_000 + index),
+                        canonical_series_id=series.id,
+                        resolved_by="PROVIDER_DISCOVERY",
+                        confidence=1.0,
+                    )
+                )
+
+    await add_pending_series(0, 1)
+    app = create_app(factory, HealthRegistry())
+    selected: list[str] = []
+
+    def count_selects(*args) -> None:
+        statement = args[2]
+        if statement.lstrip().upper().startswith("SELECT"):
+            selected.append(statement)
+
+    event.listen(engine.sync_engine, "before_cursor_execute", count_selects)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            first = await client.get("/api/matches")
+            one_card_queries = len(selected)
+            selected.clear()
+            await add_pending_series(1, 5)
+            many = await client.get("/api/matches")
+            six_card_queries = len(selected)
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", count_selects)
+
+    assert first.status_code == 200
+    assert many.status_code == 200
+    assert len(first.json()) == 1
+    assert len(many.json()) == 6
+    assert six_card_queries == one_card_queries
+    assert six_card_queries < 15
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_match_feed_orders_newest_scheduled_match_first() -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:
@@ -696,6 +754,119 @@ async def test_map_api_exposes_partial_lineup_and_readiness_counts() -> None:
     assert payload["draft"]["slots"][1]["hero_id"] == 145
     assert payload["live"]["first_blood"] == "radiant"
     assert payload["live_timeline"][0]["first_blood"] == "radiant"
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_map_detail_batches_draft_slot_lookups() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    observed_at = datetime.now(UTC) - timedelta(minutes=2)
+
+    async with factory.begin() as session:
+        team_a = CanonicalTeam(name="Batch Team A")
+        team_b = CanonicalTeam(name="Batch Team B")
+        session.add_all((team_a, team_b))
+        await session.flush()
+        series = CanonicalSeries(team_a_id=team_a.id, team_b_id=team_b.id)
+        session.add(series)
+        await session.flush()
+        canonical_map = CanonicalMap(series_id=series.id, valve_match_id=9_000_000_001)
+        player = CanonicalPlayer(account_id=10_001, name="Player 1")
+        hero = CanonicalHero(hero_id=1, name="Hero 1")
+        session.add_all((canonical_map, player, hero))
+        await session.flush()
+        first_draft = DraftSnapshotRecord(
+            canonical_map_id=canonical_map.id,
+            valve_match_id=canonical_map.valve_match_id,
+            complete=False,
+            blockers=["DRAFT_PARTIAL"],
+            warnings=[],
+            payload_hash="one-slot-draft",
+            statistics_cutoff=observed_at,
+            observed_at=observed_at,
+            raw_event_id=uuid4(),
+        )
+        session.add(first_draft)
+        await session.flush()
+        session.add(
+            DraftSlotRecord(
+                draft_snapshot_id=first_draft.id,
+                side="radiant",
+                position=1,
+                account_id=player.account_id,
+                canonical_player_id=player.id,
+                hero_id=hero.hero_id,
+                source="DLTV_SLOT",
+                confidence=1.0,
+            )
+        )
+
+    app = create_app(factory, HealthRegistry())
+    selected: list[str] = []
+
+    def count_selects(*args) -> None:
+        statement = args[2]
+        if statement.lstrip().upper().startswith("SELECT"):
+            selected.append(statement)
+
+    event.listen(engine.sync_engine, "before_cursor_execute", count_selects)
+    try:
+        async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+            first = await client.get(f"/api/maps/{canonical_map.id}")
+            one_slot_queries = len(selected)
+            selected.clear()
+            async with factory.begin() as session:
+                players = [
+                    CanonicalPlayer(account_id=10_100 + index, name=f"Player {index}")
+                    for index in range(10)
+                ]
+                heroes = [
+                    CanonicalHero(hero_id=100 + index, name=f"Hero {index}") for index in range(10)
+                ]
+                session.add_all([*players, *heroes])
+                await session.flush()
+                full_draft = DraftSnapshotRecord(
+                    canonical_map_id=canonical_map.id,
+                    valve_match_id=canonical_map.valve_match_id,
+                    complete=True,
+                    blockers=[],
+                    warnings=[],
+                    payload_hash="ten-slot-draft",
+                    statistics_cutoff=observed_at + timedelta(minutes=1),
+                    observed_at=observed_at + timedelta(minutes=1),
+                    raw_event_id=uuid4(),
+                )
+                session.add(full_draft)
+                await session.flush()
+                session.add_all(
+                    [
+                        DraftSlotRecord(
+                            draft_snapshot_id=full_draft.id,
+                            side="radiant" if index < 5 else "dire",
+                            position=index % 5 + 1,
+                            account_id=players[index].account_id,
+                            canonical_player_id=players[index].id,
+                            hero_id=heroes[index].hero_id,
+                            source="DLTV_SLOT",
+                            confidence=1.0,
+                        )
+                        for index in range(10)
+                    ]
+                )
+            selected.clear()
+            full = await client.get(f"/api/maps/{canonical_map.id}")
+            ten_slot_queries = len(selected)
+    finally:
+        event.remove(engine.sync_engine, "before_cursor_execute", count_selects)
+
+    assert first.status_code == 200
+    assert full.status_code == 200
+    assert len(full.json()["draft"]["slots"]) == 10
+    assert ten_slot_queries == one_slot_queries
+    assert ten_slot_queries < 30
     await engine.dispose()
 
 

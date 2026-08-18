@@ -2,7 +2,6 @@ import React from "react";
 import type { AuthSessionState } from "../authApi";
 import { useI18n } from "../i18n";
 
-const AI_ENTITLEMENT = "ai_decisions";
 const NOTIFICATION_ENTITLEMENT = "realtime_notifications";
 
 export function AccountPage({
@@ -59,9 +58,7 @@ export function AccountPage({
 
   const user = session.user;
   const label = user.display_name || user.email || (zh ? "Steam 用户" : "Steam user");
-  const hasGlobalAi = session.entitlements.includes(AI_ENTITLEMENT);
   const hasGlobalNotifications = session.entitlements.includes(NOTIFICATION_ENTITLEMENT);
-  const hasPro = hasGlobalAi && hasGlobalNotifications;
   const scopedGrants = session.grants.filter((grant) => grant.scope_type !== "GLOBAL");
   const activeNotificationAccess = hasGlobalNotifications || session.grants.some(
     (grant) => grant.entitlement === NOTIFICATION_ENTITLEMENT
@@ -99,7 +96,7 @@ export function AccountPage({
           <strong>{label}</strong>
           <span>{user.email || (zh ? "尚未绑定邮箱" : "No email linked")}</span>
         </div>
-        <span className={`account-v2-plan ${hasPro ? "is-pro" : ""}`}>{hasPro ? "PRO" : "FREE"}</span>
+        <span className="account-v2-plan">FREE</span>
       </section>
 
       <div className="account-v2-grid">
@@ -117,12 +114,12 @@ export function AccountPage({
 
         <section className="account-v2-card">
           <div className="account-v2-card-heading">
-            <div><span aria-hidden="true">✦</span><div><h2>{zh ? "会员与比赛权限" : "Membership & match access"}</h2><p>{zh ? "全局 Pro 和单项赛事权限分开显示。" : "Global Pro and scoped event access are shown separately."}</p></div></div>
+            <div><span aria-hidden="true">✦</span><div><h2>{zh ? "会员与比赛权限" : "Membership & match access"}</h2><p>{zh ? "Free、赛事 Pass 和系列赛 Pass 分开显示。" : "Free access, Event Pass and Series Pass are shown separately."}</p></div></div>
           </div>
-          <div className="account-v2-membership-row"><span>{zh ? "当前方案" : "Current plan"}</span><strong className={hasPro ? "is-pro" : ""}>{hasPro ? "Pro" : (zh ? "免费" : "Free")}</strong></div>
-          <div className="account-v2-membership-row"><span>{zh ? "赛事 / 单场 Pass" : "Event / map passes"}</span><strong>{scopedGrants.length}</strong></div>
-          <p className="account-v2-note">{hasPro ? (zh ? "Pro 解锁全站 AI 决策、AI 表现和全局通知能力。" : "Pro unlocks site-wide AI decisions, AI Performance and global notifications.") : (zh ? "基础赛事、赛程、比分和比赛数据保持免费。需要 AI 时再升级即可。" : "Events, schedules, scores and core match data stay free. Upgrade when you want AI features.")}</p>
-          <a className="product-btn product-btn-primary" href="/billing">{hasPro ? (zh ? "管理会员" : "Manage membership") : (zh ? "查看 Pro 与赛事 Pass" : "View Pro and event passes")}<span>→</span></a>
+          <div className="account-v2-membership-row"><span>{zh ? "当前方案" : "Current plan"}</span><strong>{zh ? "免费" : "Free"}</strong></div>
+          <div className="account-v2-membership-row"><span>{zh ? "赛事 / 系列赛 Pass" : "Event / series passes"}</span><strong>{scopedGrants.length}</strong></div>
+          <p className="account-v2-note">{zh ? "小组赛 AI、AI 表现和复盘保持免费；付费阶段按赛事或系列赛解锁。" : "Group-stage AI, AI Performance and Review stay free; paid stages unlock by event or series."}</p>
+          <a className="product-btn product-btn-primary" href="/billing">{zh ? "查看赛事 Pass" : "View competition passes"}<span>→</span></a>
         </section>
 
         <section className="account-v2-card">

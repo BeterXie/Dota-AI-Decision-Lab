@@ -14,6 +14,10 @@ class OddsMeta(BaseModel):
     group_short_name: str | None
     match_stage: str | None
     raw_status: int | None
+    # RayBet numeric status semantics are intentionally not guessed from a
+    # single fixture.  Explicit provider labels may still be normalized by
+    # the parser so the market gate can fail closed for known terminal states.
+    normalized_status: str = "UNKNOWN"
 
 
 class OddsDelta(BaseModel):
@@ -24,6 +28,7 @@ class OddsDelta(BaseModel):
     price: Decimal = Field(gt=1)
     raw_status: int | None
     provider_updated_at: datetime | None
+    normalized_status: str = "UNKNOWN"
 
 
 class OddsObservation(BaseModel):

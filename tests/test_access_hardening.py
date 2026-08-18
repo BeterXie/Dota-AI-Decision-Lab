@@ -20,15 +20,13 @@ def test_http_access_policy_is_explicit_and_unknown_api_is_not_public() -> None:
     assert _http_access_requirement(
         "/api/maps/00000000-0000-0000-0000-000000000000/draft-hero-recent"
     ) == ("PUBLIC", None)
-    # Map AI is resource-aware: middleware authenticates identity, then the
-    # route checks GLOBAL / SERIES / MAP access against the canonical map.
+    # Map AI is public only after the route confirms a settled map result;
+    # in-progress requests still require authentication or a scoped grant.
     assert _http_access_requirement(
         "/api/maps/00000000-0000-0000-0000-000000000000/ai-decisions"
-    ) == ("AUTHENTICATED", None)
-    assert _http_access_requirement("/api/review") == (
-        "ENTITLED",
-        AI_DECISIONS_ENTITLEMENT,
-    )
+    ) == ("PUBLIC", None)
+    assert _http_access_requirement("/api/review") == ("PUBLIC", None)
+    assert _http_access_requirement("/api/ai-performance") == ("PUBLIC", None)
     assert _http_access_requirement("/api/snapshots") == (
         "ENTITLED",
         AI_DECISIONS_ENTITLEMENT,
@@ -42,11 +40,12 @@ def test_http_access_policy_is_explicit_and_unknown_api_is_not_public() -> None:
     assert _http_access_requirement("/api/billing/offers") == ("PUBLIC", None)
     assert _http_access_requirement("/api/billing/webhooks/paddle") == ("PUBLIC", None)
     assert _http_access_requirement("/api/billing/account") == ("AUTHENTICATED", None)
-    assert _http_access_requirement("/api/billing/checkout/pro_30d") == (
-        "AUTHENTICATED",
-        None,
-    )
-    assert _http_access_requirement("/api/billing/portal") == ("AUTHENTICATED", None)
+    assert _http_access_requirement(
+        "/api/billing/series/00000000-0000-0000-0000-000000000000/checkout"
+    ) == ("AUTHENTICATED", None)
+    assert _http_access_requirement(
+        "/api/billing/events/00000000-0000-0000-0000-000000000000/checkout"
+    ) == ("AUTHENTICATED", None)
     assert _http_access_requirement("/api/future-ai-export") == ("AUTHENTICATED", None)
 
 

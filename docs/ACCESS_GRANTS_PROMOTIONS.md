@@ -1,100 +1,89 @@
-# Access grants and promotions
+# Access grants and competition passes
 
-The product now models premium access as independently revocable grants instead of a single plan boolean.
+The product uses independently revocable capability grants. A grant has an entitlement, a
+source, an optional validity window, and a competition scope.
 
 ## Scope model
 
-A grant has an entitlement, source, validity window, and scope:
+- `GLOBAL`: site-wide operational access, used for explicit development or admin grants.
+- `EVENT`: every series and map in one `canonical_event.id`.
+- `SERIES`: one `canonical_series.id`, including all maps in that BO series.
+- `MAP`: one `canonical_map.id`; the authorization layer supports it even though current commerce
+  sells series and event passes.
 
-- `GLOBAL`: site-wide entitlement. Existing Pro subscription/pass behavior remains GLOBAL.
-- `SERIES`: entitlement applies only to one `canonical_series.id` (the full BO matchup and its maps).
-- `MAP`: entitlement applies only to one `canonical_maps.id`. The authorization layer supports this scope even though V1 commerce sells SERIES rather than individual maps.
-
-`EntitlementService.active_entitlements()` deliberately returns GLOBAL entitlements only. Resource-scoped grants are exposed through `active_grants()` and checked through `has_resource_entitlement()` / `access_scope()`. This prevents buying one series from accidentally turning legacy `user.plan == Pro`-style surfaces into site-wide access.
+`EntitlementService.active_entitlements()` returns GLOBAL rows only. Resource grants are exposed
+through `active_grants()` and checked through `access_scope()` / `has_resource_entitlement()`.
 
 ## Product behavior
 
-### Global Pro
+### Free Access
 
-Paddle monthly and fixed-term Pro products continue to grant both:
+`CanonicalSeries.stage_key == GROUP_STAGE` provides Free AI decision access. AI Performance and
+Review are public across the product. Free Access does not create a database grant and never
+includes realtime notifications.
 
-- `ai_decisions`
-- `realtime_notifications`
+Unknown stages are not treated as group stage. Liquipedia observations are normalized into
+`GROUP_STAGE`, `PAID_STAGE`, or `UNKNOWN`; only the first is free.
 
-with `GLOBAL` scope.
+After a `MapResultRecord` exists, that individual map's normalized AI decisions and post-match
+evaluation are public regardless of stage or purchase status. This historical projection does not
+grant live or unsettled-map access and never enables realtime notifications.
 
-### BO Series Pass
+### Series Pass
 
-When `PADDLE_SERIES_PASS_PRICE_ID` is configured, an authenticated user can buy a one-time pass for a specific canonical series. The server creates the Paddle transaction and persists its trusted mapping to `user_id + canonical_series_id + configured price` before returning checkout.
+`PADDLE_SERIES_PASS_PRICE_ID` configures a one-time, non-expiring product. The authenticated
+checkout endpoint binds the transaction to one canonical BO series before returning the Paddle URL.
+A verified `transaction.completed` event grants `ai_decisions` and `realtime_notifications` with
+`SERIES` scope.
 
-A signed matching `transaction.completed` event grants both premium entitlements with `SERIES` scope. The default access duration is three days (`PADDLE_SERIES_PASS_ACCESS_DAYS`), enough to cover normal BO completion and delayed review without becoming a subscription.
+### Event Pass
 
-Full approved refunds, chargebacks, and chargeback warnings revoke only that purchase source and permanently block the purchase record from automatic reactivation. Chargeback reversals do not auto-regrant in V1.
+`PADDLE_EVENT_PASS_PRICE_ID` configures a one-time, non-expiring product. The authenticated
+checkout endpoint binds the transaction to one canonical event. A verified `transaction.completed`
+event grants both premium entitlements with `EVENT` scope; authorization resolves that grant
+through every series and map in the event.
 
-The series pass unlocks:
+Both passes keep historical AI decisions available after the event ends, while settled individual
+maps expose their normalized AI decisions publicly even without a pass. Realtime notifications
+are never replayed for historical snapshots.
 
-- premium AI decisions for maps inside that canonical series;
-- Email / QQ / WeChat decision notifications only for snapshots inside that series.
-
-It deliberately does **not** unlock cross-match `/review` or raw `/api/snapshots/*` diagnostics. Those remain GLOBAL Pro surfaces in V1.
+Full approved refunds, chargebacks, and chargeback warnings revoke only the affected purchase
+source and permanently block that purchase from automatic reactivation. Partial refunds do not
+remove the whole purchase.
 
 ## Notification enforcement
 
-A scoped notification grant is checked twice:
+A scoped realtime grant is checked twice:
 
-1. when a per-user delivery row is created, by resolving `snapshot -> map -> series`;
-2. immediately before provider send.
+1. when a delivery row is created, by resolving `snapshot -> map -> series -> event`;
+2. immediately before the provider sends the delivery.
 
-A refund, expiry, disabled account, binding change, or preference change therefore prevents a previously queued delivery from escaping its current authorization scope.
-
-## Referrals
-
-Referral campaigns are disabled by default (`REFERRAL_ENABLED=false`).
-
-Each active account can obtain one stable referral code. A newly created account may claim one code within `REFERRAL_CLAIM_WINDOW_DAYS`. Self-referral and multiple inviter attribution are rejected.
-
-A claim alone gives no premium access. V1 qualification requires the invited account's first verified Paddle `transaction.completed` purchase after the server-owned billing mapping has been reconciled. Defaults:
-
-- inviter: 7 GLOBAL Pro days;
-- invited user: 3 GLOBAL Pro days;
-- up to 20 rewarded referrals per inviter.
-
-Rewards grant both premium entitlements and are tagged with the configured campaign key and referral-specific source. Repeated inviter rewards stack sequentially rather than overlap. A full refund or chargeback of the qualifying purchase revokes only the grants created by that referral attribution.
+A refund, disabled account, binding change, or preference change therefore cancels a queued
+delivery that no longer has permission.
 
 ## API and UI
 
-Authenticated resource inspection:
-
 ```text
-GET /api/access/maps/{canonical_map_id}
-```
-
-Referral:
-
-```text
+GET  /api/access/maps/{canonical_map_id}
+POST /api/billing/series/{canonical_series_id}/checkout
+POST /api/billing/events/{canonical_event_id}/checkout
 GET  /api/promotions/referral
 POST /api/promotions/referral/claim
 ```
 
-Series checkout:
-
-```text
-POST /api/billing/series/{canonical_series_id}/checkout
-```
-
-The `/billing?series=<canonical_series_id>` UI presents a series-specific pass alongside GLOBAL Pro products. `/billing?ref=<code>` preserves an invite code through login and lets the user claim the attribution.
+The UI uses `/billing?series=<canonical_series_id>` for a Series Pass and
+`/billing?event=<canonical_event_id>` for an Event Pass.
 
 ## Configuration
 
 ```text
-PADDLE_SERIES_PASS_PRICE_ID=
-PADDLE_SERIES_PASS_ACCESS_DAYS=3
-REFERRAL_ENABLED=false
-REFERRAL_CAMPAIGN_KEY=referral-v1
-REFERRAL_CLAIM_WINDOW_DAYS=7
-REFERRAL_INVITER_REWARD_DAYS=7
-REFERRAL_INVITED_REWARD_DAYS=3
-REFERRAL_MAX_REWARDS_PER_INVITER=20
+PADDLE_ENABLED=true
+PADDLE_ENVIRONMENT=sandbox
+PADDLE_API_KEY=<sandbox API key>
+PADDLE_WEBHOOK_SECRET=<notification destination secret>
+PADDLE_SERIES_PASS_PRICE_ID=<one-time Series Pass price id>
+PADDLE_EVENT_PASS_PRICE_ID=<one-time Event Pass price id>
 ```
 
-These settings do not weaken the provider boundary: crypto/stablecoin remains a separate future adapter, and all Paddle purchase grants still require the signed webhook plus a server-owned transaction mapping.
+Paddle webhooks remain the only source that provisions paid access. Frontend payment state never
+grants an entitlement directly.

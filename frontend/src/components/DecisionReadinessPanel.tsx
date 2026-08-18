@@ -5,6 +5,7 @@ import type {
   AiReadinessSeries,
   AiReadinessStage
 } from "../performanceApi";
+import "./decision-readiness.css";
 
 export function DecisionReadinessPanel({
   data,

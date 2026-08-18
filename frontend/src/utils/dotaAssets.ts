@@ -1,5 +1,7 @@
 // Dota 2 assets, hero portraits & pro team logos
 
+import { getOfficialTeamLogoUrlByName } from "./officialVisuals";
+
 const HERO_NAME_TO_SHORT: Record<string, string> = {
   "anti-mage": "antimage",
   "antimage": "antimage",
@@ -137,7 +139,7 @@ const HERO_NAME_TO_SHORT: Record<string, string> = {
   "troll_warlord": "troll_warlord",
   "centaur warrunner": "centaur",
   "centaur": "centaur",
-  "magnus": "magnus",
+  "magnus": "magnataur",
   "timbersaw": "shredder",
   "shredder": "shredder",
   "bristleback": "bristleback",
@@ -183,44 +185,6 @@ const HERO_NAME_TO_SHORT: Record<string, string> = {
   "kez": "kez"
 };
 
-const TEAM_NAME_TO_LOGO_ID: Record<string, string> = {
-  "team spirit": "711938",
-  "spirit": "711938",
-  "team liquid": "2163",
-  "liquid": "2163",
-  "gaimin gladiators": "8599101",
-  "gladiators": "8599101",
-  "betboom team": "8254400",
-  "betboom": "8254400",
-  "xtreme gaming": "8261883",
-  "xtreme": "8261883",
-  "aurora": "8894263",
-  "aurora gaming": "8894263",
-  "team falcons": "9247354",
-  "falcons": "9247354",
-  "tundra esports": "8255888",
-  "tundra": "8255888",
-  "og": "2586976",
-  "parivision": "9579040",
-  "heroic": "9303498",
-  "virtus.pro": "1883502",
-  "virtus pro": "1883502",
-  "lgd gaming": "15",
-  "lgd": "15",
-  "team secret": "1838315",
-  "secret": "1838315",
-  "natus vincere": "36",
-  "navi": "36",
-  "azure ray": "8948704",
-  "talon esports": "8567878",
-  "talon": "8567878",
-  "shopify rebellion": "8721219",
-  "cloud9": "1333179",
-  "nouns": "8721219",
-  "boom esports": "7408018",
-  "blacklist international": "8949823"
-};
-
 export function getHeroShortName(name: string | null | undefined): string | null {
   if (!name) return null;
   const normalized = name.trim().toLowerCase();
@@ -237,14 +201,7 @@ export function getHeroPortraitUrl(heroName: string | null | undefined): string 
 }
 
 export function getTeamLogoUrl(teamName: string | null | undefined): string | null {
-  if (!teamName) return null;
-  const normalized = teamName.trim().toLowerCase();
-  for (const [key, logoId] of Object.entries(TEAM_NAME_TO_LOGO_ID)) {
-    if (normalized === key || normalized.includes(key)) {
-      return `https://cdn.stratz.com/images/dota2/teams/${logoId}.png`;
-    }
-  }
-  return null;
+  return getOfficialTeamLogoUrlByName(teamName);
 }
 
 export function getPositionLabel(pos: number): string {

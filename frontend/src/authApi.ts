@@ -9,7 +9,7 @@ export interface AuthUser {
 
 export interface AccessGrant {
   entitlement: string;
-  scope_type: "GLOBAL" | "SERIES" | "MAP" | string;
+  scope_type: "GLOBAL" | "EVENT" | "SERIES" | "MAP" | string;
   scope_ref: string | null;
   campaign_key: string | null;
   starts_at: string | null;
@@ -28,7 +28,7 @@ export interface AuthSessionState {
   user: AuthUser | null;
   /** Site-wide/global entitlements only. */
   entitlements: string[];
-  /** Includes GLOBAL plus resource-scoped SERIES/MAP grants. */
+  /** Includes GLOBAL plus resource-scoped EVENT/SERIES/MAP grants. */
   grants: AccessGrant[];
   providers?: AuthProviderAvailability;
 }

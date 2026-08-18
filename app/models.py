@@ -78,12 +78,16 @@ class CanonicalHero(Base):
 
 class CanonicalSeries(Base):
     __tablename__ = "canonical_series"
+    __table_args__ = (Index("ix_canonical_series_scheduled", "scheduled_at"),)
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     event_id: Mapped[UUID | None] = mapped_column(ForeignKey("canonical_events.id"))
     team_a_id: Mapped[UUID] = mapped_column(ForeignKey("canonical_teams.id"), nullable=False)
     team_b_id: Mapped[UUID] = mapped_column(ForeignKey("canonical_teams.id"), nullable=False)
     best_of: Mapped[int | None] = mapped_column(Integer)
+    stage_key: Mapped[str] = mapped_column(
+        String(32), nullable=False, default="UNKNOWN", server_default="UNKNOWN"
+    )
     scheduled_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
@@ -92,6 +96,7 @@ class CanonicalMap(Base):
     __tablename__ = "canonical_maps"
     __table_args__ = (
         UniqueConstraint("series_id", "map_number", name="uq_canonical_maps_series_map"),
+        Index("ix_canonical_map_series_scheduled", "series_id", "scheduled_at"),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
@@ -168,6 +173,8 @@ class ProviderMatchMapping(Base):
     __table_args__ = (
         UniqueConstraint("provider", "provider_match_id", name="uq_provider_match_identity"),
         Index("ix_provider_match_valve_id", "valve_match_id"),
+        Index("ix_provider_match_provider_map", "provider", "canonical_map_id"),
+        Index("ix_provider_match_provider_series", "provider", "canonical_series_id"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -246,6 +253,14 @@ class OddsObservationRecord(Base):
     __tablename__ = "odds_observations"
     __table_args__ = (
         Index("ix_odds_map_received", "canonical_map_id", "received_at"),
+        Index("ix_odds_map_market_received", "canonical_map_id", "market_type", "received_at"),
+        Index(
+            "ix_odds_series_market_received",
+            "canonical_series_id",
+            "market_type",
+            "received_at",
+        ),
+        Index("ix_odds_id_received", "odds_id", "received_at"),
         Index("ix_odds_id_provider_time", "odds_id", "provider_updated_at"),
         Index("ix_odds_received_brin", "received_at", postgresql_using="brin"),
         {"postgresql_partition_by": "RANGE (received_at)"},
@@ -277,7 +292,10 @@ class OddsObservationRecord(Base):
 
 class DraftSnapshotRecord(Base):
     __tablename__ = "draft_snapshots"
-    __table_args__ = (Index("ix_draft_map_cutoff", "canonical_map_id", "statistics_cutoff"),)
+    __table_args__ = (
+        Index("ix_draft_map_cutoff", "canonical_map_id", "statistics_cutoff"),
+        Index("ix_draft_map_observed", "canonical_map_id", "observed_at"),
+    )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     canonical_map_id: Mapped[UUID] = mapped_column(ForeignKey("canonical_maps.id"), nullable=False)
@@ -668,6 +686,8 @@ class AiDecisionRecord(Base):
             name="uq_ai_experiment",
         ),
         Index("ix_ai_snapshot_provider", "snapshot_hash", "provider"),
+        Index("ix_ai_snapshot_request", "snapshot_id", "request_started_at"),
+        Index("ix_ai_request_started", "request_started_at"),
     )
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
@@ -757,6 +777,12 @@ class DecisionFutureOdds(Base):
             "decision_snapshot_id", "capture_type", "due_at", name="uq_future_odds_capture"
         ),
         Index("ix_future_odds_due_brin", "due_at", postgresql_using="brin"),
+        Index(
+            "ix_future_odds_snapshot_capture_status",
+            "decision_snapshot_id",
+            "capture_type",
+            "status",
+        ),
         {"postgresql_partition_by": "RANGE (due_at)"},
     )
 
@@ -782,6 +808,7 @@ class DecisionFutureOdds(Base):
 
 class MapResultRecord(Base):
     __tablename__ = "map_results"
+    __table_args__ = (Index("ix_map_results_settled", "settled_at"),)
 
     id: Mapped[UUID] = mapped_column(Uuid, primary_key=True, default=uuid4)
     canonical_map_id: Mapped[UUID] = mapped_column(ForeignKey("canonical_maps.id"), unique=True)

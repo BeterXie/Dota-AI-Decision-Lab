@@ -8,6 +8,7 @@ from uuid import UUID
 from fastapi import APIRouter, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.orm import load_only
 
 from app.ai.eligibility import ai_record_is_game_time_eligible
 from app.market.fair_probability import remove_vig
@@ -36,29 +37,32 @@ def create_review_router(
     cache_ttl_seconds: float = REVIEW_CACHE_TTL_SECONDS,
 ) -> APIRouter:
     router = APIRouter()
-    cache: dict[int, tuple[float, dict[str, Any]]] = {}
+    cache: dict[tuple[int, int], tuple[float, dict[str, Any]]] = {}
     cache_lock = asyncio.Lock()
 
     @router.get("/api/review/matches")
     async def review_matches(
         limit: int = Query(default=100, ge=1, le=200),
+        offset: int = Query(default=0, ge=0, le=100_000),
     ) -> dict[str, Any]:
+        cache_key = (limit, offset)
         now = monotonic()
-        cached = cache.get(limit)
+        cached = cache.get(cache_key)
         if cached is not None and now - cached[0] < cache_ttl_seconds:
             return cached[1]
         async with cache_lock:
             now = monotonic()
-            cached = cache.get(limit)
+            cached = cache.get(cache_key)
             if cached is not None and now - cached[0] < cache_ttl_seconds:
                 return cached[1]
             async with session_factory() as session:
                 payload = await build_review_payload(
                     session,
                     limit=limit,
+                    offset=offset,
                     ai_min_game_time_seconds=ai_min_game_time_seconds,
                 )
-            cache[limit] = (monotonic(), payload)
+            cache[cache_key] = (monotonic(), payload)
             return payload
 
     return router
@@ -68,6 +72,7 @@ async def build_review_payload(
     session: AsyncSession,
     *,
     limit: int = 100,
+    offset: int = 0,
     ai_min_game_time_seconds: int = 600,
 ) -> dict[str, Any]:
     """Build a post-match review projection from immutable/audited records.
@@ -79,25 +84,49 @@ async def build_review_payload(
     snapshot/provider/model before accuracy is aggregated.
     """
 
-    results = list(
+    result_page = list(
         (
             await session.scalars(
                 select(MapResultRecord)
+                .options(
+                    load_only(
+                        MapResultRecord.canonical_map_id,
+                        MapResultRecord.winner_team_id,
+                        MapResultRecord.settled_at,
+                    )
+                )
                 .where(
                     MapResultRecord.winner_team_id.is_not(None),
                     MapResultRecord.provider_conflict.is_(False),
                 )
-                .order_by(MapResultRecord.settled_at.desc())
-                .limit(limit)
+                .order_by(MapResultRecord.settled_at.desc(), MapResultRecord.id.desc())
+                .offset(offset)
+                .limit(limit + 1)
             )
         ).all()
     )
+    has_more = len(result_page) > limit
+    results = result_page[:limit]
     if not results:
-        return _empty_payload()
+        return _empty_payload(limit=limit, offset=offset, has_more=False)
 
     map_ids = [item.canonical_map_id for item in results]
     maps = list(
-        (await session.scalars(select(CanonicalMap).where(CanonicalMap.id.in_(map_ids)))).all()
+        (
+            await session.scalars(
+                select(CanonicalMap)
+                .options(
+                    load_only(
+                        CanonicalMap.id,
+                        CanonicalMap.series_id,
+                        CanonicalMap.map_number,
+                        CanonicalMap.valve_match_id,
+                        CanonicalMap.scheduled_at,
+                    )
+                )
+                .where(CanonicalMap.id.in_(map_ids))
+            )
+        ).all()
     )
     map_by_id = {item.id: item for item in maps}
 
@@ -106,7 +135,17 @@ async def build_review_payload(
         list(
             (
                 await session.scalars(
-                    select(CanonicalSeries).where(CanonicalSeries.id.in_(series_ids))
+                    select(CanonicalSeries)
+                    .options(
+                        load_only(
+                            CanonicalSeries.id,
+                            CanonicalSeries.event_id,
+                            CanonicalSeries.team_a_id,
+                            CanonicalSeries.team_b_id,
+                            CanonicalSeries.scheduled_at,
+                        )
+                    )
+                    .where(CanonicalSeries.id.in_(series_ids))
                 )
             ).all()
         )
@@ -121,7 +160,11 @@ async def build_review_payload(
     teams = (
         list(
             (
-                await session.scalars(select(CanonicalTeam).where(CanonicalTeam.id.in_(team_ids)))
+                await session.scalars(
+                    select(CanonicalTeam)
+                    .options(load_only(CanonicalTeam.id, CanonicalTeam.name))
+                    .where(CanonicalTeam.id.in_(team_ids))
+                )
             ).all()
         )
         if team_ids
@@ -134,7 +177,9 @@ async def build_review_payload(
         list(
             (
                 await session.scalars(
-                    select(CanonicalEvent).where(CanonicalEvent.id.in_(event_ids))
+                    select(CanonicalEvent)
+                    .options(load_only(CanonicalEvent.id, CanonicalEvent.name))
+                    .where(CanonicalEvent.id.in_(event_ids))
                 )
             ).all()
         )
@@ -147,6 +192,14 @@ async def build_review_payload(
         (
             await session.scalars(
                 select(DecisionSnapshotRecord)
+                .options(
+                    load_only(
+                        DecisionSnapshotRecord.id,
+                        DecisionSnapshotRecord.canonical_map_id,
+                        DecisionSnapshotRecord.decision_at,
+                        DecisionSnapshotRecord.canonical_payload,
+                    )
+                )
                 .where(DecisionSnapshotRecord.canonical_map_id.in_(map_ids))
                 .order_by(
                     DecisionSnapshotRecord.canonical_map_id,
@@ -167,7 +220,22 @@ async def build_review_payload(
         list(
             (
                 await session.scalars(
-                    select(AiDecisionRecord).where(AiDecisionRecord.snapshot_id.in_(snapshot_ids))
+                    select(AiDecisionRecord)
+                    .options(
+                        load_only(
+                            AiDecisionRecord.id,
+                            AiDecisionRecord.snapshot_id,
+                            AiDecisionRecord.provider,
+                            AiDecisionRecord.model,
+                            AiDecisionRecord.prompt_version,
+                            AiDecisionRecord.decision_policy_version,
+                            AiDecisionRecord.ai_view_version,
+                            AiDecisionRecord.request_started_at,
+                            AiDecisionRecord.normalized_response,
+                            AiDecisionRecord.parse_status,
+                        )
+                    )
+                    .where(AiDecisionRecord.snapshot_id.in_(snapshot_ids))
                 )
             ).all()
         )
@@ -180,8 +248,16 @@ async def build_review_payload(
         list(
             (
                 await session.scalars(
-                    select(DecisionEvaluationRecord).where(
-                        DecisionEvaluationRecord.ai_decision_id.in_(decision_ids)
+                    select(DecisionEvaluationRecord)
+                    .where(DecisionEvaluationRecord.ai_decision_id.in_(decision_ids))
+                    .options(
+                        load_only(
+                            DecisionEvaluationRecord.ai_decision_id,
+                            DecisionEvaluationRecord.result_correct,
+                            DecisionEvaluationRecord.brier_score,
+                            DecisionEvaluationRecord.log_loss,
+                            DecisionEvaluationRecord.unit_pnl,
+                        )
                     )
                 )
             ).all()
@@ -195,10 +271,21 @@ async def build_review_payload(
         list(
             (
                 await session.scalars(
-                    select(DecisionFutureOdds).where(
+                    select(DecisionFutureOdds)
+                    .where(
                         DecisionFutureOdds.decision_snapshot_id.in_(snapshot_ids),
                         DecisionFutureOdds.capture_type == "CLOSING",
                         DecisionFutureOdds.status == "CAPTURED",
+                    )
+                    .options(
+                        load_only(
+                            DecisionFutureOdds.decision_snapshot_id,
+                            DecisionFutureOdds.triggered_at,
+                            DecisionFutureOdds.observed_at,
+                            DecisionFutureOdds.odds_a,
+                            DecisionFutureOdds.odds_b,
+                            DecisionFutureOdds.status,
+                        )
                     )
                 )
             ).all()
@@ -269,6 +356,13 @@ async def build_review_payload(
             ),
         ),
         "matches": rows,
+        "pagination": {
+            "limit": limit,
+            "offset": offset,
+            "returned": len(rows),
+            "has_more": has_more,
+            "next_offset": offset + len(results) if has_more else None,
+        },
         "methodology": {
             "rosh_reference_minute": ROSH_REFERENCE_MINUTE,
             "rosh_review_minutes": list(ROSH_REVIEW_MINUTES),
@@ -280,7 +374,7 @@ async def build_review_payload(
     }
 
 
-def _empty_payload() -> dict[str, Any]:
+def _empty_payload(*, limit: int, offset: int, has_more: bool) -> dict[str, Any]:
     return {
         "summary": {
             "settled_maps": 0,
@@ -293,6 +387,13 @@ def _empty_payload() -> dict[str, Any]:
             "odds": {"eligible_maps": 0, "closing_captured": 0, "closing_coverage": None},
         },
         "matches": [],
+        "pagination": {
+            "limit": limit,
+            "offset": offset,
+            "returned": 0,
+            "has_more": has_more,
+            "next_offset": offset if has_more else None,
+        },
         "methodology": {
             "rosh_reference_minute": ROSH_REFERENCE_MINUTE,
             "rosh_review_minutes": list(ROSH_REVIEW_MINUTES),

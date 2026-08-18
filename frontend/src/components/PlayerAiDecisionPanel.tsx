@@ -32,7 +32,7 @@ export function PlayerAiDecisionPanel({
     let cancelled = false;
     let timer: number | null = null;
 
-    // Snapshot detail remains a global-Pro diagnostics surface. SERIES/MAP
+    // Snapshot detail remains a global diagnostics surface. SERIES/MAP
     // access receives the authorized decisions from the map premium endpoint
     // and must not accidentally poll the cross-product snapshot API.
     if (!access.entitled || access.scope !== "GLOBAL" || !currentSnapshotId) {
@@ -68,10 +68,10 @@ export function PlayerAiDecisionPanel({
 
   if (!access.entitled) {
     return (
-      <section className="analytics-card ai-decision-container" aria-label="AI Decision Pro">
+      <section className="analytics-card ai-decision-container" aria-label="AI Decision access">
         <div className="player-section-heading">
           <div>
-            <span className="section-kicker">PRO INTELLIGENCE</span>
+            <span className="section-kicker">AI INTELLIGENCE</span>
             <h3>{locale === "zh-CN" ? "AI 实时决策" : "Live AI decisions"}</h3>
           </div>
           <span className="trust-pill degraded">LOCKED</span>
@@ -88,8 +88,8 @@ export function PlayerAiDecisionPanel({
           </span>
           <span>
             {locale === "zh-CN"
-              ? "可以升级全局 Pro，也可以只购买当前 BO 系列赛通行证。方向、置信度、公允概率、下注建议与推理只在有效权限范围内开放。"
-              : "Upgrade to global Pro or buy only this BO series pass. Direction, confidence, fair probability, staking and reasoning stay inside the purchased access scope."}
+                ? "可以购买当前 BO 系列赛或所属赛事的 Pass。方向、置信度、公允概率、下注建议与推理只在有效权限范围内开放。"
+                : "Buy the current BO series or its event pass. Direction, confidence, fair probability, staking and reasoning stay inside the purchased access scope."}
           </span>
         </div>
         {!access.authenticated && access.authEnabled && (
@@ -105,7 +105,7 @@ export function PlayerAiDecisionPanel({
                 : "This account does not have AI Decision access for this match."}
             </div>
             <a className="auth-primary-btn" href={access.upgradeHref}>
-              {locale === "zh-CN" ? "查看当前比赛通行证 / Pro" : "View series pass / Pro"}
+              {locale === "zh-CN" ? "查看当前比赛 Pass" : "View competition pass"}
             </a>
           </>
         )}
@@ -122,14 +122,28 @@ export function PlayerAiDecisionPanel({
 
   return (
     <>
-      {access.scope !== "GLOBAL" && (
+      {access.scope !== "GLOBAL" && access.scope !== "FREE" && access.scope !== "POSTMATCH" && (
         <section className="analytics-card ai-decision-container" aria-label="Scoped AI access">
           <div className="player-agreement-summary">
             <span>
               {locale === "zh-CN"
-                ? `当前 AI 权限范围：${access.scope === "SERIES" ? "本 BO 系列赛" : "本局 Map"}`
-                : `Current AI access scope: ${access.scope === "SERIES" ? "this BO series" : "this map"}`}
+                ? `当前 AI 权限范围：${access.scope === "EVENT" ? "本赛事" : access.scope === "SERIES" ? "本 BO 系列赛" : "本局 Map"}`
+                : `Current AI access scope: ${access.scope === "EVENT" ? "this event" : access.scope === "SERIES" ? "this BO series" : "this map"}`}
             </span>
+          </div>
+        </section>
+      )}
+      {access.scope === "FREE" && (
+        <section className="analytics-card ai-decision-container" aria-label="Free group stage access">
+          <div className="player-agreement-summary">
+            <span>{locale === "zh-CN" ? "小组赛 AI 决策已对 Free 开放" : "Group-stage AI decisions are open on Free Access"}</span>
+          </div>
+        </section>
+      )}
+      {access.scope === "POSTMATCH" && (
+        <section className="analytics-card ai-decision-container" aria-label="Post-match public access">
+          <div className="player-agreement-summary">
+            <span>{locale === "zh-CN" ? "比赛已结束，AI 决策数据对所有用户公开" : "The match is over; AI decisions are public to everyone"}</span>
           </div>
         </section>
       )}
@@ -154,7 +168,7 @@ export function PlayerAiDecisionPanel({
       {access.loading && decisions.length === 0 ? (
         <section className="analytics-card ai-decision-container">
           <div className="empty-rail-msg">
-            {locale === "zh-CN" ? "正在读取 Pro AI 决策…" : "Loading Pro AI decisions…"}
+            {locale === "zh-CN" ? "正在读取 AI 决策…" : "Loading AI decisions…"}
           </div>
         </section>
       ) : (

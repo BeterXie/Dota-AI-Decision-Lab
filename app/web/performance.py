@@ -8,6 +8,7 @@ from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import load_only
 
 from app.models import (
     AiDecisionRecord,
@@ -33,6 +34,7 @@ async def build_ai_performance_payload(
     session: AsyncSession,
     *,
     limit: int = 1000,
+    offset: int = 0,
 ) -> dict[str, Any]:
     """Build the user-facing, auditable projection for AI experiment performance.
 
@@ -42,17 +44,55 @@ async def build_ai_performance_payload(
     older results.
     """
 
-    decisions = list(
+    decision_page = list(
         (
             await session.scalars(
                 select(AiDecisionRecord)
-                .order_by(AiDecisionRecord.request_started_at.desc())
-                .limit(limit)
+                .options(
+                    load_only(
+                        AiDecisionRecord.id,
+                        AiDecisionRecord.snapshot_id,
+                        AiDecisionRecord.snapshot_hash,
+                        AiDecisionRecord.provider,
+                        AiDecisionRecord.model,
+                        AiDecisionRecord.model_version,
+                        AiDecisionRecord.prompt_version,
+                        AiDecisionRecord.decision_policy_version,
+                        AiDecisionRecord.ai_view_version,
+                        AiDecisionRecord.ai_input_hash,
+                        AiDecisionRecord.bankroll_before,
+                        AiDecisionRecord.stake,
+                        AiDecisionRecord.job_enqueued_at,
+                        AiDecisionRecord.job_claimed_at,
+                        AiDecisionRecord.input_prepare_started_at,
+                        AiDecisionRecord.input_prepare_completed_at,
+                        AiDecisionRecord.request_started_at,
+                        AiDecisionRecord.response_received_at,
+                        AiDecisionRecord.latency_seconds,
+                        AiDecisionRecord.input_tokens,
+                        AiDecisionRecord.cached_input_tokens,
+                        AiDecisionRecord.reasoning_tokens,
+                        AiDecisionRecord.output_tokens,
+                        AiDecisionRecord.total_tokens,
+                        AiDecisionRecord.decision_persisted_at,
+                        AiDecisionRecord.normalized_response,
+                        AiDecisionRecord.parse_status,
+                        AiDecisionRecord.error,
+                    )
+                )
+                .order_by(
+                    AiDecisionRecord.request_started_at.desc(),
+                    AiDecisionRecord.id.desc(),
+                )
+                .offset(offset)
+                .limit(limit + 1)
             )
         ).all()
     )
+    has_more = len(decision_page) > limit
+    decisions = decision_page[:limit]
     if not decisions:
-        return _empty_payload(limit)
+        return _empty_payload(limit, offset=offset, has_more=False)
 
     decision_ids = [record.id for record in decisions]
     snapshot_ids = list({record.snapshot_id for record in decisions})
@@ -60,8 +100,22 @@ async def build_ai_performance_payload(
     evaluations = list(
         (
             await session.scalars(
-                select(DecisionEvaluationRecord).where(
-                    DecisionEvaluationRecord.ai_decision_id.in_(decision_ids)
+                select(DecisionEvaluationRecord)
+                .where(DecisionEvaluationRecord.ai_decision_id.in_(decision_ids))
+                .options(
+                    load_only(
+                        DecisionEvaluationRecord.ai_decision_id,
+                        DecisionEvaluationRecord.result_correct,
+                        DecisionEvaluationRecord.brier_score,
+                        DecisionEvaluationRecord.log_loss,
+                        DecisionEvaluationRecord.clv,
+                        DecisionEvaluationRecord.future_odds_direction,
+                        DecisionEvaluationRecord.virtual_pnl,
+                        DecisionEvaluationRecord.virtual_odds,
+                        DecisionEvaluationRecord.unit_pnl,
+                        DecisionEvaluationRecord.evaluated_at,
+                        DecisionEvaluationRecord.metrics_version,
+                    )
                 )
             )
         ).all()
@@ -71,7 +125,16 @@ async def build_ai_performance_payload(
     snapshots = list(
         (
             await session.scalars(
-                select(DecisionSnapshotRecord).where(DecisionSnapshotRecord.id.in_(snapshot_ids))
+                select(DecisionSnapshotRecord)
+                .options(
+                    load_only(
+                        DecisionSnapshotRecord.id,
+                        DecisionSnapshotRecord.canonical_map_id,
+                        DecisionSnapshotRecord.decision_at,
+                        DecisionSnapshotRecord.mode,
+                    )
+                )
+                .where(DecisionSnapshotRecord.id.in_(snapshot_ids))
             )
         ).all()
     )
@@ -144,6 +207,13 @@ async def build_ai_performance_payload(
         },
         "experiments": experiments,
         "decisions": traces,
+        "pagination": {
+            "limit": limit,
+            "offset": offset,
+            "returned": len(decisions),
+            "has_more": has_more,
+            "next_offset": offset + len(decisions) if has_more else None,
+        },
         "methodology": {
             "query_limit": limit,
             "experiment_identity": list(EXPERIMENT_IDENTITY_FIELDS),
@@ -158,7 +228,7 @@ async def build_ai_performance_payload(
     }
 
 
-def _empty_payload(limit: int) -> dict[str, Any]:
+def _empty_payload(limit: int, *, offset: int, has_more: bool) -> dict[str, Any]:
     return {
         "summary": {
             "attempts": 0,
@@ -177,6 +247,13 @@ def _empty_payload(limit: int) -> dict[str, Any]:
         },
         "experiments": [],
         "decisions": [],
+        "pagination": {
+            "limit": limit,
+            "offset": offset,
+            "returned": 0,
+            "has_more": has_more,
+            "next_offset": offset if has_more else None,
+        },
         "methodology": {
             "query_limit": limit,
             "experiment_identity": list(EXPERIMENT_IDENTITY_FIELDS),
@@ -413,14 +490,36 @@ async def _load_match_contexts(
         return {}
 
     maps = list(
-        (await session.scalars(select(CanonicalMap).where(CanonicalMap.id.in_(map_ids)))).all()
+        (
+            await session.scalars(
+                select(CanonicalMap)
+                .options(
+                    load_only(
+                        CanonicalMap.id,
+                        CanonicalMap.series_id,
+                        CanonicalMap.map_number,
+                        CanonicalMap.valve_match_id,
+                    )
+                )
+                .where(CanonicalMap.id.in_(map_ids))
+            )
+        ).all()
     )
     series_ids = list({record.series_id for record in maps if record.series_id is not None})
     series = (
         list(
             (
                 await session.scalars(
-                    select(CanonicalSeries).where(CanonicalSeries.id.in_(series_ids))
+                    select(CanonicalSeries)
+                    .options(
+                        load_only(
+                            CanonicalSeries.id,
+                            CanonicalSeries.event_id,
+                            CanonicalSeries.team_a_id,
+                            CanonicalSeries.team_b_id,
+                        )
+                    )
+                    .where(CanonicalSeries.id.in_(series_ids))
                 )
             ).all()
         )
@@ -435,7 +534,11 @@ async def _load_match_contexts(
     teams = (
         list(
             (
-                await session.scalars(select(CanonicalTeam).where(CanonicalTeam.id.in_(team_ids)))
+                await session.scalars(
+                    select(CanonicalTeam)
+                    .options(load_only(CanonicalTeam.id, CanonicalTeam.name))
+                    .where(CanonicalTeam.id.in_(team_ids))
+                )
             ).all()
         )
         if team_ids
@@ -448,7 +551,9 @@ async def _load_match_contexts(
         list(
             (
                 await session.scalars(
-                    select(CanonicalEvent).where(CanonicalEvent.id.in_(event_ids))
+                    select(CanonicalEvent)
+                    .options(load_only(CanonicalEvent.id, CanonicalEvent.name))
+                    .where(CanonicalEvent.id.in_(event_ids))
                 )
             ).all()
         )

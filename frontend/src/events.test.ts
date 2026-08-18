@@ -4,6 +4,7 @@ import {
   buildEventSummaries,
   buildSeriesSummaries,
   eventHref,
+  eventName,
   eventNameFromPath,
   eventSlug
 } from "./events";
@@ -75,14 +76,15 @@ describe("event aggregation", () => {
   });
 
   it("uses readable ASCII slugs for public event URLs", () => {
-    expect(eventSlug("TI15 国际邀请赛")).toBe("ti15-international");
-    expect(eventHref("TI15 国际邀请赛")).toBe("/events/ti15-international");
+    expect(eventName(match({}))).toBe("The International 2026");
+    expect(eventSlug("TI15 国际邀请赛")).toBe("the-international-2026");
+    expect(eventHref("TI15 国际邀请赛")).toBe("/events/the-international-2026");
     expect(eventSlug("DreamLeague S24")).toBe("dreamleague-s24");
   });
 
-  it("keeps legacy encoded event-name URLs readable", () => {
-    const name = "TI15 国际邀请赛";
+  it("keeps encoded event-name URLs readable", () => {
+    const name = "The International 2026";
     expect(eventNameFromPath(`/events/${encodeURIComponent(name)}`)).toBe(name);
-    expect(eventNameFromPath(eventHref(name))).toBe("ti15-international");
+    expect(eventNameFromPath(eventHref(name))).toBe("the-international-2026");
   });
 });
