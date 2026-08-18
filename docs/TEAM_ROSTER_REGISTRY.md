@@ -95,7 +95,33 @@ The population pass:
 - preserves already maintained slug, tag, logo, website and source fields
 - never overwrites a conflicting maintained Valve Team ID
 
-The command is a maintenance operation. It does not imply that every historical Dota team has already been populated in a particular deployment. Run it after identity discovery, or schedule it in the deployment's maintenance workflow as appropriate.
+The command remains available for manual repair/backfill, but normal active-event maintenance is automatic as described below.
+
+## Automatic event cadence
+
+Registry maintenance follows the RayBet event lifecycle rather than polling every team continuously:
+
+1. when a new RayBet event is first discovered, schedule one team-registry refresh for the teams currently known in that event;
+2. while the event has not started, schedule one additional refresh for each completed 24-hour interval since discovery;
+3. once the event starts, stop the pre-start registry refresh cycle.
+
+The scheduler checks for due work every 60 seconds, but the durable job key is scoped to the canonical event and refresh cycle. Repeated scheduler checks therefore do not create repeated OpenDota roster requests inside the same 24-hour cycle.
+
+Event start uses `canonical_events.started_at` when an explicit start is known. Otherwise it uses the earliest confirmed `canonical_series.scheduled_at` in the event. If neither is known, the initial discovery refresh still runs, but recurring pre-start refreshes wait until a start can be determined.
+
+A newly discovered RayBet team may not yet have an OpenDota mapping. The registry job first runs the existing OpenDota identity resolver for the same canonical team, then populates the profile and roster. Ambiguous identities remain unresolved rather than being guessed.
+
+### Isolation from RayBet odds identity
+
+Team-registry maintenance is deliberately separate from RayBet match and odds identity:
+
+- RayBet discovery owns `ProviderMatchMapping(provider='raybet')` and `ProviderTeamMapping(provider='raybet')`;
+- RayBet odds bootstrap owns `RayBetOddsRegistry` and the provider odds metadata;
+- team-registry jobs resolve/read OpenDota identities and write team profile, player and roster-maintenance data;
+- team-registry code does not rewrite the RayBet provider match mapping, RayBet provider team mapping or RayBet odds registry;
+- team-registry work runs in its own durable job worker and database transaction, so an OpenDota timeout/retry/failure cannot roll back a completed RayBet discovery or odds-registry transaction.
+
+This separation is intentional: roster/presentation enrichment may lag without breaking the core RayBet odds-to-match association path.
 
 ## Player roster synchronization
 
