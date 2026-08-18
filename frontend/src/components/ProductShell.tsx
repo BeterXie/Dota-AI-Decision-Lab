@@ -17,7 +17,7 @@ const navItems: Array<{ key: ProductNavKey; href: string; zh: string; en: string
   { key: "events", href: "/events", zh: "赛事", en: "Events" },
   { key: "performance", href: "/performance", zh: "AI 表现", en: "AI Performance" },
   { key: "review", href: "/review", zh: "复盘", en: "Review" },
-  { key: "billing", href: "/billing", zh: "订阅", en: "Plans" }
+  { key: "billing", href: "/billing", zh: "会员方案", en: "Access" }
 ];
 
 export const ProductShell: React.FC<ProductShellProps> = ({
@@ -29,14 +29,11 @@ export const ProductShell: React.FC<ProductShellProps> = ({
 }) => {
   const { locale, setLocale } = useI18n();
   const [menuOpen, setMenuOpen] = React.useState(false);
+  const [navOpen, setNavOpen] = React.useState(false);
   const [logoutBusy, setLogoutBusy] = React.useState(false);
   const [logoutError, setLogoutError] = React.useState<string | null>(null);
   const menuRef = React.useRef<HTMLDivElement | null>(null);
   const signedIn = Boolean(session?.enabled && session.authenticated && session.user);
-  const hasPro = Boolean(
-    session?.entitlements.includes("ai_decisions") &&
-      session?.entitlements.includes("realtime_notifications")
-  );
   const user = session?.user ?? null;
   const label = user?.display_name || user?.email || (locale === "zh-CN" ? "Steam 用户" : "Steam user");
 
@@ -69,13 +66,26 @@ export const ProductShell: React.FC<ProductShellProps> = ({
           <span className="product-brand-mark" aria-hidden="true"><i /><b /></span>
           <span>Dota AI Decision Lab</span>
         </a>
-        <nav className="product-main-nav" aria-label={locale === "zh-CN" ? "主导航" : "Main navigation"}>
+        <button
+          type="button"
+          className={`product-nav-toggle ${navOpen ? "is-open" : ""}`}
+          aria-label={navOpen ? (locale === "zh-CN" ? "关闭主导航" : "Close main navigation") : (locale === "zh-CN" ? "打开主导航" : "Open main navigation")}
+          aria-expanded={navOpen}
+          onClick={() => {
+            setMenuOpen(false);
+            setNavOpen((value) => !value);
+          }}
+        >
+          <span aria-hidden="true">☰</span>
+        </button>
+        <nav className={`product-main-nav ${navOpen ? "is-open" : ""}`} aria-label={locale === "zh-CN" ? "主导航" : "Main navigation"}>
           {navItems.map((item) => (
             <a
               key={item.key}
               href={item.href}
               className={active === item.key ? "is-active" : undefined}
               aria-current={active === item.key ? "page" : undefined}
+              onClick={() => setNavOpen(false)}
             >
               {locale === "zh-CN" ? item.zh : item.en}
             </a>
@@ -85,7 +95,11 @@ export const ProductShell: React.FC<ProductShellProps> = ({
           <button
             type="button"
             className={`product-avatar-button ${signedIn ? "is-signed-in" : ""}`}
-            onClick={() => signedIn ? setMenuOpen((value) => !value) : onLogin()}
+            onClick={() => {
+              setNavOpen(false);
+              if (signedIn) setMenuOpen((value) => !value);
+              else onLogin();
+            }}
             aria-label={signedIn ? (locale === "zh-CN" ? "打开个人菜单" : "Open account menu") : (locale === "zh-CN" ? "登录" : "Sign in")}
             aria-expanded={signedIn ? menuOpen : undefined}
           >
@@ -105,12 +119,11 @@ export const ProductShell: React.FC<ProductShellProps> = ({
                   <strong>{label}</strong>
                   {user?.email && user.display_name ? <span>{user.email}</span> : null}
                 </div>
-                {hasPro && <em>Pro</em>}
               </div>
               <div className="account-menu-section">
                 <a className="account-menu-row" href="/account" role="menuitem">
                   <span className="account-menu-icon" aria-hidden="true">◎</span>
-                  <div><strong>{locale === "zh-CN" ? "个人信息" : "Account"}</strong><small>{hasPro ? (locale === "zh-CN" ? "Pro 会员" : "Pro member") : (locale === "zh-CN" ? "免费账户" : "Free account")}</small></div>
+                  <div><strong>{locale === "zh-CN" ? "个人信息" : "Account"}</strong><small>{locale === "zh-CN" ? "免费账户 · 赛事 Pass" : "Free access · Competition Passes"}</small></div>
                   <span className="menu-chevron">›</span>
                 </a>
                 <div className="account-menu-row language-row">
@@ -134,12 +147,6 @@ export const ProductShell: React.FC<ProductShellProps> = ({
                   <div><strong>{locale === "zh-CN" ? "管理控制台" : "Admin control plane"}</strong><small>{locale === "zh-CN" ? "Runtime 配置与 AI 提供商" : "Runtime configuration & AI providers"}</small></div>
                   <span className="menu-chevron">›</span>
                 </a>
-                {!hasPro && (
-                  <a className="account-menu-row is-pro" href="/billing" role="menuitem">
-                    <span className="account-menu-icon" aria-hidden="true">✦</span>
-                    <strong>{locale === "zh-CN" ? "订阅 Pro" : "Get Pro"}</strong>
-                  </a>
-                )}
               </div>
               <div className="account-menu-footer">
                 <button type="button" disabled={logoutBusy} onClick={() => void handleLogout()}>
