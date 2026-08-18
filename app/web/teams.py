@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException
@@ -13,6 +14,7 @@ from app.identity.roster_models import (
     TeamRosterMembership,
 )
 from app.models import CanonicalPlayer, CanonicalTeam, ProviderTeamMapping
+from app.time import ensure_utc
 
 
 def create_team_router(
@@ -194,7 +196,7 @@ def _team_payload(
             if valve_team_id
             else None
         ),
-        "observed_at": profile.observed_at if profile else None,
+        "observed_at": _utc(profile.observed_at) if profile else None,
     }
 
 
@@ -241,10 +243,14 @@ def _membership_payload(
         "role": membership.role,
         "position": membership.position,
         "is_standin": membership.is_standin,
-        "valid_from": membership.valid_from,
-        "valid_to": membership.valid_to,
+        "valid_from": _utc(membership.valid_from),
+        "valid_to": _utc(membership.valid_to),
         "source_name": membership.source_name,
         "source_url": membership.source_url,
-        "observed_at": membership.observed_at,
+        "observed_at": _utc(membership.observed_at),
         "confidence": membership.confidence,
     }
+
+
+def _utc(value: datetime | None) -> datetime | None:
+    return ensure_utc(value) if value is not None else None
