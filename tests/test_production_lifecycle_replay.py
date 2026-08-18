@@ -29,7 +29,9 @@ from app.history.service import HistoricalIntelligenceService
 from app.history.sync import HistoricalSyncService
 from app.identity.resolver import IdentityResolver
 from app.jobs.repository import JobRepository
-from app.live.anchor import picks_ended_anchor
+from app.live.collector import DltvSocketCollector
+from app.market.collector import RayBetOddsCollector
+from app.market.odds_registry import OddsRegistry
 from app.models import (
     AiDecisionRecord,
     DecisionEvaluationRecord,
