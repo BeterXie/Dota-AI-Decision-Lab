@@ -72,20 +72,22 @@ class TeamRegistryPopulationService:
             received_at=response.received_at,
             parser_version=client.normalizer_version,
         )
-        catalog = {
-            item["team_id"]: item
-            for item in payload
+        catalog = (
+            {
+                item["team_id"]: item
+                for item in payload
+                if isinstance(item, dict) and isinstance(item.get("team_id"), int)
+            }
             if isinstance(payload, list)
-            for item in payload
-            if isinstance(item, dict) and isinstance(item.get("team_id"), int)
-        } if isinstance(payload, list) else {}
-        used_slugs = set(
+            else {}
+        )
+        used_slugs = {
             value
             for value in (
                 await session.scalars(select(TeamProfile.slug).where(TeamProfile.slug.is_not(None)))
             ).all()
             if value
-        )
+        }
 
         results: list[TeamPopulationResult] = []
         for mapping in mappings:
