@@ -20,7 +20,17 @@ from app.models import (
 )
 
 
-def _raybet_match(*, scheduled_at: datetime, tournament_name: str = "The International 2026"):
+def _raybet_match(
+    *,
+    scheduled_at: datetime | None,
+    tournament_name: str = "The International 2026",
+    round_name: str | None = "BO3",
+) -> ProviderMatch:
+    observed_at = (
+        scheduled_at - timedelta(hours=2)
+        if scheduled_at is not None
+        else datetime(2026, 8, 18, 10, 0, tzinfo=UTC)
+    )
     return ProviderMatch(
         provider_match_id=9001,
         game_id=151,
@@ -30,10 +40,10 @@ def _raybet_match(*, scheduled_at: datetime, tournament_name: str = "The Interna
         team_a_name="Team Liquid",
         team_b_id=202,
         team_b_name="Team Spirit",
-        round="BO3",
+        round=round_name,
         provider_status=0,
         scheduled_at=scheduled_at,
-        observed_at=scheduled_at - timedelta(hours=2),
+        observed_at=observed_at,
     )
 
 
@@ -192,21 +202,108 @@ async def test_raybet_linker_fails_closed_when_two_existing_series_are_equally_p
 
 
 @pytest.mark.asyncio
-async def test_raybet_linker_leaves_creation_to_existing_resolver_when_schedule_is_unknown() -> (
-    None
-):
+async def test_raybet_linker_does_not_match_existing_series_without_schedule_time() -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     scheduled_at = datetime(2026, 8, 18, 12, 0, tzinfo=UTC)
-    match = _raybet_match(scheduled_at=scheduled_at)
 
+    async with factory.begin() as session:
+        liquid = CanonicalTeam(name="Team Liquid")
+        spirit = CanonicalTeam(name="Team Spirit")
+        session.add_all((liquid, spirit))
+        await session.flush()
+        session.add_all(
+            (
+                TeamAlias(
+                    canonical_team_id=liquid.id,
+                    name="Team Liquid",
+                    normalized_name=normalize_alias("Team Liquid"),
+                    provider="liquipedia",
+                ),
+                TeamAlias(
+                    canonical_team_id=spirit.id,
+                    name="Team Spirit",
+                    normalized_name=normalize_alias("Team Spirit"),
+                    provider="liquipedia",
+                ),
+            )
+        )
+        existing = CanonicalSeries(
+            team_a_id=liquid.id,
+            team_b_id=spirit.id,
+            best_of=3,
+            scheduled_at=scheduled_at,
+        )
+        session.add(existing)
+        await session.flush()
+        existing_id = existing.id
+
+    match = _raybet_match(scheduled_at=None)
     async with factory.begin() as session:
         assert await RayBetExistingSeriesLinker().link(session, match) is None
         created_id = await IdentityResolver().observe_raybet_match(session, match)
 
+    assert created_id != existing_id
     async with factory() as session:
-        assert await session.get(CanonicalSeries, created_id) is not None
-        assert await session.scalar(select(func.count()).select_from(CanonicalSeries)) == 1
+        assert await session.scalar(select(func.count()).select_from(CanonicalSeries)) == 2
+        mapping = await session.scalar(
+            select(ProviderMatchMapping).where(ProviderMatchMapping.provider == "raybet")
+        )
+        assert mapping is not None
+        assert mapping.canonical_series_id == created_id
+        assert mapping.resolved_by == "PROVIDER_DISCOVERY"
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_raybet_linker_rejects_known_best_of_conflict() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    scheduled_at = datetime(2026, 8, 18, 12, 0, tzinfo=UTC)
+
+    async with factory.begin() as session:
+        liquid = CanonicalTeam(name="Team Liquid")
+        spirit = CanonicalTeam(name="Team Spirit")
+        session.add_all((liquid, spirit))
+        await session.flush()
+        session.add_all(
+            (
+                TeamAlias(
+                    canonical_team_id=liquid.id,
+                    name="Team Liquid",
+                    normalized_name=normalize_alias("Team Liquid"),
+                    provider="liquipedia",
+                ),
+                TeamAlias(
+                    canonical_team_id=spirit.id,
+                    name="Team Spirit",
+                    normalized_name=normalize_alias("Team Spirit"),
+                    provider="liquipedia",
+                ),
+                CanonicalSeries(
+                    team_a_id=liquid.id,
+                    team_b_id=spirit.id,
+                    best_of=5,
+                    scheduled_at=scheduled_at,
+                ),
+            )
+        )
+
+    match = _raybet_match(scheduled_at=scheduled_at, round_name="BO3")
+    async with factory.begin() as session:
+        assert await RayBetExistingSeriesLinker().link(session, match) is None
+
+    async with factory() as session:
+        assert (
+            await session.scalar(
+                select(func.count())
+                .select_from(ProviderMatchMapping)
+                .where(ProviderMatchMapping.provider == "raybet")
+            )
+            == 0
+        )
     await engine.dispose()
