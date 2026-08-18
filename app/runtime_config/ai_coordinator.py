@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import json
+from contextvars import ContextVar
 from datetime import UTC, datetime
 from time import perf_counter
 
@@ -16,13 +17,16 @@ from app.ai.base import (
     PROMPT_VERSION,
     AiProvider,
     AiProviderFailure,
+    ai_experiment_key,
     extract_provider_usage,
     validate_ai_decision,
 )
 from app.ai.coordinator import AiCoordinator as StaticAiCoordinator
 from app.ai.coordinator import PreparedAiDecision
+from app.ai.jobs import ai_job_dedupe_key_for_experiment
+from app.domain.jobs import JobType
 from app.domain.snapshot import DecisionSnapshot
-from app.models import AiDecisionRecord
+from app.models import AiDecisionRecord, DurableJobRecord
 from app.runtime_config.models import AiProviderConfigRecord
 from app.runtime_config.policy import AiDecisionPolicySnapshot, ai_decision_policy_snapshot
 from app.runtime_config.provider_safety import validate_provider_base_url
@@ -32,8 +36,13 @@ from app.runtime_config.service import (
     resolve_ai_provider,
 )
 
+ExperimentKey = tuple[str, str, str, str, str]
 _CACHE_MISSING = (("__runtime_cache_missing__",) * 5,)
 _MODEL_VERSION_MAX_LENGTH = 128
+_EXPECTED_NOTIFICATION_BATCH: ContextVar[tuple[ExperimentKey, ...] | None] = ContextVar(
+    "expected_runtime_ai_notification_batch",
+    default=None,
+)
 
 
 class _RuntimeProviderReference:
@@ -65,6 +74,10 @@ class RuntimeAiCoordinator(StaticAiCoordinator):
 
     @property
     def experiments(self):
+        frozen_batch = _EXPECTED_NOTIFICATION_BATCH.get()
+        if frozen_batch is not None:
+            _EXPECTED_NOTIFICATION_BATCH.set(None)
+            return frozen_batch
         current = cached_active_ai_experiments(_CACHE_MISSING)
         if current != _CACHE_MISSING:
             self._last_runtime_experiments = current
@@ -88,6 +101,7 @@ class RuntimeAiCoordinator(StaticAiCoordinator):
         job_enqueued_at: datetime | None = None,
         job_claimed_at: datetime | None = None,
     ) -> PreparedAiDecision:
+        _EXPECTED_NOTIFICATION_BATCH.set(None)
         fallback = self._static_provider(provider, model)
         rows = list(
             (
@@ -136,7 +150,7 @@ class RuntimeAiCoordinator(StaticAiCoordinator):
             prior_decisions_limit=policy.prior_decisions_limit,
             portfolio=self._portfolio,
         )
-        return await frozen.prepare(
+        prepared = await frozen.prepare(
             session,
             snapshot,
             provider=provider,
@@ -144,6 +158,15 @@ class RuntimeAiCoordinator(StaticAiCoordinator):
             job_enqueued_at=job_enqueued_at,
             job_claimed_at=job_claimed_at,
         )
+        expected_batch = await _scheduled_notification_batch(
+            session,
+            snapshot,
+            provider=provider,
+            model=model,
+        )
+        if expected_batch is not None:
+            _EXPECTED_NOTIFICATION_BATCH.set(expected_batch)
+        return prepared
 
     async def run_inference(self, prepared: PreparedAiDecision) -> AiDecisionRecord:
         """Run against the timeout frozen with the provider configuration."""
@@ -236,6 +259,60 @@ class RuntimeAiCoordinator(StaticAiCoordinator):
             if candidate.name == provider and candidate.model == model:
                 return candidate
         return None
+
+
+async def _scheduled_notification_batch(
+    session: AsyncSession,
+    snapshot: DecisionSnapshot,
+    *,
+    provider: str,
+    model: str,
+) -> tuple[ExperimentKey, ...] | None:
+    """Recover the immutable runtime fan-out from the durable jobs themselves."""
+    current_experiment = ai_experiment_key(provider, model)
+    current_dedupe_key = ai_job_dedupe_key_for_experiment(
+        snapshot.snapshot_hash,
+        current_experiment,
+    )
+    current_job = await session.scalar(
+        select(DurableJobRecord).where(
+            DurableJobRecord.job_type == JobType.RUN_AI_PROVIDER.value,
+            DurableJobRecord.dedupe_key == current_dedupe_key,
+        )
+    )
+    if current_job is None:
+        return None
+    current_payload = current_job.payload if isinstance(current_job.payload, dict) else {}
+    if current_payload.get("experiment_replay") is True:
+        return None
+
+    jobs = list(
+        (
+            await session.scalars(
+                select(DurableJobRecord).where(
+                    DurableJobRecord.job_type == JobType.RUN_AI_PROVIDER.value,
+                    DurableJobRecord.dedupe_key.like(f"ai:{snapshot.snapshot_hash}:%"),
+                )
+            )
+        ).all()
+    )
+    expected: set[ExperimentKey] = set()
+    for job in jobs:
+        payload = job.payload if isinstance(job.payload, dict) else {}
+        if payload.get("experiment_replay") is True:
+            continue
+        job_provider = payload.get("provider")
+        job_model = payload.get("model")
+        if not isinstance(job_provider, str) or not isinstance(job_model, str):
+            continue
+        experiment = ai_experiment_key(job_provider, job_model)
+        if job.dedupe_key != ai_job_dedupe_key_for_experiment(
+            snapshot.snapshot_hash,
+            experiment,
+        ):
+            continue
+        expected.add(experiment)
+    return tuple(sorted(expected)) if expected else None
 
 
 def _execution_config_fingerprint(
