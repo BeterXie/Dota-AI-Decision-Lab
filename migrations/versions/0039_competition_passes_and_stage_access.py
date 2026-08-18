@@ -30,9 +30,7 @@ def upgrade() -> None:
     )
 
     op.drop_index("ix_series_pass_events_transaction", table_name="series_pass_events")
-    op.drop_constraint(
-        "uq_series_pass_events_provider_ref", "series_pass_events", type_="unique"
-    )
+    op.drop_constraint("uq_series_pass_events_provider_ref", "series_pass_events", type_="unique")
     op.rename_table("series_pass_events", "competition_pass_events")
     op.alter_column(
         "competition_pass_events",
@@ -172,9 +170,7 @@ def downgrade() -> None:
     )
 
     op.drop_index("ix_competition_pass_events_transaction", table_name="competition_pass_events")
-    op.drop_constraint(
-        "ck_competition_pass_event_scope", "competition_pass_events", type_="check"
-    )
+    op.drop_constraint("ck_competition_pass_event_scope", "competition_pass_events", type_="check")
     op.drop_constraint(
         "uq_competition_pass_events_provider_ref", "competition_pass_events", type_="unique"
     )

@@ -58,7 +58,7 @@ test.beforeEach(async ({ page }) => {
 });
 
 test("keeps matches dominant and access guidance secondary on event detail", async ({ page }) => {
-  await page.goto(`/events/${encodeURIComponent("TI15 国际邀请赛")}`);
+  await page.goto("/events/the-international-2026");
 
   const schedule = page.locator(".event-schedule-panel");
   const aside = page.locator(".event-detail-aside");

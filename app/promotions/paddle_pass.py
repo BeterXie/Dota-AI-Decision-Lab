@@ -274,9 +274,8 @@ class PaddleCompetitionPassService:
                     duplicate=True,
                     stale=not existing.applied,
                 )
-            if (
-                purchase.last_event_occurred_at is not None
-                and occurred_at < _as_utc(purchase.last_event_occurred_at)
+            if purchase.last_event_occurred_at is not None and occurred_at < _as_utc(
+                purchase.last_event_occurred_at
             ):
                 session.add(
                     _event_record(
@@ -489,8 +488,7 @@ def _validate_completed_transaction(
         raise PaddleWebhookError("Paddle transaction is missing checkout metadata")
     if (
         custom.get("dota_user_id") != str(purchase.user_id)
-        or custom.get("dota_offer")
-        != f"{purchase.scope_type.lower()}_pass"
+        or custom.get("dota_offer") != f"{purchase.scope_type.lower()}_pass"
     ):
         raise PaddleWebhookError("Paddle transaction metadata does not match server purchase")
 

@@ -214,13 +214,16 @@ async def test_event_pass_covers_all_series_in_event_and_refund_revokes() -> Non
         )
         result = await _deliver(event_service, purchase, now=now)
         assert result.activated is True
-        assert await entitlements.access_scope(
-            user_id,
-            AI_DECISIONS_ENTITLEMENT,
-            canonical_event_id=event_id,
-            canonical_series_id=series_id,
-            now=now + timedelta(days=365),
-        ) == "EVENT"
+        assert (
+            await entitlements.access_scope(
+                user_id,
+                AI_DECISIONS_ENTITLEMENT,
+                canonical_event_id=event_id,
+                canonical_series_id=series_id,
+                now=now + timedelta(days=365),
+            )
+            == "EVENT"
+        )
         assert await entitlements.has_resource_entitlement(
             user_id,
             AI_DECISIONS_ENTITLEMENT,

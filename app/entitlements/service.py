@@ -383,16 +383,20 @@ async def _resource_entitlement_statement(
         canonical_series_id=canonical_series_id,
         canonical_map_id=canonical_map_id,
     )
-    return select(UserEntitlementRecord.user_id).where(
-        UserEntitlementRecord.user_id.in_(user_ids),
-        UserEntitlementRecord.entitlement == entitlement,
-        *_active_window_predicates(current),
-        _resource_scope_predicate(
-            canonical_event_id=canonical_event_id,
-            canonical_series_id=canonical_series_id,
-            canonical_map_id=canonical_map_id,
-        ),
-    ).distinct()
+    return (
+        select(UserEntitlementRecord.user_id)
+        .where(
+            UserEntitlementRecord.user_id.in_(user_ids),
+            UserEntitlementRecord.entitlement == entitlement,
+            *_active_window_predicates(current),
+            _resource_scope_predicate(
+                canonical_event_id=canonical_event_id,
+                canonical_series_id=canonical_series_id,
+                canonical_map_id=canonical_map_id,
+            ),
+        )
+        .distinct()
+    )
 
 
 def _active_window_predicates(current: datetime) -> tuple:

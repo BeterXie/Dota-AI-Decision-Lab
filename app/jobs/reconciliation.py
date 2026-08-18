@@ -30,6 +30,7 @@ from app.models import (
     OddsObservationRecord,
     ProviderMatchMapping,
 )
+from app.runtime_config import active_ai_experiments
 from app.time import ensure_utc
 
 
@@ -71,6 +72,7 @@ class ReconciliationService:
         self._checkpoint_sweep_grace_seconds = checkpoint_sweep_grace_seconds
 
     async def run(self, session: AsyncSession, *, now: datetime) -> ReconciliationResult:
+        self._ai_experiments = await active_ai_experiments(session, self._ai_experiments)
         reclaimed = await self._jobs.reclaim_expired(
             session, lease_seconds=self._lease_seconds, now=now
         )
