@@ -1,5 +1,9 @@
 from datetime import UTC, datetime
 
+import pytest
+from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
+
 import app.config
 import app.db
 import app.events.outbox
@@ -9,9 +13,6 @@ import app.providers.common
 import app.providers.liquipedia.fetch
 import app.providers.liquipedia.runtime
 import app.repositories.raw
-import pytest
-from sqlalchemy import func, select
-from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 
 SCHEDULE_HTML = """
