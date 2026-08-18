@@ -1,7 +1,7 @@
 from typing import Any
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Query
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import aliased
@@ -12,6 +12,7 @@ from app.evaluation.portfolio_models import (
     TournamentPortfolioPositionRecord,
 )
 from app.evaluation.quality import TournamentQualityService
+from app.evaluation.readiness import DecisionReadinessService
 from app.models import CanonicalEvent, CanonicalMap, CanonicalSeries, CanonicalTeam
 
 
@@ -110,11 +111,24 @@ def create_quality_router(
     router = APIRouter()
     quality = TournamentQualityService()
     leaderboard = TournamentLeaderboardService()
+    readiness = DecisionReadinessService()
 
     @router.get("/api/review/ai-quality/leaderboard")
     async def global_ai_quality_leaderboard() -> dict[str, Any]:
         async with session_factory() as session:
             return await leaderboard.build_report(session)
+
+    @router.get("/api/review/ai-quality/readiness")
+    async def global_ai_decision_readiness(
+        lookback_hours: int = Query(168, ge=1, le=720),
+        limit: int = Query(250, ge=1, le=500),
+    ) -> dict[str, Any]:
+        async with session_factory() as session:
+            return await readiness.build_report(
+                session,
+                lookback_hours=lookback_hours,
+                limit=limit,
+            )
 
     @router.get("/api/review/events/{canonical_event_id}/ai-quality")
     async def event_ai_quality(canonical_event_id: UUID) -> dict[str, Any]:
