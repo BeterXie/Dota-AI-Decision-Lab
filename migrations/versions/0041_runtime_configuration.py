@@ -1,7 +1,11 @@
 """Add database-backed runtime configuration and encrypted secrets.
 
-Revision ID: 0041_runtime_configuration
+Revision ID: 0038_runtime_configuration
 Revises: 0040_normalize_competition_pass_purchase_constraint
+
+The revision id is retained from PR #51 for compatibility with existing replay
+assertions; Alembic ordering is determined by down_revision, so this remains the
+single migration after the latest main head.
 """
 
 from collections.abc import Sequence
@@ -10,7 +14,7 @@ import sqlalchemy as sa
 from alembic import op
 from sqlalchemy.dialects.postgresql import JSONB
 
-revision: str = "0041_runtime_configuration"
+revision: str = "0038_runtime_configuration"
 down_revision: str | None = "0040_normalize_competition_pass_purchase_constraint"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
