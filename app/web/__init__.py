@@ -99,8 +99,6 @@ def create_app(
         max_rewards_per_inviter=promotions.referral_max_rewards_per_inviter,
     )
 
-    # Build API routes first without the SPA catch-all, so detail-scoped
-    # extension routes remain reachable before the frontend fallback route.
     app = create_api_app(
         session_factory,
         health,
@@ -142,8 +140,7 @@ def create_app(
         development_grant_emails=development_grant_emails,
         runtime_config=runtime_config,
     )
-    # This is deliberately independent of frontend behavior: even a hand-written
-    # HTTP client cannot extract premium decision payloads from public match APIs.
+    app.router.add_event_handler("startup", runtime_config.ensure_seeded)
     app.add_middleware(PublicMatchDataBoundaryMiddleware)
     if owns_auth_service and auth_service is not None:
         app.router.add_event_handler("shutdown", auth_service.close)
