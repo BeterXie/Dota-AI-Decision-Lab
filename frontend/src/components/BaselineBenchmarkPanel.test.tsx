@@ -117,7 +117,7 @@ describe("BaselineBenchmarkPanel", () => {
     expect(screen.getAllByText("BASELINE").length).toBeGreaterThan(0);
     expect(screen.getByText("CHALLENGER")).toBeTruthy();
     expect(screen.getByText("相对基线改善")).toBeTruthy();
-    expect(screen.getByText("+3.0%")).toBeTruthy();
+    expect(screen.getByText("+10.0%")).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: "gemini" }));
 
