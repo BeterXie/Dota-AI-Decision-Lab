@@ -46,6 +46,7 @@ def test_core_durable_job_workers_are_all_registered() -> None:
         "RayBetRegistryRefreshWorker",
         "DltvBootstrapWorker",
         "HistoricalSyncWorker",
+        "TeamRegistrySyncWorker",
         "DraftCoordinator",
         "SnapshotCoordinator",
         "AiCoordinatorWorker",

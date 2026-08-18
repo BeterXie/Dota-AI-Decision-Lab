@@ -45,6 +45,11 @@ from app.history.repository import HistoricalRepository
 from app.history.service import HistoricalIntelligenceService
 from app.history.sync import HistoricalSyncService
 from app.identity.resolver import IdentityResolver
+from app.identity.team_registry_jobs import TeamRegistryJobHandler
+from app.identity.team_registry_schedule import (
+    schedule_discovered_event_team_registry_refreshes,
+    schedule_prestart_event_team_registry_refreshes,
+)
 from app.jobs.handlers import ApplicationJobHandlers, JobHandlerDependencies
 from app.jobs.reconciliation import ReconciliationService
 from app.jobs.repository import JobRepository
@@ -97,6 +102,8 @@ from app.web import WebServerWorker, create_app
 
 logger = structlog.get_logger()
 ROOT = Path(__file__).resolve().parents[1]
+TEAM_REGISTRY_REFRESH_SECONDS = 86_400.0
+TEAM_REGISTRY_SCHEDULER_INTERVAL_SECONDS = 60.0
 
 
 async def run() -> None:
@@ -320,6 +327,11 @@ async def run() -> None:
             qq_bot=qq_bot,
         )
     ).mapping()
+    handlers[JobType.SYNC_TEAM_REGISTRY] = TeamRegistryJobHandler(
+        session_factory=session_factory,
+        raw_events=raw_events,
+        opendota=opendota,
+    ).handle
     reconciliation = ReconciliationService(
         jobs,
         events,
@@ -404,6 +416,28 @@ async def run() -> None:
                     dedupe_key=f"periodic-history:{series_id}:{bucket}",
                     payload={"canonical_series_id": str(series_id)},
                 )
+
+    async def schedule_team_registry_refresh() -> None:
+        now = datetime.now(UTC)
+        async with session_factory() as session, session.begin():
+            discovered = await schedule_discovered_event_team_registry_refreshes(
+                session,
+                jobs,
+                discovered_after=now - timedelta(seconds=TEAM_REGISTRY_REFRESH_SECONDS),
+                now=now,
+            )
+            prestart = await schedule_prestart_event_team_registry_refreshes(
+                session,
+                jobs,
+                refresh_seconds=TEAM_REGISTRY_REFRESH_SECONDS,
+                now=now,
+            )
+        if discovered.jobs_enqueued or prestart.jobs_enqueued:
+            logger.info(
+                "team_registry_refresh_scheduled",
+                discovery_jobs=discovered.jobs_enqueued,
+                prestart_jobs=prestart.jobs_enqueued,
+            )
 
     async def align_live_maps() -> None:
         now = datetime.now(UTC)
@@ -503,13 +537,21 @@ async def run() -> None:
     )
 
     if settings.run_provider_workers:
-        workers.append(
-            PeriodicWorker(
-                name="RayBetDiscoveryWorker",
-                interval_seconds=settings.raybet_discovery_interval_seconds,
-                action=discover,
-                health_registry=health,
-            )
+        workers.extend(
+            [
+                PeriodicWorker(
+                    name="RayBetDiscoveryWorker",
+                    interval_seconds=settings.raybet_discovery_interval_seconds,
+                    action=discover,
+                    health_registry=health,
+                ),
+                PeriodicWorker(
+                    name="TeamRegistryRefreshScheduler",
+                    interval_seconds=TEAM_REGISTRY_SCHEDULER_INTERVAL_SECONDS,
+                    action=schedule_team_registry_refresh,
+                    health_registry=health,
+                ),
+            ]
         )
 
     async def raybet_publish(message: dict) -> None:
@@ -672,6 +714,7 @@ def _job_workers(*, settings, session_factory, jobs, handlers, health) -> list[S
             1,
         ),
         "HistoricalSyncWorker": ((JobType.SYNC_HISTORICAL,), 1),
+        "TeamRegistrySyncWorker": ((JobType.SYNC_TEAM_REGISTRY,), 1),
         "DraftCoordinator": ((JobType.BUILD_DRAFT_CURVE,), 1),
         "SnapshotCoordinator": ((JobType.BUILD_SNAPSHOT,), 1),
         # One job = one provider/model, so the AI worker pool owns multiple
