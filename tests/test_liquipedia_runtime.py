@@ -14,7 +14,6 @@ from app.providers.liquipedia.fetch import FetchedPage
 from app.providers.liquipedia.runtime import LiquipediaRuntimeSeeder
 from app.repositories.raw import RawEventRepository
 
-
 SCHEDULE_HTML = """
 <table class="wikitable wikitable-striped infobox_matches_content">
   <tr>
