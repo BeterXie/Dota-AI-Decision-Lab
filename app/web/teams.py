@@ -12,7 +12,7 @@ from app.identity.roster_models import (
     TeamProfile,
     TeamRosterMembership,
 )
-from app.models import CanonicalPlayer, CanonicalTeam
+from app.models import CanonicalPlayer, CanonicalTeam, ProviderTeamMapping
 
 
 def create_team_router(
@@ -30,7 +30,11 @@ def create_team_router(
                     .order_by(CanonicalTeam.name.asc())
                 )
             ).all()
-            return [_team_payload(team, profile) for team, profile in rows]
+            opendota_ids = await _opendota_team_ids(session)
+            return [
+                _team_payload(team, profile, discovered_valve_team_id=opendota_ids.get(team.id))
+                for team, profile in rows
+            ]
 
     @router.get("/{team_id}")
     async def team_detail(team_id: UUID) -> dict:
@@ -39,6 +43,7 @@ def create_team_router(
             if team is None:
                 raise HTTPException(status_code=404, detail="team not found")
             profile = await session.get(TeamProfile, team_id)
+            discovered_valve_team_id = await _opendota_team_id(session, team_id)
             memberships = list(
                 (
                     await session.scalars(
@@ -106,7 +111,11 @@ def create_team_router(
                 for item in memberships
             ]
             return {
-                **_team_payload(team, profile),
+                **_team_payload(
+                    team,
+                    profile,
+                    discovered_valve_team_id=discovered_valve_team_id,
+                ),
                 "current_roster": [item for item in roster if item["valid_to"] is None],
                 "roster_history": roster,
             }
@@ -114,18 +123,73 @@ def create_team_router(
     return router
 
 
-def _team_payload(team: CanonicalTeam, profile: TeamProfile | None) -> dict:
+async def _opendota_team_ids(session: AsyncSession) -> dict[UUID, int]:
+    mappings = list(
+        (
+            await session.scalars(
+                select(ProviderTeamMapping).where(ProviderTeamMapping.provider == "opendota")
+            )
+        ).all()
+    )
+    result: dict[UUID, int] = {}
+    for mapping in mappings:
+        try:
+            team_id = int(mapping.provider_team_id)
+        except ValueError:
+            continue
+        if team_id > 0:
+            result[mapping.canonical_team_id] = team_id
+    return result
+
+
+async def _opendota_team_id(session: AsyncSession, team_id: UUID) -> int | None:
+    mapping = await session.scalar(
+        select(ProviderTeamMapping).where(
+            ProviderTeamMapping.provider == "opendota",
+            ProviderTeamMapping.canonical_team_id == team_id,
+        )
+    )
+    if mapping is None:
+        return None
+    try:
+        value = int(mapping.provider_team_id)
+    except ValueError:
+        return None
+    return value if value > 0 else None
+
+
+def _team_payload(
+    team: CanonicalTeam,
+    profile: TeamProfile | None,
+    *,
+    discovered_valve_team_id: int | None,
+) -> dict:
+    valve_team_id = profile.valve_team_id if profile and profile.valve_team_id else discovered_valve_team_id
+    identity_source = "registry" if profile and profile.valve_team_id else "opendota" if valve_team_id else None
     return {
         "id": str(team.id),
         "name": team.name,
         "slug": profile.slug if profile else None,
         "short_name": profile.short_name if profile else None,
-        "valve_team_id": profile.valve_team_id if profile else None,
+        "valve_team_id": valve_team_id,
+        "identity_source": identity_source,
         "country_code": profile.country_code if profile else None,
         "logo_url": profile.logo_url if profile else None,
-        "logo_source": profile.logo_source if profile else None,
+        "logo_source": (
+            profile.logo_source
+            if profile and profile.logo_source
+            else "valve-steam"
+            if valve_team_id
+            else None
+        ),
         "website_url": profile.website_url if profile else None,
-        "source_url": profile.source_url if profile else None,
+        "source_url": (
+            profile.source_url
+            if profile and profile.source_url
+            else f"https://www.opendota.com/teams/{valve_team_id}"
+            if valve_team_id
+            else None
+        ),
         "observed_at": profile.observed_at if profile else None,
     }
 
