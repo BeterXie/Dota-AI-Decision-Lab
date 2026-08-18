@@ -1,5 +1,5 @@
 import React, { useMemo, useState } from "react";
-import type { AiBenchmarkExperiment, AiBenchmarkPayload } from "../benchmarkApi";
+import type { AiBenchmarkExperiment, AiBenchmarkPayload, AiContextExperimentMetadata } from "../benchmarkApi";
 
 export function BaselineBenchmarkPanel({
   data,
@@ -115,9 +115,7 @@ function ExperimentCard({ row, locale }: { row: AiBenchmarkExperiment; locale: s
           {context && (
             <small>
               {context.label}
-              {context.removed_evidence.length > 0
-                ? ` · ${zh ? "移除" : "removed"}: ${context.removed_evidence.join(", ")}`
-                : ` · ${zh ? "修正历史字段投影" : "history projection aligned"}`}
+              {contextDetail(context, zh)}
             </small>
           )}
         </div>
@@ -163,6 +161,16 @@ function ExperimentCard({ row, locale }: { row: AiBenchmarkExperiment; locale: s
       )}
     </article>
   );
+}
+
+function contextDetail(context: AiContextExperimentMetadata, zh: boolean): string {
+  if (context.removed_evidence.length > 0) {
+    return ` · ${zh ? "移除" : "removed"}: ${context.removed_evidence.join(", ")}`;
+  }
+  if (context.schema_aligned_history) {
+    return ` · ${zh ? "修正历史字段投影" : "history projection aligned"}`;
+  }
+  return ` · ${zh ? "匹配回放生产视图控制" : "matched replay production-view control"}`;
 }
 
 function ContractField({ label, value }: { label: string; value: string }) {
