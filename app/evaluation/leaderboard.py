@@ -87,7 +87,7 @@ class TournamentLeaderboardService:
 
         experiments = []
         excluded = []
-        for key, rows in grouped.items():
+        for rows in grouped.values():
             signatures = _runtime_position_config_signatures(
                 rows,
                 positions_by_account,
