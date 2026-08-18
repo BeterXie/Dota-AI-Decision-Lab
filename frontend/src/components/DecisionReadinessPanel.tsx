@@ -86,7 +86,7 @@ export function DecisionReadinessPanel({
         </div>
       </div>
 
-      <div className="readiness-funnel" role="list" aria-label={locale === "zh-CN" ? "决策漏斗" : "Decision funnel"}>
+      <div className="readiness-funnel" aria-label={locale === "zh-CN" ? "决策漏斗" : "Decision funnel"}>
         {data.stages.map((stage) => (
           <StageCard
             key={stage.key}
@@ -189,7 +189,6 @@ function StageCard({
   return (
     <button
       type="button"
-      role="listitem"
       className={`readiness-stage ${active ? "active" : ""}`}
       onClick={onSelect}
       aria-pressed={active}
