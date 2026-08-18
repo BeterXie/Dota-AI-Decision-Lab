@@ -79,6 +79,13 @@ const payload: AiReadinessPayload = {
   ]
 };
 
+function hasTeamPair(first: string, second: string) {
+  return (_content: string, element: Element | null) =>
+    element?.tagName === "STRONG" &&
+    element.textContent?.includes(first) === true &&
+    element.textContent?.includes(second) === true;
+}
+
 describe("DecisionReadinessPanel", () => {
   it("shows the real-match funnel and filters trace rows by blocker", () => {
     render(
@@ -93,12 +100,12 @@ describe("DecisionReadinessPanel", () => {
 
     expect(screen.getByText("真实比赛决策就绪度")).toBeTruthy();
     expect(screen.getAllByText("33%").length).toBeGreaterThan(0);
-    expect(screen.getByText("Aurora")).toBeTruthy();
-    expect(screen.getByText("Team Falcons")).toBeTruthy();
+    expect(screen.getByText(hasTeamPair("Aurora", "Xtreme Gaming"))).toBeTruthy();
+    expect(screen.getByText(hasTeamPair("Team Falcons", "Tundra Esports"))).toBeTruthy();
 
     fireEvent.click(screen.getByRole("button", { name: /RayBet 身份未匹配/ }));
 
-    expect(screen.getByText("Aurora")).toBeTruthy();
-    expect(screen.queryByText("Team Falcons")).toBeNull();
+    expect(screen.getByText(hasTeamPair("Aurora", "Xtreme Gaming"))).toBeTruthy();
+    expect(screen.queryByText(hasTeamPair("Team Falcons", "Tundra Esports"))).toBeNull();
   });
 });
