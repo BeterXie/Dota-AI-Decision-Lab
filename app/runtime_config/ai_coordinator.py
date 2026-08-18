@@ -22,6 +22,7 @@ from app.ai.coordinator import PreparedAiDecision
 from app.domain.snapshot import DecisionSnapshot
 from app.models import AiDecisionRecord
 from app.runtime_config.service import (
+    SUPPORTED_AI_PROVIDERS,
     cached_active_ai_experiments,
     resolve_ai_provider,
 )
@@ -30,6 +31,20 @@ _PREPARE_PROVIDER: ContextVar[AiProvider | None] = ContextVar(
     "runtime_config_prepare_provider",
     default=None,
 )
+
+
+class _RuntimeProviderReference:
+    """Synchronous preflight reference; PREPARE resolves the real DB snapshot."""
+
+    def __init__(self, provider: str, model: str) -> None:
+        self.name = provider
+        self.model = model
+
+    async def decide(self, snapshot_input: str):
+        raise RuntimeError("runtime provider reference cannot execute inference")
+
+    async def close(self) -> None:
+        return None
 
 
 class RuntimeAiCoordinator(StaticAiCoordinator):
@@ -49,7 +64,12 @@ class RuntimeAiCoordinator(StaticAiCoordinator):
         prepared = _PREPARE_PROVIDER.get()
         if prepared is not None and prepared.name == provider and prepared.model == model:
             return prepared
-        return super().get_provider(provider, model)
+        static = self._static_provider(provider, model)
+        if static is not None:
+            return static
+        if provider in SUPPORTED_AI_PROVIDERS:
+            return _RuntimeProviderReference(provider, model)
+        raise ValueError(f"AI provider experiment is not configured: {provider}/{model}")
 
     async def prepare(
         self,
