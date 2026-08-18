@@ -50,10 +50,6 @@ function ProductExperience({ pathname }: { pathname: string }) {
   });
   const session = auth.data;
   const signedIn = Boolean(session?.enabled && session.authenticated && session.user);
-  const hasPro = Boolean(
-    session?.entitlements.includes("ai_decisions") &&
-      session?.entitlements.includes("realtime_notifications")
-  );
 
   const handleAuthenticated = (next: AuthSessionState) => {
     queryClient.setQueryData(authSessionKey, next);
@@ -118,7 +114,6 @@ function ProductExperience({ pathname }: { pathname: string }) {
         matches={matches.data ?? []}
         loading={matches.isLoading}
         signedIn={signedIn}
-        hasPro={hasPro}
         onLogin={() => setLoginOpen(true)}
       />
     );
@@ -145,8 +140,9 @@ function ProductExperience({ pathname }: { pathname: string }) {
       <EventsPage
         matches={matches.data ?? []}
         loading={matches.isLoading}
+        error={Boolean(matches.error)}
+        onRetry={() => void matches.refetch()}
         pathname={pathname}
-        hasPro={hasPro}
       />
     );
   }
