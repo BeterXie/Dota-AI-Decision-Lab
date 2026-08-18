@@ -45,7 +45,7 @@ export interface OfficialEventArtwork {
 }
 
 const VALVE_AEGIS: OfficialEventArtwork = {
-  src: "https://cdn.steamstatic.com/apps/dota2/images//aegis/aegis_front.jpg",
+  src: "https://cdn.steamstatic.com/apps/dota2/images/aegis/aegis_front.jpg",
   sourceName: "Valve / Dota 2",
   sourceUrl: "https://www.dota2.com/aegisofchampions",
   objectPosition: "50% 50%"
@@ -87,4 +87,12 @@ export function teamAbbreviation(team: TeamIdentity, fallbackName?: string): str
     return words.map((word) => word[0]).join("").slice(0, 3).toUpperCase();
   }
   return name.slice(0, 3).toUpperCase();
+}
+
+export function eventAbbreviation(eventName: string): string {
+  const ti = eventName.match(/TI\s*\d+/i);
+  if (ti) return ti[0].replace(/\s+/g, "").toUpperCase();
+  const words = eventName.match(/[A-Za-z0-9]+/g) ?? [];
+  if (words.length >= 2) return words.map((word) => word[0]).join("").slice(0, 4).toUpperCase();
+  return eventName.replace(/[^A-Za-z0-9\u4e00-\u9fff]/g, "").slice(0, 3).toUpperCase() || "D2";
 }
