@@ -43,7 +43,24 @@ class _Node:
 
 
 class _TreeParser(HTMLParser):
-    _VOID_TAGS = frozenset({"area", "base", "br", "col", "embed", "hr", "img", "input", "link", "meta", "param", "source", "track", "wbr"})
+    _VOID_TAGS = frozenset(
+        {
+            "area",
+            "base",
+            "br",
+            "col",
+            "embed",
+            "hr",
+            "img",
+            "input",
+            "link",
+            "meta",
+            "param",
+            "source",
+            "track",
+            "wbr",
+        }
+    )
 
     def __init__(self) -> None:
         super().__init__(convert_charrefs=True)
@@ -278,7 +295,7 @@ def _parse_timestamp(raw: str) -> datetime | None:
             timestamp //= 1000
         try:
             return datetime.fromtimestamp(timestamp, tz=UTC)
-        except (OverflowError, OSError, ValueError):
+        except OverflowError, OSError, ValueError:
             return None
     try:
         parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
