@@ -96,9 +96,7 @@ class IdentityResolver:
                 provider_match_id=provider_match_id,
                 canonical_series_id=series.id,
                 resolved_by=(
-                    "LIQUIPEDIA_TEAMS_TIME_BO"
-                    if exact_best_of
-                    else "LIQUIPEDIA_TEAMS_TIME"
+                    "LIQUIPEDIA_TEAMS_TIME_BO" if exact_best_of else "LIQUIPEDIA_TEAMS_TIME"
                 ),
                 confidence=0.99 if exact_best_of else 0.97,
             )
