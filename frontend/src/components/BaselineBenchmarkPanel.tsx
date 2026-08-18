@@ -66,8 +66,8 @@ export function BaselineBenchmarkPanel({
         </div>
         <p>
           {zh
-            ? "预测质量只取每张 Map 第一条可评估 forecast，避免重复 checkpoint 灌大样本；所有差值都只是描述性比较，不声称统计显著。"
-            : "Forecast quality uses only the first evaluable forecast per map so repeated checkpoints cannot inflate N. Deltas are descriptive and do not claim statistical significance."}
+            ? "预测质量只取每张 Map 第一条可评估 forecast，避免重复 checkpoint 灌大样本；Context Test 会显示自己的受控实验参照，所有差值都只是描述性比较，不声称统计显著。"
+            : "Forecast quality uses only the first evaluable forecast per map so repeated checkpoints cannot inflate N. Context tests show their controlled reference; all deltas are descriptive and do not claim statistical significance."}
         </p>
       </div>
 
@@ -98,22 +98,32 @@ export function BaselineBenchmarkPanel({
 function ExperimentCard({ row, locale }: { row: AiBenchmarkExperiment; locale: string }) {
   const zh = locale === "zh-CN";
   const baseline = row.baseline_role === "BASELINE";
-  const delta = row.delta_vs_baseline;
+  const context = row.context_experiment ?? null;
+  const reference = context ? row.context_reference ?? null : row.baseline_reference;
+  const delta = context ? row.delta_vs_context_reference ?? null : row.delta_vs_baseline;
   return (
     <article className={`baseline-experiment-card ${baseline ? "is-baseline" : "is-challenger"}`}>
       <header>
         <div>
           <span className={`baseline-role ${baseline ? "is-baseline" : "is-challenger"}`}>
-            {baseline ? "BASELINE" : "CHALLENGER"}
+            {baseline ? "BASELINE" : context ? "CONTEXT TEST" : "CHALLENGER"}
           </span>
           <strong>{row.experiment.provider} · {row.experiment.model}</strong>
           <small>
             {row.experiment.prompt_version} · {row.experiment.decision_policy_version} · {row.experiment.ai_view_version}
           </small>
+          {context && (
+            <small>
+              {context.label}
+              {context.removed_evidence.length > 0
+                ? ` · ${zh ? "移除" : "removed"}: ${context.removed_evidence.join(", ")}`
+                : ` · ${zh ? "修正历史字段投影" : "history projection aligned"}`}
+            </small>
+          )}
         </div>
-        {row.baseline_reference && (
+        {reference && (
           <span className="baseline-reference">
-            {zh ? "参照" : "vs"} {row.baseline_reference.model}
+            {zh ? "参照" : "vs"} {reference.ai_view_version}
           </span>
         )}
       </header>
@@ -135,7 +145,13 @@ function ExperimentCard({ row, locale }: { row: AiBenchmarkExperiment; locale: s
 
       {!baseline && delta && (
         <div className="baseline-delta-strip">
-          <span>{zh ? "相对基线改善" : "Improvement vs baseline"}</span>
+          <span>
+            {context
+              ? `${zh ? "相对实验参照" : "Improvement vs context reference"} · ${reference?.ai_view_version ?? context.reference_ai_view_version}`
+              : zh
+                ? "相对基线改善"
+                : "Improvement vs baseline"}
+          </span>
           <Delta label={zh ? "准确率" : "Accuracy"} value={signedPercent(delta.forecast_accuracy, locale)} />
           <Delta label="Brier" value={signedDecimal(delta.brier_improvement)} />
           <Delta label="Log Loss" value={signedDecimal(delta.log_loss_improvement)} />

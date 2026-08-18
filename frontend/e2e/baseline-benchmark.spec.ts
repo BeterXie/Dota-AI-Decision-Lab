@@ -8,6 +8,54 @@ const identity = {
   ai_view_version: "ai-view-v6"
 };
 
+const baseline = {
+  experiment: identity,
+  observed_model_versions: [identity.model],
+  baseline_role: "BASELINE",
+  samples: { attempts: 30, successful_decisions: 29, parse_success_rate: 29 / 30, forecast_maps: 20, clv_maps: 10, market_comparison_maps: 18 },
+  quality: { forecast_accuracy: 0.6, average_brier_score: 0.21, average_log_loss: 0.59, calibration_error: 0.12, average_clv: 0.01, market_brier_improvement: 0.015, abstention_rate: 0.45, action_counts: {}, parse_status_counts: { SUCCESS: 29, PARSE_FAILED: 1 } },
+  latency: { sample_count: 30, average_seconds: 4.2, p95_seconds: 7.8 },
+  portfolio: { event_count: 2, realized_roi: 0.04, realized_pnl: 800, worst_event_drawdown_pct: 0.12, bet_count: 16 },
+  baseline_reference: null,
+  delta_vs_baseline: null,
+  context_experiment: null,
+  context_reference: null,
+  delta_vs_context_reference: null
+};
+
+const alignedIdentity = { ...identity, ai_view_version: "ctx-history-schema-aligned-v1" };
+const aligned = {
+  ...baseline,
+  experiment: alignedIdentity,
+  baseline_role: "CHALLENGER",
+  context_experiment: {
+    ai_view_version: alignedIdentity.ai_view_version,
+    label: "History schema aligned full context",
+    reference_ai_view_version: "ai-view-v6",
+    removed_evidence: [],
+    schema_aligned_history: true
+  },
+  context_reference: identity,
+  delta_vs_context_reference: { forecast_maps: 0, forecast_accuracy: 0.06, brier_improvement: 0.03, log_loss_improvement: 0.05, calibration_improvement: 0.03, clv_improvement: 0.008, market_brier_improvement_delta: 0.011, abstention_rate_delta: -0.05, average_latency_improvement_seconds: 0.1, p95_latency_improvement_seconds: 0.3, shadow_roi_delta: 0.02, drawdown_improvement: 0.01 }
+};
+
+const noFormIdentity = { ...identity, ai_view_version: "ctx-ablation-no-player-form-v1" };
+const noForm = {
+  ...baseline,
+  experiment: noFormIdentity,
+  baseline_role: "CHALLENGER",
+  quality: { ...baseline.quality, forecast_accuracy: 0.55, average_brier_score: 0.24 },
+  context_experiment: {
+    ai_view_version: noFormIdentity.ai_view_version,
+    label: "No player form context",
+    reference_ai_view_version: alignedIdentity.ai_view_version,
+    removed_evidence: ["player_form"],
+    schema_aligned_history: true
+  },
+  context_reference: alignedIdentity,
+  delta_vs_context_reference: { forecast_maps: 0, forecast_accuracy: -0.11, brier_improvement: -0.06, log_loss_improvement: -0.04, calibration_improvement: -0.02, clv_improvement: -0.01, market_brier_improvement_delta: -0.02, abstention_rate_delta: 0.05, average_latency_improvement_seconds: 0.2, p95_latency_improvement_seconds: 0.2, shadow_roi_delta: -0.02, drawdown_improvement: -0.01 }
+};
+
 const benchmark = {
   benchmark_report_version: "ai-benchmark-v1",
   baseline_contract: {
@@ -29,30 +77,7 @@ const benchmark = {
     market_comparison: "VIG_REMOVED_TWO_WAY_PROBABILITY_AT_DECISION_SNAPSHOT",
     significance: "DESCRIPTIVE_ONLY_NO_STATISTICAL_SIGNIFICANCE_CLAIM"
   },
-  experiments: [
-    {
-      experiment: identity,
-      observed_model_versions: [identity.model],
-      baseline_role: "BASELINE",
-      samples: { attempts: 30, successful_decisions: 29, parse_success_rate: 29 / 30, forecast_maps: 20, clv_maps: 10, market_comparison_maps: 18 },
-      quality: { forecast_accuracy: 0.6, average_brier_score: 0.21, average_log_loss: 0.59, calibration_error: 0.12, average_clv: 0.01, market_brier_improvement: 0.015, abstention_rate: 0.45, action_counts: {}, parse_status_counts: { SUCCESS: 29, PARSE_FAILED: 1 } },
-      latency: { sample_count: 30, average_seconds: 4.2, p95_seconds: 7.8 },
-      portfolio: { event_count: 2, realized_roi: 0.04, realized_pnl: 800, worst_event_drawdown_pct: 0.12, bet_count: 16 },
-      baseline_reference: null,
-      delta_vs_baseline: null
-    },
-    {
-      experiment: { ...identity, prompt_version: "decision-analyst-vNext" },
-      observed_model_versions: [identity.model],
-      baseline_role: "CHALLENGER",
-      samples: { attempts: 28, successful_decisions: 28, parse_success_rate: 1, forecast_maps: 20, clv_maps: 11, market_comparison_maps: 18 },
-      quality: { forecast_accuracy: 0.7, average_brier_score: 0.18, average_log_loss: 0.52, calibration_error: 0.08, average_clv: 0.025, market_brier_improvement: 0.03, abstention_rate: 0.35, action_counts: {}, parse_status_counts: { SUCCESS: 28 } },
-      latency: { sample_count: 28, average_seconds: 3.5, p95_seconds: 6.2 },
-      portfolio: { event_count: 2, realized_roi: 0.08, realized_pnl: 1600, worst_event_drawdown_pct: 0.1, bet_count: 18 },
-      baseline_reference: identity,
-      delta_vs_baseline: { forecast_maps: 0, forecast_accuracy: 0.1, brier_improvement: 0.03, log_loss_improvement: 0.07, calibration_improvement: 0.04, clv_improvement: 0.015, market_brier_improvement_delta: 0.015, abstention_rate_delta: -0.1, average_latency_improvement_seconds: 0.7, p95_latency_improvement_seconds: 1.6, shadow_roi_delta: 0.04, drawdown_improvement: 0.02 }
-    }
-  ]
+  experiments: [baseline, aligned, noForm]
 };
 
 async function mockApis(page: Page) {
@@ -71,14 +96,17 @@ async function mockApis(page: Page) {
   });
 }
 
-test("shows frozen baseline contract and challenger deltas", async ({ page }) => {
+test("shows frozen baseline, aligned context challenger and ablation reference", async ({ page }) => {
   await mockApis(page);
   await page.goto("/performance");
 
   await expect(page.getByRole("heading", { name: "AI 基线 Benchmark" })).toBeVisible();
   await expect(page.getByText("production-baseline-v1")).toBeVisible();
   await expect(page.getByText("81698ca175a7")).toBeVisible();
-  await expect(page.getByText("CHALLENGER")).toBeVisible();
-  await expect(page.getByText("相对基线改善")).toBeVisible();
-  await expect(page.getByText("+10%")).toBeVisible();
+  await expect(page.getByText("CONTEXT TEST").first()).toBeVisible();
+  await expect(page.getByText(/History schema aligned full context/)).toBeVisible();
+  await expect(page.getByText(/相对实验参照 · ai-view-v6/)).toBeVisible();
+  await expect(page.getByText(/No player form context/)).toBeVisible();
+  await expect(page.getByText(/移除: player_form/)).toBeVisible();
+  await expect(page.getByText(/相对实验参照 · ctx-history-schema-aligned-v1/)).toBeVisible();
 });

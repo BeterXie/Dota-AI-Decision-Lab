@@ -61,6 +61,49 @@ const payload: AiBenchmarkPayload = {
       delta_vs_baseline: null
     },
     {
+      experiment: { ...identity, ai_view_version: "ctx-history-schema-aligned-v1" },
+      observed_model_versions: [identity.model],
+      baseline_role: "CHALLENGER",
+      samples: { attempts: 30, successful_decisions: 30, parse_success_rate: 1, forecast_maps: 20, clv_maps: 10, market_comparison_maps: 18 },
+      quality: {
+        forecast_accuracy: 0.66,
+        average_brier_score: 0.18,
+        average_log_loss: 0.54,
+        calibration_error: 0.09,
+        average_clv: 0.018,
+        market_brier_improvement: 0.026,
+        abstention_rate: 0.4,
+        action_counts: { BUY_A: 9, BUY_B: 9, NO_BUY: 12 },
+        parse_status_counts: { SUCCESS: 30 }
+      },
+      latency: { sample_count: 30, average_seconds: 4.1, p95_seconds: 7.5 },
+      portfolio: { event_count: 2, realized_roi: 0.06, realized_pnl: 1200, worst_event_drawdown_pct: 0.11, bet_count: 18 },
+      baseline_reference: identity,
+      delta_vs_baseline: null,
+      context_experiment: {
+        ai_view_version: "ctx-history-schema-aligned-v1",
+        label: "History schema aligned full context",
+        reference_ai_view_version: "ai-view-v6",
+        removed_evidence: [],
+        schema_aligned_history: true
+      },
+      context_reference: identity,
+      delta_vs_context_reference: {
+        forecast_maps: 0,
+        forecast_accuracy: 0.06,
+        brier_improvement: 0.03,
+        log_loss_improvement: 0.05,
+        calibration_improvement: 0.03,
+        clv_improvement: 0.008,
+        market_brier_improvement_delta: 0.011,
+        abstention_rate_delta: -0.05,
+        average_latency_improvement_seconds: 0.1,
+        p95_latency_improvement_seconds: 0.3,
+        shadow_roi_delta: 0.02,
+        drawdown_improvement: 0.01
+      }
+    },
+    {
       experiment: { ...identity, prompt_version: "decision-analyst-vNext" },
       observed_model_versions: [identity.model],
       baseline_role: "CHALLENGER",
@@ -109,12 +152,15 @@ const payload: AiBenchmarkPayload = {
 };
 
 describe("BaselineBenchmarkPanel", () => {
-  it("shows the frozen contract, challenger deltas and provider filtering", () => {
+  it("shows the frozen contract, context reference, challenger deltas and provider filtering", () => {
     render(<BaselineBenchmarkPanel data={payload} loading={false} error={false} onRetry={() => undefined} locale="zh-CN" />);
 
     expect(screen.getByText("AI 基线 Benchmark")).toBeTruthy();
     expect(screen.getByText("production-baseline-v1")).toBeTruthy();
     expect(screen.getAllByText("BASELINE").length).toBeGreaterThan(0);
+    expect(screen.getByText("CONTEXT TEST")).toBeTruthy();
+    expect(screen.getByText(/History schema aligned full context/)).toBeTruthy();
+    expect(screen.getByText(/相对实验参照 · ai-view-v6/)).toBeTruthy();
     expect(screen.getByText("CHALLENGER")).toBeTruthy();
     expect(screen.getByText("相对基线改善")).toBeTruthy();
     expect(screen.getByText("+10%")).toBeTruthy();
@@ -123,5 +169,6 @@ describe("BaselineBenchmarkPanel", () => {
 
     expect(screen.getByText("gemini · gemini-3.6-flash")).toBeTruthy();
     expect(screen.queryByText("CHALLENGER")).toBeNull();
+    expect(screen.queryByText("CONTEXT TEST")).toBeNull();
   });
 });

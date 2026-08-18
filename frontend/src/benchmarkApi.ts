@@ -60,6 +60,14 @@ export interface AiBenchmarkDelta {
   drawdown_improvement: number | null;
 }
 
+export interface AiContextExperimentMetadata {
+  ai_view_version: string;
+  label: string;
+  reference_ai_view_version: string;
+  removed_evidence: string[];
+  schema_aligned_history: boolean;
+}
+
 export interface AiBenchmarkExperiment {
   experiment: AiExperimentIdentity;
   observed_model_versions: string[];
@@ -70,6 +78,9 @@ export interface AiBenchmarkExperiment {
   portfolio: AiBenchmarkPortfolio;
   baseline_reference: AiExperimentIdentity | null;
   delta_vs_baseline: AiBenchmarkDelta | null;
+  context_experiment?: AiContextExperimentMetadata | null;
+  context_reference?: AiExperimentIdentity | null;
+  delta_vs_context_reference?: AiBenchmarkDelta | null;
 }
 
 export interface AiBenchmarkPayload {
