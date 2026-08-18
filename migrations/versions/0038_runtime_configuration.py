@@ -8,11 +8,14 @@ from collections.abc import Sequence
 
 import sqlalchemy as sa
 from alembic import op
+from sqlalchemy.dialects.postgresql import JSONB
 
 revision: str = "0038_runtime_configuration"
 down_revision: str | None = "0037_team_roster_registry"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
+
+_JSON_DOCUMENT = sa.JSON().with_variant(JSONB(), "postgresql")
 
 
 def upgrade() -> None:
@@ -24,7 +27,7 @@ def upgrade() -> None:
     op.create_table(
         "runtime_settings",
         sa.Column("key", sa.String(length=160), nullable=False),
-        sa.Column("value", sa.JSON().with_variant(sa.JSON(), "sqlite"), nullable=False),
+        sa.Column("value", _JSON_DOCUMENT, nullable=False),
         sa.Column("value_type", sa.String(length=24), nullable=False),
         sa.Column("category", sa.String(length=64), nullable=False),
         sa.Column("description", sa.Text(), nullable=True),
@@ -66,8 +69,8 @@ def upgrade() -> None:
         sa.Column("target_key", sa.String(length=200), nullable=False),
         sa.Column("category", sa.String(length=64), nullable=False),
         sa.Column("operation", sa.String(length=32), nullable=False),
-        sa.Column("previous_value", sa.JSON().with_variant(sa.JSON(), "sqlite"), nullable=True),
-        sa.Column("new_value", sa.JSON().with_variant(sa.JSON(), "sqlite"), nullable=True),
+        sa.Column("previous_value", _JSON_DOCUMENT, nullable=True),
+        sa.Column("new_value", _JSON_DOCUMENT, nullable=True),
         sa.Column("secret_changed", sa.Boolean(), nullable=False),
         sa.Column("actor", sa.String(length=320), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
