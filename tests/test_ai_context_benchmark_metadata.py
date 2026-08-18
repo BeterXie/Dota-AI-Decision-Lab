@@ -1,3 +1,5 @@
+import pytest
+
 from app.ai.context_profiles import (
     NO_PLAYER_FORM_CONTEXT_VERSION,
     SCHEMA_ALIGNED_CONTEXT_VERSION,
@@ -16,8 +18,8 @@ def test_context_benchmark_uses_aligned_full_as_ablation_reference() -> None:
     assert production["context_experiment"] is None
     assert aligned["context_experiment"]["reference_ai_view_version"] == "ai-view-v6"
     assert aligned["context_reference"]["ai_view_version"] == "ai-view-v6"
-    assert aligned["delta_vs_context_reference"]["forecast_accuracy"] == 0.06
-    assert aligned["delta_vs_context_reference"]["brier_improvement"] == 0.03
+    assert aligned["delta_vs_context_reference"]["forecast_accuracy"] == pytest.approx(0.06)
+    assert aligned["delta_vs_context_reference"]["brier_improvement"] == pytest.approx(0.03)
 
     assert (
         no_form["context_experiment"]["reference_ai_view_version"]
@@ -25,8 +27,8 @@ def test_context_benchmark_uses_aligned_full_as_ablation_reference() -> None:
     )
     assert no_form["context_experiment"]["removed_evidence"] == ["player_form"]
     assert no_form["context_reference"]["ai_view_version"] == SCHEMA_ALIGNED_CONTEXT_VERSION
-    assert no_form["delta_vs_context_reference"]["forecast_accuracy"] == -0.05
-    assert no_form["delta_vs_context_reference"]["brier_improvement"] == -0.05
+    assert no_form["delta_vs_context_reference"]["forecast_accuracy"] == pytest.approx(-0.05)
+    assert no_form["delta_vs_context_reference"]["brier_improvement"] == pytest.approx(-0.05)
 
 
 def _row(ai_view_version: str, *, accuracy: float, brier: float) -> dict:
