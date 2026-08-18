@@ -57,8 +57,23 @@ export function buildSeriesSummaries(event: EventSummary): EventSeriesSummary[] 
     });
 }
 
+export function eventSlug(name: string): string {
+  const normalized = name
+    .normalize("NFKC")
+    .replace(/国际邀请赛/g, " international ")
+    .replace(/国际邀请/g, " international ")
+    .replace(/利雅得大师赛/g, " riyadh-masters ")
+    .toLowerCase();
+  const slug = normalized
+    .replace(/&/g, " and ")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .replace(/-+/g, "-");
+  return slug || `event-${stableHash(name)}`;
+}
+
 export function eventHref(name: string): string {
-  return `/events/${encodeURIComponent(name)}`;
+  return `/events/${eventSlug(name)}`;
 }
 
 export function eventNameFromPath(pathname: string): string | null {
@@ -192,4 +207,13 @@ function compareDates(left: string | null | undefined, right: string | null | un
   if (!left) return 1;
   if (!right) return -1;
   return Date.parse(left) - Date.parse(right);
+}
+
+function stableHash(value: string): string {
+  let hash = 2166136261;
+  for (const char of value.normalize("NFKC")) {
+    hash ^= char.codePointAt(0) ?? 0;
+    hash = Math.imul(hash, 16777619);
+  }
+  return (hash >>> 0).toString(36);
 }
