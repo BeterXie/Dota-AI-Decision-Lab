@@ -5,7 +5,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.ai.base import ai_experiment_key
 from app.auth.social import SocialAuthSettings
-from app.config import Settings
+from app.config import Settings, get_settings
 from app.db import Base
 from app.runtime_config.models import AiProviderConfigRecord, RuntimeConfigAuditRecord
 from app.runtime_config.service import (
@@ -66,64 +66,68 @@ async def test_auth_switches_apply_without_recreating_service() -> None:
 
 
 @pytest.mark.asyncio
-async def test_ai_model_timeout_reasoning_and_enablement_are_hot() -> None:
+async def test_ai_model_timeout_reasoning_and_enablement_are_hot(monkeypatch) -> None:
+    monkeypatch.setenv("OPENAI_API_KEY", "env-openai-key")
+    get_settings.cache_clear()
     engine, factory, service = await _service()
-    await service.ensure_seeded(actor="bootstrap")
+    try:
+        await service.ensure_seeded(actor="bootstrap")
 
-    async with factory() as session:
-        assert await active_ai_experiments(session) == (
-            ai_experiment_key("openai", "baseline-model"),
-        )
+        async with factory() as session:
+            assert await active_ai_experiments(session) == (
+                ai_experiment_key("openai", "baseline-model"),
+            )
 
-    payload = await service.upsert_ai_provider(
-        "openai",
-        "default",
-        {
-            "model": "challenger-model",
-            "reasoning_effort": "medium",
-            "timeout_seconds": 17,
-            "enabled": True,
-            "decisions_enabled": True,
-        },
-        actor="dev@localhost",
-    )
-    assert payload["model"] == "challenger-model"
-    assert payload["reasoning_effort"] == "medium"
-    assert payload["timeout_seconds"] == 17
-    assert payload["secret_configured"] is True
-
-    async with factory() as session:
-        assert await active_ai_experiments(session) == (
-            ai_experiment_key("openai", "challenger-model"),
-        )
-        provider = await resolve_ai_provider(
-            session,
+        payload = await service.upsert_ai_provider(
             "openai",
-            "challenger-model",
-            fallback=None,
+            "default",
+            {
+                "model": "challenger-model",
+                "reasoning_effort": "medium",
+                "timeout_seconds": 17,
+                "enabled": True,
+                "decisions_enabled": True,
+            },
+            actor="dev@localhost",
         )
-    assert provider.model == "challenger-model"
-    assert provider.reasoning_effort == "medium"
-    assert provider.runtime_timeout_seconds == 17
-    await provider.close()
+        assert payload["model"] == "challenger-model"
+        assert payload["reasoning_effort"] == "medium"
+        assert payload["timeout_seconds"] == 17
+        assert payload["secret_configured"] is True
 
-    await service.upsert_ai_provider(
-        "openai",
-        "default",
-        {"enabled": False},
-        actor="dev@localhost",
-    )
-    async with factory() as session:
-        assert await active_ai_experiments(session) == ()
-        with pytest.raises(ValueError, match="disabled or superseded"):
-            await resolve_ai_provider(
+        async with factory() as session:
+            assert await active_ai_experiments(session) == (
+                ai_experiment_key("openai", "challenger-model"),
+            )
+            provider = await resolve_ai_provider(
                 session,
                 "openai",
                 "challenger-model",
                 fallback=None,
             )
+        assert provider.model == "challenger-model"
+        assert provider.reasoning_effort == "medium"
+        assert provider.runtime_timeout_seconds == 17
+        await provider.close()
 
-    await engine.dispose()
+        await service.upsert_ai_provider(
+            "openai",
+            "default",
+            {"enabled": False},
+            actor="dev@localhost",
+        )
+        async with factory() as session:
+            assert await active_ai_experiments(session) == ()
+            with pytest.raises(ValueError, match="disabled or superseded"):
+                await resolve_ai_provider(
+                    session,
+                    "openai",
+                    "challenger-model",
+                    fallback=None,
+                )
+    finally:
+        await engine.dispose()
+        get_settings.cache_clear()
 
 
 @pytest.mark.asyncio
