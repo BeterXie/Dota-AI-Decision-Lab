@@ -77,8 +77,8 @@ test("shows frozen baseline contract and challenger deltas", async ({ page }) =>
 
   await expect(page.getByRole("heading", { name: "AI 基线 Benchmark" })).toBeVisible();
   await expect(page.getByText("production-baseline-v1")).toBeVisible();
-  await expect(page.getByText("81698ca175a")).toBeVisible();
+  await expect(page.getByText("81698ca175a7")).toBeVisible();
   await expect(page.getByText("CHALLENGER")).toBeVisible();
   await expect(page.getByText("相对基线改善")).toBeVisible();
-  await expect(page.getByText("+3.0%")).toBeVisible();
+  await expect(page.getByText("+10.0%")).toBeVisible();
 });
