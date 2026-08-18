@@ -32,8 +32,7 @@ class RequestLoginCodePayload(BaseModel):
 
 
 class VerifyLoginCodePayload(BaseModel):
-    email: str = Field(min_length=3, max_length=320)
-    code: str = Field(min_length=1, max_length=20)
+    email: str = Field(min_length=1, max_length=20)
 
 
 class AuthGuardMiddleware:
@@ -474,7 +473,8 @@ def _http_access_requirement(path: str) -> tuple[str, str | None]:
     if path == "/metrics" or path == "/api/jobs/summary" or path.startswith("/api/account/"):
         return "AUTHENTICATED", None
     if (
-        path in {"/health", "/ready", "/api/runtime", "/api/matches"}
+        path in {"/health", "/ready", "/api/runtime", "/api/matches", "/api/teams"}
+        or path.startswith("/api/teams/")
         or path == "/api/auth"
         or path.startswith("/api/auth/")
         or _is_public_map_path(path)
