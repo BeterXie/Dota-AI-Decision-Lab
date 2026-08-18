@@ -9,7 +9,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.db import Base
 from app.identity.roster_models import TeamProfile, TeamRosterMembership
 from app.identity.team_registry_population import TeamRegistryPopulationService
-from app.models import CanonicalTeam, ProviderTeamMapping
+from app.models import CanonicalSeries, CanonicalTeam, ProviderMatchMapping, ProviderTeamMapping
 from app.providers.common import TimedPayload
 from app.repositories.raw import RawEventRepository
 from app.runtime.health import HealthRegistry
@@ -99,6 +99,80 @@ async def test_population_fills_missing_profile_and_roster_without_guessing_asse
         "https://steamcdn-a.akamaihd.net/apps/dota2/images/team_logos/7654321.png"
     )
     assert len(memberships) == 2
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_population_does_not_mutate_raybet_match_or_team_associations() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory.begin() as session:
+        team = CanonicalTeam(name="Team Example")
+        opponent = CanonicalTeam(name="Opponent")
+        session.add_all((team, opponent))
+        await session.flush()
+        series = CanonicalSeries(team_a_id=team.id, team_b_id=opponent.id)
+        session.add(series)
+        await session.flush()
+        session.add_all(
+            (
+                ProviderTeamMapping(
+                    provider="opendota",
+                    provider_team_id="7654321",
+                    canonical_team_id=team.id,
+                    observed_name="Team Example",
+                ),
+                ProviderTeamMapping(
+                    provider="raybet",
+                    provider_team_id="501",
+                    canonical_team_id=team.id,
+                    observed_name="Team Example",
+                ),
+                ProviderTeamMapping(
+                    provider="raybet",
+                    provider_team_id="502",
+                    canonical_team_id=opponent.id,
+                    observed_name="Opponent",
+                ),
+                ProviderMatchMapping(
+                    provider="raybet",
+                    provider_match_id="9001",
+                    canonical_series_id=series.id,
+                    resolved_by="PROVIDER_DISCOVERY",
+                    confidence=1.0,
+                ),
+            )
+        )
+
+    async with factory.begin() as session:
+        await TeamRegistryPopulationService(RawEventRepository()).populate(
+            session,
+            FakeTeamRegistryClient(),
+            canonical_team_ids=[team.id],
+        )
+
+    async with factory() as session:
+        match_mapping = await session.scalar(
+            select(ProviderMatchMapping).where(
+                ProviderMatchMapping.provider == "raybet",
+                ProviderMatchMapping.provider_match_id == "9001",
+            )
+        )
+        raybet_team_mapping = await session.scalar(
+            select(ProviderTeamMapping).where(
+                ProviderTeamMapping.provider == "raybet",
+                ProviderTeamMapping.provider_team_id == "501",
+            )
+        )
+    assert match_mapping is not None
+    assert match_mapping.canonical_series_id == series.id
+    assert match_mapping.resolved_by == "PROVIDER_DISCOVERY"
+    assert raybet_team_mapping is not None
+    assert raybet_team_mapping.canonical_team_id == team.id
 
     await engine.dispose()
 
