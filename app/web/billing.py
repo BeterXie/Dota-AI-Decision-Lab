@@ -57,14 +57,10 @@ def create_billing_router(
             "enabled": series_gateway is not None or event_gateway is not None,
             "environment": settings.paddle_environment,
             "series_pass": (
-                series_gateway.public_offer
-                if series_gateway is not None
-                else {"enabled": False}
+                series_gateway.public_offer if series_gateway is not None else {"enabled": False}
             ),
             "event_pass": (
-                event_gateway.public_offer
-                if event_gateway is not None
-                else {"enabled": False}
+                event_gateway.public_offer if event_gateway is not None else {"enabled": False}
             ),
             "referral": {
                 "enabled": referral_service.enabled,
@@ -121,7 +117,7 @@ def create_billing_router(
                     "status": item.status,
                     "completed_at": item.completed_at,
                     "payment_blocked": item.payment_blocked,
-                    }
+                }
                 for item in passes
             ],
         }
