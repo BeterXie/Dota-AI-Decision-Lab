@@ -161,7 +161,9 @@ class _FakePolicy:
 
 
 @pytest.mark.asyncio
-async def test_runtime_feature_middleware_hard_gates_surfaces_but_keeps_billing_maintenance() -> None:
+async def test_runtime_feature_middleware_hard_gates_surfaces_but_keeps_billing_maintenance() -> (
+    None
+):
     policy = _FakePolicy()
     app = FastAPI()
     app.add_middleware(RuntimeFeatureFlagMiddleware, policy=policy)

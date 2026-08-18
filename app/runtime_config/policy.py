@@ -215,7 +215,9 @@ class RuntimePolicyService:
     def _lifecycle_features(self) -> list[dict[str, object]]:
         settings = self._settings
         return [
-            _lifecycle("email_notifications", "Email notifications", settings.email_notifications_enabled),
+            _lifecycle(
+                "email_notifications", "Email notifications", settings.email_notifications_enabled
+            ),
             _lifecycle("qq_bot", "QQ Bot", settings.qq_bot_enabled),
             _lifecycle("wechat_clawbot", "WeChat ClawBot", settings.wechat_clawbot_enabled),
             _lifecycle("raybet_workers", "RayBet collectors", settings.run_provider_workers),
@@ -274,7 +276,11 @@ def _setting_payload(row: RuntimeSettingRecord) -> dict[str, object]:
 
 
 def _normalize_policy_value(key: str, value: object) -> object:
-    if key in {"ai.decisions.enabled", "feature.performance.enabled", "feature.billing_checkout.enabled"}:
+    if key in {
+        "ai.decisions.enabled",
+        "feature.performance.enabled",
+        "feature.billing_checkout.enabled",
+    }:
         if not isinstance(value, bool):
             raise ValueError(f"{key} must be boolean")
         return value
