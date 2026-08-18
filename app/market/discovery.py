@@ -1,15 +1,21 @@
 from collections.abc import Awaitable, Callable
 from typing import Protocol
 
+import structlog
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.config import Settings
 from app.domain.events import DomainEvent, DomainEventType
 from app.events.outbox import EventRepository
+from app.identity.raybet_linking import RayBetExistingSeriesLinker
+from app.identity.resolver import IdentityAmbiguousError
 from app.models import RayBetMatch
 from app.providers.common import TimedPayload
+from app.providers.liquipedia.runtime import LiquipediaRuntimeSeeder
 from app.providers.raybet.parser import PARSER_VERSION, parse_matches
 from app.repositories.raw import RawEventRepository
+
+logger = structlog.get_logger()
 
 
 class MatchHttpClient(Protocol):
@@ -29,6 +35,8 @@ class RayBetDiscoveryService:
         raw_events: RawEventRepository,
         events: EventRepository,
         on_match: IdentityCallback,
+        liquipedia_seeder: LiquipediaRuntimeSeeder | None = None,
+        existing_series_linker: RayBetExistingSeriesLinker | None = None,
     ) -> None:
         self._settings = settings
         self._client = client
@@ -36,8 +44,11 @@ class RayBetDiscoveryService:
         self._raw_events = raw_events
         self._events = events
         self._on_match = on_match
+        self._liquipedia = liquipedia_seeder or LiquipediaRuntimeSeeder(raw_events)
+        self._existing_series_linker = existing_series_linker or RayBetExistingSeriesLinker()
 
     async def discover_once(self, session: AsyncSession) -> int:
+        await self._seed_liquipedia_without_blocking_raybet(session)
         discovered = 0
         for match_type in self._settings.raybet_discovery_match_types:
             for page in range(1, 11):
@@ -76,7 +87,26 @@ class RayBetDiscoveryService:
                             raw_event_id=raw_event_id,
                         )
                     )
-                    await self._on_match(session, match)
+                    await session.flush()
+                    try:
+                        async with session.begin_nested():
+                            link_result = await self._existing_series_linker.link(session, match)
+                            if link_result.canonical_series_id is not None:
+                                await self._on_match(session, match)
+                            elif link_result.fallback_allowed:
+                                await self._on_match(session, match)
+                            else:
+                                logger.warning(
+                                    "raybet_identity_fallback_blocked",
+                                    provider_match_id=match.provider_match_id,
+                                    reason=link_result.reason,
+                                )
+                    except IdentityAmbiguousError as exc:
+                        logger.warning(
+                            "raybet_identity_ambiguous",
+                            provider_match_id=match.provider_match_id,
+                            code=str(exc),
+                        )
                     await self._events.record(
                         session,
                         DomainEvent(
@@ -93,6 +123,27 @@ class RayBetDiscoveryService:
                 if not isinstance(result, list) or not result:
                     break
         return discovered
+
+    async def close(self) -> None:
+        await self._liquipedia.close()
+
+    async def _seed_liquipedia_without_blocking_raybet(self, session: AsyncSession) -> None:
+        try:
+            async with session.begin_nested():
+                result = await self._liquipedia.refresh_one_due(session)
+        except Exception as exc:
+            logger.warning(
+                "liquipedia_seed_failed",
+                error_type=type(exc).__name__,
+                error=str(exc),
+            )
+            return
+        if result.source is not None:
+            logger.info(
+                "liquipedia_seed_completed",
+                source=result.source,
+                observations=result.observations,
+            )
 
     async def _fetch(self, match_type: int, page: int) -> TimedPayload:
         try:
