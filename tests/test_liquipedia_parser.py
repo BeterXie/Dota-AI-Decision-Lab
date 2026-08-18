@@ -2,7 +2,6 @@ from datetime import UTC, datetime
 
 from app.providers.liquipedia.parser import parse_series, parse_tournaments
 
-
 TOURNAMENTS_HTML = """
 <ul class="tournaments-list">
   <li class="tournaments-list-type">
