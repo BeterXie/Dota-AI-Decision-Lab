@@ -6,7 +6,8 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import aliased
 
-from app.evaluation.benchmark import AiBaselineBenchmarkService
+from app.ai.context_profiles import context_profile_metadata
+from app.evaluation.benchmark import AiBaselineBenchmarkService, _comparison_delta
 from app.evaluation.leaderboard import TournamentLeaderboardService
 from app.evaluation.portfolio_models import (
     TournamentPortfolioAccountRecord,
@@ -106,6 +107,57 @@ async def build_position_audit(
     }
 
 
+def annotate_context_experiments(report: dict[str, Any]) -> dict[str, Any]:
+    """Attach controlled-context metadata and its intended comparison row."""
+    experiments = report.get("experiments")
+    if not isinstance(experiments, list):
+        return report
+    rows_by_key = {
+        _experiment_key(row.get("experiment")): row
+        for row in experiments
+        if isinstance(row, dict) and isinstance(row.get("experiment"), dict)
+    }
+    for row in experiments:
+        if not isinstance(row, dict):
+            continue
+        identity = row.get("experiment")
+        if not isinstance(identity, dict):
+            continue
+        try:
+            metadata = context_profile_metadata(str(identity.get("ai_view_version")))
+        except ValueError:
+            metadata = None
+        row["context_experiment"] = metadata
+        row["context_reference"] = None
+        row["delta_vs_context_reference"] = None
+        if metadata is None:
+            continue
+        reference_key = (
+            str(identity.get("provider")),
+            str(identity.get("model")),
+            str(identity.get("prompt_version")),
+            str(identity.get("decision_policy_version")),
+            str(metadata["reference_ai_view_version"]),
+        )
+        reference = rows_by_key.get(reference_key)
+        if reference is None or reference is row:
+            continue
+        row["context_reference"] = reference["experiment"]
+        row["delta_vs_context_reference"] = _comparison_delta(reference, row)
+    return report
+
+
+def _experiment_key(identity: dict[str, Any] | None) -> tuple[str, str, str, str, str]:
+    identity = identity or {}
+    return (
+        str(identity.get("provider")),
+        str(identity.get("model")),
+        str(identity.get("prompt_version")),
+        str(identity.get("decision_policy_version")),
+        str(identity.get("ai_view_version")),
+    )
+
+
 def create_quality_router(
     session_factory: async_sessionmaker[AsyncSession],
 ) -> APIRouter:
@@ -135,7 +187,8 @@ def create_quality_router(
     @router.get("/api/review/ai-quality/benchmark")
     async def global_ai_baseline_benchmark() -> dict[str, Any]:
         async with session_factory() as session:
-            return await benchmark.build_report(session)
+            report = await benchmark.build_report(session)
+            return annotate_context_experiments(report)
 
     @router.get("/api/review/events/{canonical_event_id}/ai-quality")
     async def event_ai_quality(canonical_event_id: UUID) -> dict[str, Any]:
