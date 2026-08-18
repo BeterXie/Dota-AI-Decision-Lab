@@ -1,6 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { MapSummary } from "./api";
-import { buildEventSummaries, buildSeriesSummaries, eventHref, eventNameFromPath } from "./events";
+import {
+  buildEventSummaries,
+  buildSeriesSummaries,
+  eventHref,
+  eventNameFromPath,
+  eventSlug
+} from "./events";
 
 function match(overrides: Partial<MapSummary>): MapSummary {
   return {
@@ -68,8 +74,15 @@ describe("event aggregation", () => {
     expect(series[0].phase).toBe("POSTMATCH");
   });
 
-  it("round-trips event names through the public event URL", () => {
-    const name = "TI 15 / 国际邀请赛";
-    expect(eventNameFromPath(eventHref(name))).toBe(name);
+  it("uses readable ASCII slugs for public event URLs", () => {
+    expect(eventSlug("TI15 国际邀请赛")).toBe("ti15-international");
+    expect(eventHref("TI15 国际邀请赛")).toBe("/events/ti15-international");
+    expect(eventSlug("DreamLeague S24")).toBe("dreamleague-s24");
+  });
+
+  it("keeps legacy encoded event-name URLs readable", () => {
+    const name = "TI15 国际邀请赛";
+    expect(eventNameFromPath(`/events/${encodeURIComponent(name)}`)).toBe(name);
+    expect(eventNameFromPath(eventHref(name))).toBe("ti15-international");
   });
 });

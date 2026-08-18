@@ -16,6 +16,7 @@ import "./design/premium-shell.css";
 import "./design/account-v2.css";
 import "./design/final-experience-audit.css";
 import "./design/real-data-ux.css";
+import "./design/visual-assets-v2.css";
 
 const queryClient = new QueryClient({
   defaultOptions: {
