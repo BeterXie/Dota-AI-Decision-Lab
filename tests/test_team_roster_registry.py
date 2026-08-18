@@ -12,7 +12,7 @@ from app.identity.roster_models import (
     TeamProfile,
     TeamRosterMembership,
 )
-from app.models import CanonicalPlayer, CanonicalTeam
+from app.models import CanonicalPlayer, CanonicalTeam, ProviderTeamMapping
 from app.runtime.health import HealthRegistry
 from app.web import create_app
 
@@ -90,6 +90,7 @@ async def test_team_directory_exposes_profile_and_current_roster(tmp_path: Path)
             "slug": "team-example",
             "short_name": "EX",
             "valve_team_id": 999999,
+            "identity_source": "registry",
             "country_code": "JP",
             "logo_url": "https://steamcdn-a.akamaihd.net/apps/dota2/images/team_logos/999999.png",
             "logo_source": "valve-steam",
@@ -106,6 +107,41 @@ async def test_team_directory_exposes_profile_and_current_roster(tmp_path: Path)
     assert payload["current_roster"][1]["subject"]["name"] == "Coach Example"
     assert len(payload["roster_history"]) == 2
 
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_team_directory_reuses_existing_opendota_team_mapping(tmp_path: Path) -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory.begin() as session:
+        team = CanonicalTeam(name="Mapped Team")
+        session.add(team)
+        await session.flush()
+        session.add(
+            ProviderTeamMapping(
+                provider="opendota",
+                provider_team_id="1234567",
+                canonical_team_id=team.id,
+                observed_name="Mapped Team",
+            )
+        )
+
+    health = HealthRegistry()
+    await health.dependency("DATABASE", "READY")
+    app = create_app(factory, health, frontend_dist=tmp_path / "missing", auth_enabled=False)
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/api/teams")
+
+    assert response.status_code == 200
+    payload = response.json()[0]
+    assert payload["valve_team_id"] == 1234567
+    assert payload["identity_source"] == "opendota"
+    assert payload["logo_source"] == "valve-steam"
+    assert payload["source_url"] == "https://www.opendota.com/teams/1234567"
     await engine.dispose()
 
 
