@@ -33,7 +33,7 @@ AUTH_SETTING_KEYS = frozenset(
         "auth.external_base_url",
     }
 )
-AUTH_SECRET_KEY = "auth.google.client_secret"
+AUTH_SECRET_KEY = "auth.google.client_secret"  # noqa: S105 - lookup key, not a credential
 AI_SECRET_KEYS = frozenset(
     {
         "ai.openai.api_key",
@@ -526,7 +526,7 @@ class RuntimeConfigurationService:
                 model=settings.openai_model,
                 reasoning_effort=settings.openai_reasoning_effort,
                 timeout_seconds=settings.ai_timeout_seconds,
-                secret_key="ai.openai.api_key",
+                credential_ref="ai.openai.api_key",
             ),
             ("local_openai", "default"): _provider_defaults(
                 "local_openai",
@@ -537,7 +537,7 @@ class RuntimeConfigurationService:
                 model=settings.local_openai_model,
                 reasoning_effort=settings.local_openai_reasoning_effort,
                 timeout_seconds=settings.ai_timeout_seconds,
-                secret_key="ai.local_openai.api_key",
+                credential_ref="ai.local_openai.api_key",
             ),
             ("anthropic", "default"): _provider_defaults(
                 "anthropic",
@@ -548,7 +548,7 @@ class RuntimeConfigurationService:
                 model=settings.anthropic_model,
                 reasoning_effort=None,
                 timeout_seconds=settings.ai_timeout_seconds,
-                secret_key="ai.anthropic.api_key",
+                credential_ref="ai.anthropic.api_key",
             ),
             ("gemini", "default"): _provider_defaults(
                 "gemini",
@@ -559,7 +559,7 @@ class RuntimeConfigurationService:
                 model=settings.gemini_model,
                 reasoning_effort=None,
                 timeout_seconds=settings.ai_timeout_seconds,
-                secret_key="ai.gemini.api_key",
+                credential_ref="ai.gemini.api_key",
             ),
             ("deepseek", "flash"): _provider_defaults(
                 "deepseek",
@@ -570,7 +570,7 @@ class RuntimeConfigurationService:
                 model=settings.deepseek_model,
                 reasoning_effort=settings.deepseek_reasoning_effort,
                 timeout_seconds=settings.ai_timeout_seconds,
-                secret_key="ai.deepseek.api_key",
+                credential_ref="ai.deepseek.api_key",
             ),
             ("deepseek", "pro"): _provider_defaults(
                 "deepseek",
@@ -581,7 +581,7 @@ class RuntimeConfigurationService:
                 model=settings.deepseek_pro_model,
                 reasoning_effort=settings.deepseek_reasoning_effort,
                 timeout_seconds=settings.ai_timeout_seconds,
-                secret_key="ai.deepseek.api_key",
+                credential_ref="ai.deepseek.api_key",
             ),
             ("kimi", "default"): _provider_defaults(
                 "kimi",
@@ -592,7 +592,7 @@ class RuntimeConfigurationService:
                 model=settings.kimi_model,
                 reasoning_effort=None,
                 timeout_seconds=settings.ai_timeout_seconds,
-                secret_key="ai.kimi.api_key",
+                credential_ref="ai.kimi.api_key",
             ),
         }
 
@@ -795,7 +795,7 @@ def _provider_defaults(
     model: str,
     reasoning_effort: str | None,
     timeout_seconds: float,
-    secret_key: str,
+    credential_ref: str,
 ) -> dict[str, object]:
     return {
         "provider": provider,
@@ -806,7 +806,7 @@ def _provider_defaults(
         "model": model,
         "reasoning_effort": reasoning_effort,
         "timeout_seconds": timeout_seconds,
-        "api_key_secret_key": secret_key,
+        "api_key_secret_key": credential_ref,
     }
 
 
