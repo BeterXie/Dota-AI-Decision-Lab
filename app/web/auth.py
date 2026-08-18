@@ -20,6 +20,7 @@ from app.auth import (
 )
 from app.auth.social import SocialAuthProviderError, SocialAuthService, SocialAuthSettings
 from app.entitlements import AI_DECISIONS_ENTITLEMENT, EntitlementService
+from app.runtime_config import AuthRuntimeSnapshot, RuntimeConfigurationService
 
 _LOOPBACK_ORIGIN_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
 _SOCIAL_STATE_COOKIE = "dota_auth_state"
@@ -147,6 +148,7 @@ def register_auth(
     enabled: bool,
     cookie_secure: bool,
     development_grant_emails: tuple[str, ...] = (),
+    runtime_config: RuntimeConfigurationService | None = None,
 ) -> None:
     if enabled and service is None:
         raise ValueError("auth is enabled but no auth service was configured")
@@ -155,6 +157,7 @@ def register_auth(
         _auth_router(
             service=service,
             social=social,
+            runtime_config=runtime_config,
             entitlements=entitlements,
             enabled=enabled,
             cookie_secure=cookie_secure,
@@ -173,12 +176,30 @@ def _auth_router(
     *,
     service: EmailAuthService | None,
     social: SocialAuthService,
+    runtime_config: RuntimeConfigurationService | None,
     entitlements: EntitlementService,
     enabled: bool,
     cookie_secure: bool,
     development_grant_emails: tuple[str, ...],
 ) -> APIRouter:
     router = APIRouter(prefix="/api/auth", tags=["auth"])
+
+    async def runtime_auth() -> AuthRuntimeSnapshot:
+        if runtime_config is not None:
+            return await runtime_config.auth_snapshot()
+        settings = social.settings
+        return AuthRuntimeSnapshot(
+            email_enabled=enabled,
+            google_enabled=settings.google_enabled,
+            google_client_id=settings.google_client_id,
+            google_client_secret=(
+                settings.google_client_secret.get_secret_value()
+                if settings.google_client_secret is not None
+                else None
+            ),
+            steam_enabled=settings.steam_enabled,
+            external_base_url=settings.external_base_url,
+        )
 
     async def session_payload(user: AuthenticatedUser | None) -> dict:
         active: tuple[str, ...] = ()
@@ -193,6 +214,7 @@ def _auth_router(
             else:
                 active = await entitlements.active_entitlements(user.id)
             grants = [item.public_payload() for item in await entitlements.active_grants(user.id)]
+        auth_config = await runtime_auth()
         return {
             "enabled": enabled,
             "authenticated": user is not None if enabled else True,
@@ -200,9 +222,7 @@ def _auth_router(
             "entitlements": list(active),
             "grants": grants,
             "providers": {
-                "email": enabled,
-                "google": enabled and social.settings.google_available,
-                "steam": enabled and social.settings.steam_available,
+                key: enabled and value for key, value in auth_config.provider_payload.items()
             },
         }
 
@@ -215,18 +235,19 @@ def _auth_router(
 
     @router.get("/providers")
     async def auth_providers() -> dict:
+        auth_config = await runtime_auth()
         return {
             "enabled": enabled,
             "providers": {
-                "email": enabled,
-                "google": enabled and social.settings.google_available,
-                "steam": enabled and social.settings.steam_available,
+                key: enabled and value for key, value in auth_config.provider_payload.items()
             },
         }
 
     @router.post("/request-code", status_code=status.HTTP_202_ACCEPTED)
     async def request_code(payload: RequestLoginCodePayload, request: Request) -> dict:
         auth = _require_service(service, enabled)
+        if not (await runtime_auth()).email_enabled:
+            raise HTTPException(status_code=503, detail="email login is disabled")
         request_source = request.client.host if request.client is not None else None
         try:
             result = await auth.request_login_code(
@@ -252,6 +273,8 @@ def _auth_router(
     @router.post("/verify-code")
     async def verify_code(payload: VerifyLoginCodePayload, response: Response) -> dict:
         auth = _require_service(service, enabled)
+        if not (await runtime_auth()).email_enabled:
+            raise HTTPException(status_code=503, detail="email login is disabled")
         try:
             result = await auth.verify_login_code(payload.email, payload.code)
         except InvalidEmailError as exc:
@@ -266,7 +289,8 @@ def _auth_router(
         _require_service(service, enabled)
         state_value = secrets.token_urlsafe(32)
         try:
-            target = social.google_authorization_url(state_value)
+            live_social = SocialAuthService((await runtime_auth()).social_settings())
+            target = live_social.google_authorization_url(state_value)
         except SocialAuthProviderError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         response = RedirectResponse(target, status_code=status.HTTP_302_FOUND)
@@ -282,7 +306,8 @@ def _auth_router(
         if request.query_params.get("error") or not request.query_params.get("code"):
             return _social_failure_redirect(return_to, "google_cancelled", cookie_secure)
         try:
-            claim = await social.google_identity(request.query_params["code"])
+            live_social = SocialAuthService((await runtime_auth()).social_settings())
+            claim = await live_social.google_identity(request.query_params["code"])
             result = await auth.login_external_identity(
                 provider=claim.provider,
                 subject=claim.subject,
@@ -303,7 +328,8 @@ def _auth_router(
         _require_service(service, enabled)
         state_value = secrets.token_urlsafe(32)
         try:
-            target = social.steam_authorization_url(state_value)
+            live_social = SocialAuthService((await runtime_auth()).social_settings())
+            target = live_social.steam_authorization_url(state_value)
         except SocialAuthProviderError as exc:
             raise HTTPException(status_code=503, detail=str(exc)) from exc
         response = RedirectResponse(target, status_code=status.HTTP_302_FOUND)
@@ -317,8 +343,9 @@ def _auth_router(
         expected_state = _validate_social_state(request, "steam", state_value)
         return_to = _return_to_from_cookie(request)
         try:
+            live_social = SocialAuthService((await runtime_auth()).social_settings())
             params = {key: value for key, value in request.query_params.items()}
-            claim = await social.steam_identity(params, expected_state)
+            claim = await live_social.steam_identity(params, expected_state)
             result = await auth.login_external_identity(
                 provider=claim.provider,
                 subject=claim.subject,
@@ -461,6 +488,8 @@ def _http_access_requirement(path: str) -> tuple[str, str | None]:
     if path == "/api/billing" or path.startswith("/api/billing/"):
         return "AUTHENTICATED", None
     if path == "/api/notifications" or path.startswith("/api/notifications/"):
+        return "AUTHENTICATED", None
+    if path.startswith("/api/admin/"):
         return "AUTHENTICATED", None
     if path.startswith("/api/maps/") and path.endswith("/ai-decisions"):
         return "AUTHENTICATED", None
