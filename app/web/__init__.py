@@ -29,6 +29,7 @@ from app.web.public_boundary import PublicMatchDataBoundaryMiddleware
 from app.web.quality import create_quality_router
 from app.web.server import WebServerWorker
 from app.web.spa import spa_file_response
+from app.web.teams import create_team_router
 
 logger = structlog.get_logger()
 _LOOPBACK_HOSTS = frozenset({"127.0.0.1", "localhost", "::1"})
@@ -104,6 +105,7 @@ def create_app(
         ai_min_game_time_seconds=ai_min_game_time_seconds,
     )
     register_player_hero_recent_routes(app, session_factory)
+    app.include_router(create_team_router(session_factory))
     app.include_router(
         create_premium_router(
             session_factory,
