@@ -134,6 +134,26 @@ class TeamRegistryPopulationService:
 
             item = catalog.get(valve_team_id, {})
             profile = await session.get(TeamProfile, team.id)
+            if (
+                profile is not None
+                and profile.valve_team_id is not None
+                and profile.valve_team_id != valve_team_id
+            ):
+                # A maintained Valve identity disagreeing with the provider mapping
+                # is an identity conflict. Do not attach provider roster data to the
+                # team until the mapping/profile conflict is reviewed explicitly.
+                results.append(
+                    TeamPopulationResult(
+                        team.id,
+                        profile.valve_team_id,
+                        profile.slug,
+                        False,
+                        None,
+                        skipped=True,
+                    )
+                )
+                continue
+
             profile_created = profile is None
             if profile is None:
                 profile = TeamProfile(canonical_team_id=team.id)
