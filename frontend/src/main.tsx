@@ -20,6 +20,7 @@ import "./design/admin-runtime-advanced.css";
 import "./design/final-experience-audit.css";
 import "./design/real-data-ux.css";
 import "./design/visual-assets-v2.css";
+import "./design/typography-refresh.css";
 
 const queryClient = new QueryClient({
   defaultOptions: {
