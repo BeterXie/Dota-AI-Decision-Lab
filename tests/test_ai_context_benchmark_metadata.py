@@ -22,8 +22,7 @@ def test_context_benchmark_uses_aligned_full_as_ablation_reference() -> None:
     assert aligned["delta_vs_context_reference"]["brier_improvement"] == pytest.approx(0.03)
 
     assert (
-        no_form["context_experiment"]["reference_ai_view_version"]
-        == SCHEMA_ALIGNED_CONTEXT_VERSION
+        no_form["context_experiment"]["reference_ai_view_version"] == SCHEMA_ALIGNED_CONTEXT_VERSION
     )
     assert no_form["context_experiment"]["removed_evidence"] == ["player_form"]
     assert no_form["context_reference"]["ai_view_version"] == SCHEMA_ALIGNED_CONTEXT_VERSION
