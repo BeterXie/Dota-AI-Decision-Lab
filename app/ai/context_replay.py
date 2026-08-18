@@ -9,9 +9,10 @@ isolates match context and avoids fabricating retrospective portfolio returns.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import asdict, dataclass
 from datetime import datetime
-from typing import Any, Iterable
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
