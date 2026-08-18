@@ -12,10 +12,8 @@ from app.models import (
     CanonicalEvent,
     CanonicalMap,
     CanonicalSeries,
-    CanonicalTeam,
     ProviderEventMapping,
     ProviderMatchMapping,
-    TeamAlias,
 )
 from app.providers.liquipedia.models import LiquipediaSeriesObservation
 from app.providers.liquipedia.projection import LiquipediaCanonicalProjector
@@ -24,7 +22,7 @@ from app.providers.liquipedia.projection import LiquipediaCanonicalProjector
 def _raybet_match(
     *,
     scheduled_at: datetime | None,
-    tournament_name: str = "The International 2026",
+    tournament_name: str = "TI 2026",
     tournament_id: int = 77,
     round_name: str | None = "BO3",
 ) -> ProviderMatch:
@@ -58,8 +56,7 @@ async def _project_liquipedia_series(
     provider_key: str = "ti2026-liquid-spirit",
     best_of: int = 3,
 ) -> CanonicalSeries:
-    projector = LiquipediaCanonicalProjector()
-    await projector.project_series(
+    await LiquipediaCanonicalProjector().project_series(
         session,
         [
             LiquipediaSeriesObservation(
@@ -127,7 +124,7 @@ async def test_raybet_links_to_event_compatible_liquipedia_series() -> None:
 
 
 @pytest.mark.asyncio
-async def test_raybet_blocks_cross_tournament_fallback_even_with_one_time_candidate() -> None:
+async def test_raybet_blocks_cross_tournament_fallback_with_one_time_candidate() -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
@@ -200,19 +197,15 @@ async def test_raybet_linker_fails_closed_when_two_liquipedia_series_are_plausib
         first = await _project_liquipedia_series(
             session,
             scheduled_at=scheduled_at,
-            tournament_name="The International 2026",
-            tournament_page="The International/2026/A",
             provider_key="series-a",
         )
-        liquid_id = first.team_a_id
-        spirit_id = first.team_b_id
         event = CanonicalEvent(name="The International 2026")
         session.add(event)
         await session.flush()
         second = CanonicalSeries(
             event_id=event.id,
-            team_a_id=liquid_id,
-            team_b_id=spirit_id,
+            team_a_id=first.team_a_id,
+            team_b_id=first.team_b_id,
             best_of=3,
             scheduled_at=scheduled_at + timedelta(minutes=10),
         )
@@ -242,10 +235,7 @@ async def test_raybet_first_fallback_reconciles_to_later_liquipedia_schedule() -
         await connection.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     scheduled_at = datetime(2026, 8, 18, 12, 0, tzinfo=UTC)
-    match = _raybet_match(
-        scheduled_at=scheduled_at,
-        tournament_name="The International 2026",
-    )
+    match = _raybet_match(scheduled_at=scheduled_at)
 
     async with factory.begin() as session:
         fallback_id = await IdentityResolver().observe_raybet_match(session, match)
