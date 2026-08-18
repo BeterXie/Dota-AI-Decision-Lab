@@ -1,6 +1,7 @@
 import React from "react";
 import type { MapSummary } from "../api";
 import { useTeamDirectory } from "../teamDirectoryApi";
+import { teamHref } from "../teams";
 import {
   eventAbbreviation,
   getOfficialEventArtwork,
@@ -18,7 +19,8 @@ export const TeamCrest: React.FC<{
   team: TeamIdentity;
   fallbackName?: string;
   size?: Exclude<VisualSize, "hero">;
-}> = ({ team, fallbackName, size = "md" }) => {
+  link?: boolean;
+}> = ({ team, fallbackName, size = "md", link = true }) => {
   const [failed, setFailed] = React.useState(false);
   const directory = useTeamDirectory();
   const profile = team ? directory.data?.find((item) => item.id === team.id) : undefined;
@@ -33,22 +35,40 @@ export const TeamCrest: React.FC<{
         ? "valve-steam-compat"
         : "fallback";
   const name = team?.name || fallbackName || "TBD";
+  const href = link ? teamHref(profile?.slug) : null;
 
   React.useEffect(() => {
     setFailed(false);
   }, [logo]);
 
+  const className = `team-crest team-crest-${size} ${logo && !failed ? "has-image" : "is-fallback"}${href ? " is-link" : ""}`;
+  const content = logo && !failed ? (
+    <img src={logo} alt="" loading="lazy" decoding="async" onError={() => setFailed(true)} />
+  ) : (
+    <b aria-hidden="true">{teamAbbreviation(team, fallbackName)}</b>
+  );
+
+  if (href) {
+    return (
+      <a
+        className={className}
+        data-team-logo-source={logo && !failed ? logoSource : "fallback"}
+        title={name}
+        href={href}
+        aria-label={name}
+      >
+        {content}
+      </a>
+    );
+  }
+
   return (
     <span
-      className={`team-crest team-crest-${size} ${logo && !failed ? "has-image" : "is-fallback"}`}
+      className={className}
       data-team-logo-source={logo && !failed ? logoSource : "fallback"}
       title={name}
     >
-      {logo && !failed ? (
-        <img src={logo} alt="" loading="lazy" decoding="async" onError={() => setFailed(true)} />
-      ) : (
-        <b aria-hidden="true">{teamAbbreviation(team, fallbackName)}</b>
-      )}
+      {content}
     </span>
   );
 };
