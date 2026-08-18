@@ -14,9 +14,11 @@ from app.runtime_config.service import (
     AuthRuntimeSnapshot,
     RuntimeConfigurationService,
     RuntimeControlSettings,
-    active_ai_experiments as active_provider_ai_experiments,
     cached_active_ai_experiments,
     resolve_ai_provider,
+)
+from app.runtime_config.service import (
+    active_ai_experiments as active_provider_ai_experiments,
 )
 
 # Existing scheduling/reconciliation imports use this package-level name. Keep

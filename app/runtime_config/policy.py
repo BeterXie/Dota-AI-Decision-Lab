@@ -320,16 +320,26 @@ def _lifecycle(key: str, label: str, enabled: bool) -> dict[str, object]:
         "label": label,
         "enabled": bool(enabled),
         "hot_mutable": False,
-        "reason": "Requires dynamic supervisor lifecycle management before no-restart toggling is safe.",
+        "reason": (
+            "Requires dynamic supervisor lifecycle management before "
+            "no-restart toggling is safe."
+        ),
     }
 
 
 _DESCRIPTIONS = {
-    "ai.decisions.enabled": "Schedule new AI decision provider jobs. Existing prepared inference is not interrupted.",
+    "ai.decisions.enabled": (
+        "Schedule new AI decision provider jobs. "
+        "Existing prepared inference is not interrupted."
+    ),
     "ai.max_live_data_lag_seconds": "Maximum delayed live-data lag included in new AI inputs.",
-    "ai.prior_decisions_limit": "Maximum recent prior decisions included in each new AI provider input.",
+    "ai.prior_decisions_limit": (
+        "Maximum recent prior decisions included in each new AI provider input."
+    ),
     "feature.performance.enabled": "Allow AI Performance and review quality API access.",
-    "feature.billing_checkout.enabled": "Allow new billing checkout creation while keeping account and webhook maintenance active.",
+    "feature.billing_checkout.enabled": (
+        "Allow new billing checkout creation while keeping account and webhook maintenance active."
+    ),
 }
 
 _SECRET_CATALOG = (
