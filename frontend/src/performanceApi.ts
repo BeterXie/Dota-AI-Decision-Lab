@@ -52,6 +52,62 @@ export interface AiLeaderboardPayload {
   experiments: AiLeaderboardExperiment[];
 }
 
+export interface AiReadinessStage {
+  key: string;
+  label: string;
+  count: number;
+  rate: number | null;
+  drop_count: number;
+}
+
+export interface AiReadinessFailureReason {
+  stage: string;
+  reason: string;
+  count: number;
+  rate: number;
+}
+
+export interface AiReadinessSeries {
+  canonical_series_id: string;
+  canonical_event_id: string | null;
+  event_name: string | null;
+  scheduled_at: string;
+  team_a: { id: string; name: string };
+  team_b: { id: string; name: string };
+  best_of: number | null;
+  current_stage: string;
+  blocker: { stage: string; reason: string } | null;
+  facts: Record<string, boolean>;
+  counts: {
+    maps: number;
+    live_maps: number;
+    snapshots: number;
+    successful_decision_snapshots: number;
+    result_maps: number;
+    evaluated_snapshots: number;
+  };
+  ai_status_counts: Record<string, number>;
+}
+
+export interface AiReadinessPayload {
+  report_version: string;
+  generated_at: string;
+  window: {
+    from: string;
+    to: string;
+    lookback_hours: number;
+    future_series_included: boolean;
+  };
+  scope: {
+    source: string;
+    series_count: number;
+    series_limit: number;
+  };
+  stages: AiReadinessStage[];
+  failure_reasons: AiReadinessFailureReason[];
+  series: AiReadinessSeries[];
+}
+
 export interface AiQualityGate {
   mode: "SHADOW_ONLY" | string;
   status: "PASS" | "FAIL" | "INSUFFICIENT_SAMPLE" | string;
@@ -204,6 +260,11 @@ export interface AiPositionAuditPayload {
 
 export async function fetchAiLeaderboard(): Promise<AiLeaderboardPayload> {
   return fetchJson("/api/review/ai-quality/leaderboard");
+}
+
+export async function fetchAiReadiness(lookbackHours = 168): Promise<AiReadinessPayload> {
+  const query = new URLSearchParams({ lookback_hours: String(lookbackHours) });
+  return fetchJson(`/api/review/ai-quality/readiness?${query.toString()}`);
 }
 
 export async function fetchAiEventQuality(eventId: string): Promise<AiEventQualityPayload> {
