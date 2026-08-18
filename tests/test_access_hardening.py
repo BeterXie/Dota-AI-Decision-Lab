@@ -8,6 +8,11 @@ from app.web.public_boundary import _sanitize_match_payload
 
 def test_http_access_policy_is_explicit_and_unknown_api_is_not_public() -> None:
     assert _http_access_requirement("/api/matches") == ("PUBLIC", None)
+    assert _http_access_requirement("/api/teams") == ("PUBLIC", None)
+    assert _http_access_requirement("/api/teams/00000000-0000-0000-0000-000000000000") == (
+        "PUBLIC",
+        None,
+    )
     assert _http_access_requirement("/api/maps/00000000-0000-0000-0000-000000000000") == (
         "PUBLIC",
         None,
