@@ -1,13 +1,13 @@
 """Controlled provider-input projections for context value experiments.
 
-Production ``ai-view-v6`` is immutable.  These profiles derive alternate views
+Production ``ai-view-v6`` is immutable. These profiles derive alternate views
 from the same immutable :class:`DecisionSnapshot` so model, prompt, decision
 policy and source evidence can stay fixed while one context group changes.
 
 The first challenger also repairs a discovered projection mismatch: snapshot
 history stores player ``base_strength``, ``recent_form`` and flattened
 ``player_hero_*`` fields, while production ``ai-view-v6`` looks for legacy
-``recent_5/10/20`` and nested ``player_hero`` fields.  We intentionally do NOT
+``recent_5/10/20`` and nested ``player_hero`` fields. We intentionally do NOT
 mutate v6; ``ctx-history-schema-aligned-v1`` exposes the already-stored fields
 as a new auditable experiment instead.
 """
@@ -115,11 +115,14 @@ def build_context_profile_view(
     max_live_data_lag_seconds: float = 120.0,
 ) -> dict[str, Any]:
     """Build production or controlled experimental AI view deterministically."""
+    # Validate the requested experiment identity before touching snapshot
+    # evidence. Unknown profiles therefore fail closed even if the source
+    # snapshot would itself be malformed for projection.
+    profile = context_profile(ai_view_version)
     base_view = build_ai_view(
         snapshot,
         max_live_data_lag_seconds=max_live_data_lag_seconds,
     )
-    profile = context_profile(ai_view_version)
     if profile is None:
         return base_view
 
