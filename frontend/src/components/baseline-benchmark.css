@@ -1,0 +1,226 @@
+.baseline-benchmark {
+  margin: 24px 0 8px;
+}
+
+.baseline-benchmark-heading {
+  align-items: center;
+  margin-bottom: 14px;
+}
+
+.baseline-frozen-badge {
+  border: 1px solid var(--cds-border-subtle-01, #d6d6d6);
+  border-radius: 999px;
+  padding: 6px 10px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.baseline-contract-card,
+.baseline-experiment-card,
+.baseline-benchmark-state {
+  border: 1px solid var(--cds-border-subtle-01, #d6d6d6);
+  background: var(--cds-layer-01, #fff);
+}
+
+.baseline-contract-card {
+  padding: 18px;
+}
+
+.baseline-contract-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.baseline-contract-title > div {
+  display: grid;
+  gap: 5px;
+}
+
+.baseline-contract-title strong {
+  font-size: 18px;
+}
+
+.baseline-contract-title span,
+.baseline-contract-card > p {
+  color: var(--cds-text-secondary, #525252);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.baseline-contract-title code,
+.baseline-contract-grid code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+}
+
+.baseline-contract-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+  margin-top: 16px;
+}
+
+.baseline-contract-grid > div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--cds-border-subtle-01, #d6d6d6);
+}
+
+.baseline-contract-grid span,
+.baseline-metric span,
+.baseline-delta-strip span,
+.baseline-reference {
+  color: var(--cds-text-secondary, #525252);
+  font-size: 11px;
+}
+
+.baseline-contract-grid code {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+}
+
+.baseline-provider-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin: 14px 0;
+}
+
+.baseline-provider-filter button,
+.baseline-benchmark-state button {
+  border: 1px solid var(--cds-border-subtle-01, #d6d6d6);
+  background: transparent;
+  color: inherit;
+  padding: 7px 11px;
+  cursor: pointer;
+}
+
+.baseline-provider-filter button.active {
+  border-color: var(--cds-text-primary, #161616);
+  font-weight: 700;
+}
+
+.baseline-experiment-list {
+  display: grid;
+  gap: 12px;
+}
+
+.baseline-experiment-card {
+  padding: 16px;
+}
+
+.baseline-experiment-card > header {
+  display: flex;
+  justify-content: space-between;
+  gap: 14px;
+  align-items: flex-start;
+  margin-bottom: 14px;
+}
+
+.baseline-experiment-card > header > div {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+}
+
+.baseline-experiment-card > header strong {
+  font-size: 15px;
+}
+
+.baseline-experiment-card > header small {
+  color: var(--cds-text-secondary, #525252);
+  font-size: 11px;
+  overflow-wrap: anywhere;
+}
+
+.baseline-role {
+  width: fit-content;
+  border: 1px solid currentColor;
+  border-radius: 999px;
+  padding: 3px 7px;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.07em;
+}
+
+.baseline-metric-grid {
+  display: grid;
+  grid-template-columns: repeat(6, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.baseline-metric {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 10px;
+  background: var(--cds-layer-02, #f4f4f4);
+}
+
+.baseline-metric strong {
+  font-size: 17px;
+  font-variant-numeric: tabular-nums;
+}
+
+.baseline-metric small {
+  color: var(--cds-text-secondary, #525252);
+  font-size: 10px;
+}
+
+.baseline-delta-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 16px;
+  align-items: center;
+  margin-top: 10px;
+  padding: 10px;
+  border: 1px dashed var(--cds-border-subtle-01, #d6d6d6);
+}
+
+.baseline-delta-strip > div {
+  display: inline-flex;
+  gap: 6px;
+  align-items: baseline;
+}
+
+.baseline-delta-strip > div strong {
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.baseline-benchmark-state {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  align-items: center;
+  padding: 16px;
+  color: var(--cds-text-secondary, #525252);
+}
+
+@media (max-width: 1100px) {
+  .baseline-contract-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .baseline-metric-grid {
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 640px) {
+  .baseline-contract-title,
+  .baseline-experiment-card > header {
+    flex-direction: column;
+  }
+
+  .baseline-contract-grid,
+  .baseline-metric-grid {
+    grid-template-columns: 1fr 1fr;
+  }
+}
