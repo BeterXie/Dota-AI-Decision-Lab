@@ -15,7 +15,36 @@ export interface TeamDirectoryEntry {
   observed_at: string | null;
 }
 
-const teamDirectoryKey = ["product", "team-directory"] as const;
+export interface TeamRosterSubject {
+  type: "PLAYER" | "STAFF" | "UNKNOWN";
+  id: string | null;
+  name: string | null;
+  account_id: number | null;
+  real_name: string | null;
+  country_code: string | null;
+  avatar_url: string | null;
+}
+
+export interface TeamRosterMembership {
+  id: string;
+  subject: TeamRosterSubject;
+  role: string;
+  position: number | null;
+  is_standin: boolean;
+  valid_from: string | null;
+  valid_to: string | null;
+  source_name: string;
+  source_url: string | null;
+  observed_at: string;
+  confidence: number;
+}
+
+export interface TeamDetail extends TeamDirectoryEntry {
+  current_roster: TeamRosterMembership[];
+  roster_history: TeamRosterMembership[];
+}
+
+export const teamDirectoryKey = ["product", "team-directory"] as const;
 
 export async function fetchTeamDirectory(): Promise<TeamDirectoryEntry[]> {
   const response = await fetch("/api/teams", {
@@ -24,6 +53,15 @@ export async function fetchTeamDirectory(): Promise<TeamDirectoryEntry[]> {
   });
   if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
   return response.json() as Promise<TeamDirectoryEntry[]>;
+}
+
+export async function fetchTeamDetail(slug: string): Promise<TeamDetail> {
+  const response = await fetch(`/api/teams/by-slug/${encodeURIComponent(slug)}`, {
+    cache: "no-store",
+    headers: { Accept: "application/json" }
+  });
+  if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+  return response.json() as Promise<TeamDetail>;
 }
 
 export function useTeamDirectory() {

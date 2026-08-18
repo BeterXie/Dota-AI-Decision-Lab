@@ -22,24 +22,7 @@ def create_team_router(
 ) -> APIRouter:
     router = APIRouter(prefix="/api/teams", tags=["teams"])
 
-    @router.get("")
-    async def team_directory() -> list[dict]:
-        async with session_factory() as session:
-            rows = (
-                await session.execute(
-                    select(CanonicalTeam, TeamProfile)
-                    .outerjoin(TeamProfile, TeamProfile.canonical_team_id == CanonicalTeam.id)
-                    .order_by(CanonicalTeam.name.asc())
-                )
-            ).all()
-            opendota_ids = await _opendota_team_ids(session)
-            return [
-                _team_payload(team, profile, discovered_valve_team_id=opendota_ids.get(team.id))
-                for team, profile in rows
-            ]
-
-    @router.get("/{team_id}")
-    async def team_detail(team_id: UUID) -> dict:
+    async def load_team_detail(team_id: UUID) -> dict:
         async with session_factory() as session:
             team = await session.get(CanonicalTeam, team_id)
             if team is None:
@@ -121,6 +104,38 @@ def create_team_router(
                 "current_roster": [item for item in roster if item["valid_to"] is None],
                 "roster_history": roster,
             }
+
+    @router.get("")
+    async def team_directory() -> list[dict]:
+        async with session_factory() as session:
+            rows = (
+                await session.execute(
+                    select(CanonicalTeam, TeamProfile)
+                    .outerjoin(TeamProfile, TeamProfile.canonical_team_id == CanonicalTeam.id)
+                    .order_by(CanonicalTeam.name.asc())
+                )
+            ).all()
+            opendota_ids = await _opendota_team_ids(session)
+            return [
+                _team_payload(team, profile, discovered_valve_team_id=opendota_ids.get(team.id))
+                for team, profile in rows
+            ]
+
+    # Static prefix must be registered before /{team_id}; otherwise Starlette
+    # matches "by-slug" as the dynamic segment and FastAPI returns a UUID 422.
+    @router.get("/by-slug/{slug}")
+    async def team_detail_by_slug(slug: str) -> dict:
+        async with session_factory() as session:
+            team_id = await session.scalar(
+                select(TeamProfile.canonical_team_id).where(TeamProfile.slug == slug)
+            )
+        if team_id is None:
+            raise HTTPException(status_code=404, detail="team not found")
+        return await load_team_detail(team_id)
+
+    @router.get("/{team_id}")
+    async def team_detail(team_id: UUID) -> dict:
+        return await load_team_detail(team_id)
 
     return router
 
