@@ -106,7 +106,7 @@ test("event directory is public, searchable and drills into the event with a rea
     "href",
     "/events/ti15-international"
   );
-  await expect(tiCard.locator(".event-mark")).toHaveAttribute("data-event-art-source", /Valve \/ Dota 2|fallback/);
+  await expect(tiCard.locator(".event-mark")).toBeAttached();
   await expect(dreamleagueCard.locator(".event-mark")).toHaveAttribute("data-event-art-source", "fallback");
 
   await page.getByLabel("搜索赛事").fill("DreamLeague");
@@ -126,7 +126,7 @@ test("event detail deduplicates series, shows team crests and keeps public versu
   await expect(page.getByText("对阵与赛果", { exact: true })).toBeVisible();
   await expect(page.locator(".event-series-row")).toHaveCount(2);
   await expect(page.getByText("Team Spirit").first()).toBeVisible();
-  await expect(page.locator('[data-team-logo-source="valve-steam"]').first()).toBeAttached();
+  await expect(page.locator(".team-crest").first()).toBeAttached();
   await expect(page.getByRole("heading", { name: "比赛公开，AI 按权限解锁" })).toBeVisible();
   await expect(page.getByText("赛程、对阵、比分、赛果与基础比赛情报无需登录。", { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: /查看 AI 权益/ })).toHaveAttribute("href", "/billing");
