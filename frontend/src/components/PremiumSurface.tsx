@@ -5,8 +5,10 @@ import { useI18n } from "../i18n";
 const ReviewPage = lazy(() =>
   import("./ReviewPage").then((module) => ({ default: module.ReviewPage }))
 );
-const AiPerformancePage = lazy(() =>
-  import("./AiPerformancePage").then((module) => ({ default: module.AiPerformancePage }))
+const AiPerformanceExperience = lazy(() =>
+  import("./AiPerformanceExperience").then((module) => ({
+    default: module.AiPerformanceExperience
+  }))
 );
 const NotificationCenterPage = lazy(() =>
   import("./NotificationCenterPage").then((module) => ({
@@ -97,7 +99,7 @@ export function PremiumSurface({
       <PremiumShellFrame surface={surface}>
         <PremiumProductIntro surface={surface} />
         <Suspense fallback={<PremiumLoading label={locale === "zh-CN" ? "正在加载 AI 表现…" : "Loading AI performance…"} />}>
-          <AiPerformancePage />
+          <AiPerformanceExperience />
         </Suspense>
       </PremiumShellFrame>
     );
