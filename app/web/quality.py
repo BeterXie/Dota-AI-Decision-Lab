@@ -6,6 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import aliased
 
+from app.evaluation.benchmark import AiBaselineBenchmarkService
 from app.evaluation.leaderboard import TournamentLeaderboardService
 from app.evaluation.portfolio_models import (
     TournamentPortfolioAccountRecord,
@@ -112,6 +113,7 @@ def create_quality_router(
     quality = TournamentQualityService()
     leaderboard = TournamentLeaderboardService()
     readiness = DecisionReadinessService()
+    benchmark = AiBaselineBenchmarkService(leaderboard)
 
     @router.get("/api/review/ai-quality/leaderboard")
     async def global_ai_quality_leaderboard() -> dict[str, Any]:
@@ -129,6 +131,11 @@ def create_quality_router(
                 lookback_hours=lookback_hours,
                 limit=limit,
             )
+
+    @router.get("/api/review/ai-quality/benchmark")
+    async def global_ai_baseline_benchmark() -> dict[str, Any]:
+        async with session_factory() as session:
+            return await benchmark.build_report(session)
 
     @router.get("/api/review/events/{canonical_event_id}/ai-quality")
     async def event_ai_quality(canonical_event_id: UUID) -> dict[str, Any]:
