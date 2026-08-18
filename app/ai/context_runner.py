@@ -1,13 +1,19 @@
 """Explicit, side-effect-free-by-default runner for controlled context experiments.
 
-This path intentionally does not fan out from normal production scheduling.  A
-caller chooses a historical immutable snapshot and one registered context
-profile.  Provider/model/prompt/policy stay fixed while prior-decision history
-and portfolio state are isolated on the full five-part experiment identity.
+This path intentionally does not fan out from normal production scheduling. A
+caller chooses an immutable snapshot and one registered context profile.
+Provider/model/prompt/policy stay fixed while experiment input is explicit.
+
+Normal controlled runs isolate prior-decision history and portfolio state on the
+full five-part experiment identity. Historical matched replay can instead pass a
+fixed bankroll/prior-decision control and disable portfolio recording, ensuring
+that only match context changes between replay profiles and that post-settlement
+calls never masquerade as historical Shadow ROI.
 """
 
 import hashlib
 from datetime import UTC, datetime
+from typing import Any
 from uuid import UUID
 
 from sqlalchemy import select
@@ -35,12 +41,7 @@ ExperimentKey = tuple[str, str, str, str, str]
 
 
 class AiContextExperimentRunner:
-    """Run one controlled context profile using existing coordinator semantics.
-
-    The production coordinator deliberately remains unchanged.  This runner
-    reuses its provider invocation, validation, bankroll formatting and
-    portfolio service, but makes experiment selection explicit and exact.
-    """
+    """Run one controlled context profile using existing coordinator semantics."""
 
     def __init__(self, coordinator: AiCoordinator) -> None:
         self._coordinator = coordinator
@@ -55,6 +56,7 @@ class AiContextExperimentRunner:
         ai_view_version: str,
         job_enqueued_at: datetime | None = None,
         job_claimed_at: datetime | None = None,
+        bankroll_context_override: dict[str, Any] | None = None,
     ) -> PreparedAiDecision:
         self._validate_controlled_identity(provider, model, ai_view_version)
         candidate = self._coordinator.get_provider(provider, model)
@@ -90,34 +92,41 @@ class AiContextExperimentRunner:
                 job_claimed_at=job_claimed_at,
             )
 
-        snapshot_record = await session.get(DecisionSnapshotRecord, snapshot.snapshot_id)
-        canonical_map_id = snapshot_record.canonical_map_id if snapshot_record is not None else None
-        prior = await self._exact_prior_decisions(
-            session,
-            canonical_map_id=canonical_map_id,
-            snapshot=snapshot,
-            experiment=experiment,
-        )
-        portfolio = self._coordinator._portfolio
-        portfolio_scope = (
-            await portfolio.scope_for_snapshot(session, snapshot.snapshot_id)
-            if portfolio is not None
-            else None
-        )
-        portfolio_context = (
-            await portfolio.context_for_scope(
-                session,
-                scope=portfolio_scope,
-                experiment=experiment,
-                funding_reference_at=snapshot.decision_at,
+        portfolio_scope = None
+        if bankroll_context_override is not None:
+            bankroll_context = _validated_bankroll_context(bankroll_context_override)
+        else:
+            snapshot_record = await session.get(DecisionSnapshotRecord, snapshot.snapshot_id)
+            canonical_map_id = (
+                snapshot_record.canonical_map_id if snapshot_record is not None else None
             )
-            if portfolio is not None and portfolio_scope is not None
-            else None
-        )
-        bankroll_context = self._coordinator._bankroll_context(
-            prior,
-            portfolio_context=portfolio_context,
-        )
+            prior = await self._exact_prior_decisions(
+                session,
+                canonical_map_id=canonical_map_id,
+                snapshot=snapshot,
+                experiment=experiment,
+            )
+            portfolio = self._coordinator._portfolio
+            portfolio_scope = (
+                await portfolio.scope_for_snapshot(session, snapshot.snapshot_id)
+                if portfolio is not None
+                else None
+            )
+            portfolio_context = (
+                await portfolio.context_for_scope(
+                    session,
+                    scope=portfolio_scope,
+                    experiment=experiment,
+                    funding_reference_at=snapshot.decision_at,
+                )
+                if portfolio is not None and portfolio_scope is not None
+                else None
+            )
+            bankroll_context = self._coordinator._bankroll_context(
+                prior,
+                portfolio_context=portfolio_context,
+            )
+
         base_input = build_ai_input(
             snapshot,
             ai_view_version=ai_view_version,
@@ -148,6 +157,8 @@ class AiContextExperimentRunner:
         provider: str,
         model: str,
         ai_view_version: str,
+        bankroll_context_override: dict[str, Any] | None = None,
+        record_portfolio: bool = True,
     ) -> AiDecisionRecord:
         """Run and persist one explicit context experiment in caller transaction."""
         prepared = await self.prepare(
@@ -156,6 +167,7 @@ class AiContextExperimentRunner:
             provider=provider,
             model=model,
             ai_view_version=ai_view_version,
+            bankroll_context_override=bankroll_context_override,
         )
         if prepared.existing_record is not None:
             return prepared.existing_record
@@ -168,7 +180,7 @@ class AiContextExperimentRunner:
         session.add(record)
         await session.flush()
         portfolio = self._coordinator._portfolio
-        if portfolio is not None:
+        if record_portfolio and portfolio is not None:
             await portfolio.record_decision_position(
                 session,
                 record,
@@ -239,3 +251,14 @@ class AiContextExperimentRunner:
             raise ValueError(
                 f"context ablation requires frozen {provider} model {expected_model}, got {model}"
             )
+
+
+def _validated_bankroll_context(value: dict[str, Any]) -> dict[str, Any]:
+    context = dict(value)
+    bankroll_before = context.get("bankroll_before")
+    prior_decisions = context.get("prior_decisions")
+    if not isinstance(bankroll_before, int | float) or bankroll_before <= 0:
+        raise ValueError("bankroll context override requires positive bankroll_before")
+    if not isinstance(prior_decisions, list):
+        raise ValueError("bankroll context override requires prior_decisions list")
+    return context
