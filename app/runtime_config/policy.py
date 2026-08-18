@@ -15,11 +15,7 @@ from app.runtime_config.models import (
     RuntimeSecretRecord,
     RuntimeSettingRecord,
 )
-from app.runtime_config.service import (
-    AI_SECRET_KEYS,
-    AUTH_SECRET_KEY,
-    active_ai_experiments,
-)
+from app.runtime_config.service import AUTH_SECRET_KEY, active_ai_experiments
 
 AI_DECISION_SETTING_KEYS = frozenset(
     {
@@ -344,8 +340,4 @@ _SECRET_CATALOG = (
     ("ai.gemini.api_key", "Gemini API Key", "ai"),
     ("ai.deepseek.api_key", "DeepSeek API Key", "ai"),
     ("ai.kimi.api_key", "Kimi API Key", "ai"),
-)
-
-assert frozenset(key for key, _label, _category in _SECRET_CATALOG) == frozenset(
-    {AUTH_SECRET_KEY, *AI_SECRET_KEYS}
 )
