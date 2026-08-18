@@ -486,7 +486,7 @@ def _market_probability_a(
             continue
         try:
             price = float(item.get("price"))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         if price <= 1:
             continue
