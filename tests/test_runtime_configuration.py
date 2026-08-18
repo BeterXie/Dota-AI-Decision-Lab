@@ -1,5 +1,5 @@
-from pydantic import SecretStr
 import pytest
+from pydantic import SecretStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
@@ -128,7 +128,8 @@ async def test_ai_model_timeout_reasoning_and_enablement_are_hot() -> None:
 
 @pytest.mark.asyncio
 async def test_ai_key_can_be_configured_from_scratch_and_audit_never_contains_secret() -> None:
-    engine, factory, service = await _service(openai_key=None)
+    sensitive_value = "highly-sensitive-provider-key"
+    engine, factory, service = await _service(openai_key=sensitive_value)
     await service.ensure_seeded(actor="bootstrap")
 
     assert "ai.openai.api_key" in service.allowed_secret_keys
@@ -149,8 +150,10 @@ async def test_ai_key_can_be_configured_from_scratch_and_audit_never_contains_se
         )
         assert row is not None and row.api_key_secret_key == "ai.openai.api_key"
         audits = list((await session.scalars(select(RuntimeConfigAuditRecord))).all())
+    serialized_audit = str(
+        [(item.previous_value, item.new_value, item.secret_changed) for item in audits]
+    )
     assert audits
-    assert all("secret" not in str(item.previous_value).lower() for item in audits)
-    assert all("secret" not in str(item.new_value).lower() for item in audits)
+    assert sensitive_value not in serialized_audit
 
     await engine.dispose()
