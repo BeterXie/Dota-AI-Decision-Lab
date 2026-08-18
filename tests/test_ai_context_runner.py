@@ -133,7 +133,10 @@ async def test_prior_decisions_are_isolated_by_full_context_experiment_identity(
 
     payload = json.loads(prepared.provider_input)
     assert len(payload["prior_decisions"]) == 1
-    assert payload["prior_decisions"][0]["decision_at"] == first.decision_at.isoformat()
+    prior_at = datetime.fromisoformat(payload["prior_decisions"][0]["decision_at"])
+    if prior_at.tzinfo is None:
+        prior_at = prior_at.replace(tzinfo=UTC)
+    assert prior_at == first.decision_at
     assert "base_strength" not in payload["history"]["players"][0]
     await engine.dispose()
 
