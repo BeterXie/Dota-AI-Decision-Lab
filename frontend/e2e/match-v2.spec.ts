@@ -27,8 +27,42 @@ const publicMatch = {
   },
   best_of: 3,
   series_score: { team_a: 1, team_b: 1 },
-  market: [],
-  market_quality: null,
+  market: [
+    {
+      odds_id: 1,
+      selection_team_id: "liquid",
+      price: 1.72,
+      fair_probability: 0.55,
+      raw_status: 1,
+      normalized_status: "OPEN",
+      metadata_version: "v1",
+      market_type: "map_winner",
+      match_stage: "R2",
+      received_at: "2026-08-18T09:20:00Z",
+      age_seconds: 0
+    },
+    {
+      odds_id: 2,
+      selection_team_id: "spirit",
+      price: 2.1,
+      fair_probability: 0.45,
+      raw_status: 1,
+      normalized_status: "OPEN",
+      metadata_version: "v1",
+      market_type: "map_winner",
+      match_stage: "R2",
+      received_at: "2026-08-18T09:20:00Z",
+      age_seconds: 0
+    }
+  ],
+  market_quality: {
+    eligible: true,
+    blockers: [],
+    warnings: [],
+    metadata_version: "v1",
+    paired_at: "2026-08-18T09:20:00Z",
+    pair_skew_seconds: 0
+  },
   current_market_view: {
     team_a: { odds_id: 1, selection_team_id: "liquid", price: 1.72, implied_probability: 0.581, fair_probability: 0.55 },
     team_b: { odds_id: 2, selection_team_id: "spirit", price: 2.1, implied_probability: 0.476, fair_probability: 0.45 },
