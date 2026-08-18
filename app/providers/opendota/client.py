@@ -36,6 +36,9 @@ class OpenDotaClient:
     async def get_team_catalog(self, page: int = 0) -> TimedPayload:
         return await self._get("/teams", params={"page": page})
 
+    async def get_team_players(self, team_id: str | int) -> TimedPayload:
+        return await self._get(f"/teams/{team_id}/players")
+
     async def get_team_pro_maps(
         self, team_id: str, *, before: datetime, limit: int
     ) -> TimedPayload:
