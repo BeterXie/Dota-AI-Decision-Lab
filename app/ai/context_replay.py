@@ -161,7 +161,9 @@ class ContextReplayPlanner:
             existing_rows = list(
                 (
                     await session.execute(
-                        select(AiDecisionRecord.snapshot_id, AiDecisionRecord.ai_view_version).where(
+                        select(
+                            AiDecisionRecord.snapshot_id, AiDecisionRecord.ai_view_version
+                        ).where(
                             AiDecisionRecord.snapshot_id.in_(snapshot_ids),
                             AiDecisionRecord.provider == provider,
                             AiDecisionRecord.model == model,
@@ -252,6 +254,19 @@ class ContextReplayExecutor:
                         bankroll_context_override=pointwise_replay_bankroll_context(),
                         record_portfolio=False,
                     )
+                    if record.parse_status != "SUCCESS" or record.normalized_response is None:
+                        results.append(
+                            {
+                                "status": "FAILED",
+                                "canonical_map_id": str(entry.canonical_map_id),
+                                "snapshot_id": str(entry.snapshot_id),
+                                "ai_view_version": entry.ai_view_version,
+                                "ai_decision_id": str(record.id),
+                                "parse_status": record.parse_status,
+                                "error": record.error,
+                            }
+                        )
+                        continue
                     evaluations_created = await self._evaluation.evaluate_snapshot(
                         session,
                         snapshot_id=entry.snapshot_id,
@@ -303,7 +318,9 @@ def _frozen_model(provider: str) -> str:
     model = FROZEN_MODELS_BY_PROVIDER.get(provider)
     if model is None:
         supported = ", ".join(sorted(FROZEN_MODELS_BY_PROVIDER))
-        raise ValueError(f"unsupported frozen baseline provider {provider!r}; choose one of {supported}")
+        raise ValueError(
+            f"unsupported frozen baseline provider {provider!r}; choose one of {supported}"
+        )
     return model
 
 
