@@ -17,11 +17,12 @@ from app.entitlements import EntitlementService
 from app.promotions import PromotionService
 from app.promotions.config import PromotionSettings
 from app.runtime.health import HealthRegistry
-from app.runtime_config import RuntimeConfigurationService
+from app.runtime_config import RuntimeConfigurationService, RuntimePolicyService
 from app.web.access import create_access_router
 from app.web.api import create_app as create_api_app
 from app.web.auth import register_auth
 from app.web.billing import create_billing_router
+from app.web.feature_flags import RuntimeFeatureFlagMiddleware
 from app.web.notifications import create_notification_router
 from app.web.player_hero_recent import register_player_hero_recent_routes
 from app.web.premium import create_premium_router
@@ -92,6 +93,10 @@ def create_app(
         session_factory,
         settings=control_plane_settings,
     )
+    runtime_policy = RuntimePolicyService(
+        session_factory,
+        settings=control_plane_settings,
+    )
     promotion_service = PromotionService(
         session_factory,
         referral_enabled=promotions.referral_enabled,
@@ -125,7 +130,7 @@ def create_app(
     app.include_router(create_notification_router(session_factory))
     app.include_router(create_promotion_router(promotion_service))
     app.include_router(create_quality_router(session_factory))
-    app.include_router(create_runtime_admin_router(runtime_config))
+    app.include_router(create_runtime_admin_router(runtime_config, runtime_policy))
     app.include_router(
         create_billing_router(
             session_factory,
@@ -144,6 +149,8 @@ def create_app(
         runtime_config=runtime_config,
     )
     app.router.add_event_handler("startup", runtime_config.ensure_seeded)
+    app.router.add_event_handler("startup", runtime_policy.ensure_seeded)
+    app.add_middleware(RuntimeFeatureFlagMiddleware, policy=runtime_policy)
     app.add_middleware(PublicMatchDataBoundaryMiddleware)
     if owns_auth_service and auth_service is not None:
         app.router.add_event_handler("shutdown", auth_service.close)

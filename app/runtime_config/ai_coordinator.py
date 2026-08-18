@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from contextvars import ContextVar
 from datetime import UTC, datetime
 from time import perf_counter
 
@@ -21,15 +20,11 @@ from app.ai.coordinator import AiCoordinator as StaticAiCoordinator
 from app.ai.coordinator import PreparedAiDecision
 from app.domain.snapshot import DecisionSnapshot
 from app.models import AiDecisionRecord
+from app.runtime_config.policy import ai_decision_policy_snapshot
 from app.runtime_config.service import (
     SUPPORTED_AI_PROVIDERS,
     cached_active_ai_experiments,
     resolve_ai_provider,
-)
-
-_PREPARE_PROVIDER: ContextVar[AiProvider | None] = ContextVar(
-    "runtime_config_prepare_provider",
-    default=None,
 )
 
 
@@ -50,10 +45,10 @@ class _RuntimeProviderReference:
 class RuntimeAiCoordinator(StaticAiCoordinator):
     """Hot-configurable runtime coordinator without changing replay semantics.
 
-    Production single-provider PREPARE resolves the current database row and
-    freezes that provider object into ``PreparedAiDecision``. The HTTP phase no
-    longer consults configuration, so a concurrent admin edit cannot mutate an
-    in-flight request. Batch/replay paths keep the static coordinator behavior.
+    Production PREPARE freezes provider/model/key/timeout plus the runtime-safe
+    input policy (live-data lag and prior-context depth) into one immutable
+    ``PreparedAiDecision``. Admin edits after PREPARE therefore affect only
+    subsequent inference requests. Batch/replay paths retain static behavior.
     """
 
     @property
@@ -61,9 +56,6 @@ class RuntimeAiCoordinator(StaticAiCoordinator):
         return cached_active_ai_experiments(super().experiments)
 
     def get_provider(self, provider: str, model: str) -> AiProvider:
-        prepared = _PREPARE_PROVIDER.get()
-        if prepared is not None and prepared.name == provider and prepared.model == model:
-            return prepared
         static = self._static_provider(provider, model)
         if static is not None:
             return static
@@ -88,18 +80,30 @@ class RuntimeAiCoordinator(StaticAiCoordinator):
             model,
             fallback=fallback,
         )
-        token = _PREPARE_PROVIDER.set(runtime_provider)
-        try:
-            return await super().prepare(
-                session,
-                snapshot,
-                provider=provider,
-                model=model,
-                job_enqueued_at=job_enqueued_at,
-                job_claimed_at=job_claimed_at,
-            )
-        finally:
-            _PREPARE_PROVIDER.reset(token)
+        policy = await ai_decision_policy_snapshot(
+            session,
+            fallback_max_live_data_lag_seconds=self._max_live_data_lag_seconds,
+            fallback_prior_decisions_limit=self._prior_decisions_limit,
+        )
+        timeout_seconds = float(
+            getattr(runtime_provider, "runtime_timeout_seconds", self._timeout_seconds)
+        )
+        frozen = StaticAiCoordinator(
+            [runtime_provider],
+            timeout_seconds=timeout_seconds,
+            max_live_data_lag_seconds=policy.max_live_data_lag_seconds,
+            virtual_bankroll=self._virtual_bankroll,
+            prior_decisions_limit=policy.prior_decisions_limit,
+            portfolio=self._portfolio,
+        )
+        return await frozen.prepare(
+            session,
+            snapshot,
+            provider=provider,
+            model=model,
+            job_enqueued_at=job_enqueued_at,
+            job_claimed_at=job_claimed_at,
+        )
 
     async def run_inference(self, prepared: PreparedAiDecision) -> AiDecisionRecord:
         """Run against the timeout frozen with the provider configuration."""

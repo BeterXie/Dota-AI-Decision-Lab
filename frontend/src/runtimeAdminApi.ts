@@ -51,6 +51,42 @@ export interface RuntimeAuditPayload {
   items: RuntimeAuditItem[];
 }
 
+export interface RuntimeAiContract {
+  prompt_version: string;
+  decision_policy_version: string;
+  ai_view_version: string;
+  fan_out_strategy: string;
+  worker_concurrency: number;
+  worker_concurrency_hot_mutable: boolean;
+}
+
+export interface RuntimeLifecycleFeature {
+  key: string;
+  label: string;
+  enabled: boolean;
+  hot_mutable: boolean;
+  reason: string;
+}
+
+export interface RuntimePolicyPayload {
+  settings: RuntimeSettingRecord[];
+  ai_contract: RuntimeAiContract;
+  lifecycle_features: RuntimeLifecycleFeature[];
+}
+
+export interface RuntimeSecretStatus {
+  key: string;
+  label: string;
+  category: string;
+  configured: boolean;
+  storage: "DATABASE_ENCRYPTED" | "BOOTSTRAP_FALLBACK" | "NOT_CONFIGURED" | string;
+  runtime_hot: boolean;
+}
+
+export interface RuntimeSecretsPayload {
+  items: RuntimeSecretStatus[];
+}
+
 async function runtimeJson<T>(path: string, init?: RequestInit): Promise<T> {
   const response = await fetch(path, {
     ...init,
@@ -81,8 +117,20 @@ export const fetchRuntimeConfig = () =>
 export const fetchRuntimeAudit = (limit = 12) =>
   runtimeJson<RuntimeAuditPayload>(`/api/admin/runtime/audit?limit=${limit}`);
 
+export const fetchRuntimePolicy = () =>
+  runtimeJson<RuntimePolicyPayload>("/api/admin/runtime/policy");
+
+export const fetchRuntimeSecrets = () =>
+  runtimeJson<RuntimeSecretsPayload>("/api/admin/runtime/secrets");
+
 export const updateRuntimeSetting = (key: string, value: unknown) =>
   runtimeJson<RuntimeSettingRecord>(`/api/admin/runtime/settings/${encodeURIComponent(key)}`, {
+    method: "PATCH",
+    body: JSON.stringify({ value })
+  });
+
+export const updateRuntimePolicySetting = (key: string, value: unknown) =>
+  runtimeJson<RuntimeSettingRecord>(`/api/admin/runtime/policy/${encodeURIComponent(key)}`, {
     method: "PATCH",
     body: JSON.stringify({ value })
   });

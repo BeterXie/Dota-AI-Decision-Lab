@@ -3,7 +3,7 @@ from typing import Any
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel, Field
 
-from app.runtime_config import RuntimeConfigurationService
+from app.runtime_config import RuntimeConfigurationService, RuntimePolicyService
 
 
 class RuntimeSettingUpdate(BaseModel):
@@ -26,13 +26,26 @@ class RuntimeSecretUpdate(BaseModel):
     value: str = Field(min_length=1, max_length=20_000)
 
 
-def create_runtime_admin_router(service: RuntimeConfigurationService) -> APIRouter:
+def create_runtime_admin_router(
+    service: RuntimeConfigurationService,
+    policy: RuntimePolicyService | None = None,
+) -> APIRouter:
     router = APIRouter(prefix="/api/admin/runtime", tags=["runtime-admin"])
 
     @router.get("/config")
     async def runtime_config(request: Request) -> dict[str, Any]:
         _admin_actor(request, service)
         return await service.public_payload()
+
+    @router.get("/policy")
+    async def runtime_policy(request: Request) -> dict[str, Any]:
+        _admin_actor(request, service)
+        return await _require_policy(policy).public_payload()
+
+    @router.get("/secrets")
+    async def runtime_secrets(request: Request) -> dict[str, Any]:
+        _admin_actor(request, service)
+        return await _require_policy(policy).secret_status_payload()
 
     @router.patch("/settings/{key:path}")
     async def update_setting(
@@ -43,6 +56,18 @@ def create_runtime_admin_router(service: RuntimeConfigurationService) -> APIRout
         actor = _admin_actor(request, service)
         try:
             return await service.set_setting(key, payload.value, actor=actor)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=str(exc)) from exc
+
+    @router.patch("/policy/{key:path}")
+    async def update_policy_setting(
+        key: str,
+        payload: RuntimeSettingUpdate,
+        request: Request,
+    ) -> dict[str, object]:
+        actor = _admin_actor(request, service)
+        try:
+            return await _require_policy(policy).set_setting(key, payload.value, actor=actor)
         except ValueError as exc:
             raise HTTPException(status_code=422, detail=str(exc)) from exc
 
@@ -97,3 +122,9 @@ def _admin_actor(request: Request, service: RuntimeConfigurationService) -> str:
     if not service.is_admin_email(email):
         raise HTTPException(status_code=403, detail="runtime configuration admin access required")
     return str(email).strip().lower()
+
+
+def _require_policy(policy: RuntimePolicyService | None) -> RuntimePolicyService:
+    if policy is None:
+        raise HTTPException(status_code=503, detail="runtime policy service is unavailable")
+    return policy
