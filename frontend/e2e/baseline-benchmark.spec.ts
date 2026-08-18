@@ -80,5 +80,5 @@ test("shows frozen baseline contract and challenger deltas", async ({ page }) =>
   await expect(page.getByText("81698ca175a7")).toBeVisible();
   await expect(page.getByText("CHALLENGER")).toBeVisible();
   await expect(page.getByText("相对基线改善")).toBeVisible();
-  await expect(page.getByText("+10.0%")).toBeVisible();
+  await expect(page.getByText("+10%")).toBeVisible();
 });
