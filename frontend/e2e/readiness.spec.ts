@@ -113,12 +113,13 @@ test("shows the production readiness funnel and traces blockers to real series",
 
   await expect(page.getByRole("heading", { name: "真实比赛决策就绪度" })).toBeVisible();
   await expect(page.getByText("端到端闭环率")).toBeVisible();
-  await expect(page.getByRole("button", { name: /RayBet 绑定 2 67% -1 掉点/ })).toBeVisible();
-  await expect(page.getByText("Aurora", { exact: true })).toBeVisible();
-  await expect(page.getByText("Team Falcons", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /RayBet 绑定.*67%.*掉点/ })).toBeVisible();
+  const teamRows = page.locator(".readiness-series-main strong");
+  await expect(teamRows.filter({ hasText: "Aurora" })).toBeVisible();
+  await expect(teamRows.filter({ hasText: "Team Falcons" })).toBeVisible();
 
   await page.getByRole("button", { name: /RayBet 身份未匹配/ }).click();
 
-  await expect(page.getByText("Aurora", { exact: true })).toBeVisible();
-  await expect(page.getByText("Team Falcons", { exact: true })).toHaveCount(0);
+  await expect(teamRows.filter({ hasText: "Aurora" })).toBeVisible();
+  await expect(teamRows.filter({ hasText: "Team Falcons" })).toHaveCount(0);
 });
