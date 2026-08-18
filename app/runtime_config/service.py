@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import UTC, datetime
 from typing import Any
 
@@ -9,15 +9,12 @@ from pydantic_settings import BaseSettings, SettingsConfigDict
 from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.ai import (
-    AnthropicDecisionProvider,
-    DeepSeekDecisionProvider,
-    GeminiDecisionProvider,
-    KimiDecisionProvider,
-    LocalOpenAiDecisionProvider,
-    OpenAiDecisionProvider,
-)
+from app.ai.anthropic import AnthropicDecisionProvider
 from app.ai.base import AiProvider, ai_experiment_key
+from app.ai.chat_completions import KimiDecisionProvider
+from app.ai.deepseek import DeepSeekDecisionProvider
+from app.ai.gemini import GeminiDecisionProvider
+from app.ai.openai import LocalOpenAiDecisionProvider, OpenAiDecisionProvider
 from app.auth.social import SocialAuthSettings
 from app.config import Settings, get_settings
 from app.runtime_config.models import (
@@ -37,6 +34,16 @@ AUTH_SETTING_KEYS = frozenset(
     }
 )
 AUTH_SECRET_KEY = "auth.google.client_secret"
+AI_SECRET_KEYS = frozenset(
+    {
+        "ai.openai.api_key",
+        "ai.local_openai.api_key",
+        "ai.anthropic.api_key",
+        "ai.gemini.api_key",
+        "ai.deepseek.api_key",
+        "ai.kimi.api_key",
+    }
+)
 SUPPORTED_AI_PROVIDERS = frozenset(
     {"openai", "local_openai", "anthropic", "gemini", "deepseek", "kimi"}
 )
@@ -47,9 +54,8 @@ _ACTIVE_EXPERIMENT_CACHE: tuple[tuple[str, str, str, str, str], ...] | None = No
 class RuntimeControlSettings(BaseSettings):
     """Bootstrap-only control-plane settings.
 
-    The database cannot safely contain the key required to decrypt itself. These
-    values therefore remain process bootstrap configuration while the mutable
-    provider/auth settings live in the database.
+    The database cannot safely contain the key required to decrypt itself. The
+    master key and admin allowlist therefore remain process bootstrap settings.
     """
 
     model_config = SettingsConfigDict(
@@ -80,16 +86,11 @@ class AuthRuntimeSnapshot:
 
     @property
     def google_available(self) -> bool:
-        return bool(
-            self.google_enabled
-            and self.external_base_url
-            and self.google_client_id
-            and self.google_client_secret
-        )
+        return self.social_settings().google_available
 
     @property
     def steam_available(self) -> bool:
-        return bool(self.steam_enabled and self.external_base_url)
+        return self.social_settings().steam_available
 
     @property
     def provider_payload(self) -> dict[str, bool]:
@@ -179,6 +180,7 @@ class RuntimeConfigurationService:
             await self._seed_settings(session, actor=actor)
             await self._seed_ai_providers(session, actor=actor)
             await self._seed_environment_secrets(session, actor=actor)
+        _clear_active_experiment_cache()
 
     async def public_payload(self) -> dict[str, Any]:
         await self.ensure_seeded()
@@ -186,7 +188,10 @@ class RuntimeConfigurationService:
             settings = list(
                 (
                     await session.scalars(
-                        select(RuntimeSettingRecord).order_by(RuntimeSettingRecord.category, RuntimeSettingRecord.key)
+                        select(RuntimeSettingRecord).order_by(
+                            RuntimeSettingRecord.category,
+                            RuntimeSettingRecord.key,
+                        )
                     )
                 ).all()
             )
@@ -194,12 +199,16 @@ class RuntimeConfigurationService:
                 (
                     await session.scalars(
                         select(AiProviderConfigRecord).order_by(
-                            AiProviderConfigRecord.provider, AiProviderConfigRecord.slot
+                            AiProviderConfigRecord.provider,
+                            AiProviderConfigRecord.slot,
                         )
                     )
                 ).all()
             )
             secret_keys = set((await session.scalars(select(RuntimeSecretRecord.key))).all())
+        secret_keys.update(self._environment_ai_secrets())
+        if self._social.google_client_secret is not None:
+            secret_keys.add(AUTH_SECRET_KEY)
         return {
             "settings": [self._setting_payload(row) for row in settings],
             "ai_providers": [
@@ -301,6 +310,7 @@ class RuntimeConfigurationService:
             )
             await session.flush()
             secret_keys = set((await session.scalars(select(RuntimeSecretRecord.key))).all())
+            secret_keys.update(self._environment_ai_secrets())
             _clear_active_experiment_cache()
             return self._provider_payload(row, secret_keys=secret_keys)
 
@@ -372,7 +382,7 @@ class RuntimeConfigurationService:
 
     @property
     def allowed_secret_keys(self) -> frozenset[str]:
-        return frozenset({AUTH_SECRET_KEY, *self._environment_ai_secrets()})
+        return frozenset({AUTH_SECRET_KEY, *AI_SECRET_KEYS})
 
     def is_admin_email(self, email: str | None) -> bool:
         return bool(email and email.strip().lower() in self.bootstrap.admin_email_entries)
@@ -418,7 +428,10 @@ class RuntimeConfigurationService:
             )
 
     async def _seed_environment_secrets(
-        self, session: AsyncSession, *, actor: str | None
+        self,
+        session: AsyncSession,
+        *,
+        actor: str | None,
     ) -> None:
         if self.bootstrap.config_master_key is None:
             return
@@ -456,7 +469,8 @@ class RuntimeConfigurationService:
             return fallback
         result = await session.scalar(
             text(
-                "SELECT pgp_sym_decrypt(ciphertext, :master) FROM runtime_secrets WHERE key = :key"
+                "SELECT pgp_sym_decrypt(ciphertext, :master) "
+                "FROM runtime_secrets WHERE key = :key"
             ),
             {"master": self._master_key(), "key": key},
         )
@@ -620,26 +634,22 @@ async def active_ai_experiments(
     session: AsyncSession,
     fallback: tuple[tuple[str, str, str, str, str], ...] = (),
 ) -> tuple[tuple[str, str, str, str, str], ...]:
-    """Return the current decision-voting experiment set.
-
-    No rows means the installation has not opted into DB runtime configuration
-    yet, so existing environment behavior remains intact. Once provider rows
-    exist, the DB is authoritative for new scheduling decisions.
-    """
     rows = list(
         (
             await session.scalars(
-                select(AiProviderConfigRecord).where(
+                select(AiProviderConfigRecord)
+                .where(
                     AiProviderConfigRecord.enabled.is_(True),
                     AiProviderConfigRecord.decisions_enabled.is_(True),
                 )
+                .order_by(AiProviderConfigRecord.provider, AiProviderConfigRecord.slot)
             )
         ).all()
     )
-    any_rows = await session.scalar(select(AiProviderConfigRecord.id).limit(1))
+    any_row = await session.scalar(select(AiProviderConfigRecord.id).limit(1))
     experiments = (
         tuple(ai_experiment_key(row.provider, row.model) for row in rows)
-        if any_rows is not None
+        if any_row is not None
         else fallback
     )
     global _ACTIVE_EXPERIMENT_CACHE
@@ -660,31 +670,35 @@ async def resolve_ai_provider(
     *,
     fallback: AiProvider | None,
 ) -> AiProvider:
-    """Resolve one immutable provider config snapshot at PREPARE time."""
-    row = await session.scalar(
-        select(AiProviderConfigRecord).where(
-            AiProviderConfigRecord.provider == provider,
-            AiProviderConfigRecord.model == model,
-            AiProviderConfigRecord.enabled.is_(True),
-            AiProviderConfigRecord.decisions_enabled.is_(True),
-        )
-    )
-    if row is None:
+    """Freeze the current provider row into a provider object for one call."""
+    any_row = await session.scalar(select(AiProviderConfigRecord.id).limit(1))
+    if any_row is None:
         if fallback is None:
             raise ValueError(f"AI provider experiment is not configured: {provider}/{model}")
         return fallback
 
+    row = await session.scalar(
+        select(AiProviderConfigRecord).where(
+            AiProviderConfigRecord.provider == provider,
+            AiProviderConfigRecord.model == model,
+        )
+    )
+    if row is None or not row.enabled or not row.decisions_enabled:
+        raise ValueError(f"AI provider experiment is disabled or superseded: {provider}/{model}")
+
     settings = get_settings()
-    service_bootstrap = RuntimeControlSettings()
     api_key = await _runtime_secret_or_environment(
         session,
         row.api_key_secret_key,
-        bootstrap=service_bootstrap,
+        bootstrap=RuntimeControlSettings(),
         settings=settings,
     )
     if not api_key:
         raise ValueError(f"AI provider secret is not configured: {provider}/{row.slot}")
-    return _build_provider(row, api_key)
+    resolved = _build_provider(row, api_key)
+    setattr(resolved, "runtime_config_managed", True)
+    setattr(resolved, "runtime_timeout_seconds", float(row.timeout_seconds))
+    return resolved
 
 
 def _build_provider(row: AiProviderConfigRecord, api_key: str) -> AiProvider:
