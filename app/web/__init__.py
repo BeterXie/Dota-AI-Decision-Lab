@@ -17,6 +17,7 @@ from app.entitlements import EntitlementService
 from app.promotions import PromotionService
 from app.promotions.config import PromotionSettings
 from app.runtime.health import HealthRegistry
+from app.runtime_config import RuntimeConfigurationService
 from app.web.access import create_access_router
 from app.web.api import create_app as create_api_app
 from app.web.auth import register_auth
@@ -27,6 +28,7 @@ from app.web.premium import create_premium_router
 from app.web.promotions import create_promotion_router
 from app.web.public_boundary import PublicMatchDataBoundaryMiddleware
 from app.web.quality import create_quality_router
+from app.web.runtime_admin import create_runtime_admin_router
 from app.web.server import WebServerWorker
 from app.web.spa import spa_file_response
 from app.web.teams import create_team_router
@@ -83,6 +85,10 @@ def create_app(
 
     promotions = promotion_settings or PromotionSettings()
     entitlement_service = EntitlementService(session_factory)
+    runtime_config = RuntimeConfigurationService(
+        session_factory,
+        settings=runtime_settings,
+    )
     promotion_service = PromotionService(
         session_factory,
         referral_enabled=promotions.referral_enabled,
@@ -118,6 +124,7 @@ def create_app(
     app.include_router(create_notification_router(session_factory))
     app.include_router(create_promotion_router(promotion_service))
     app.include_router(create_quality_router(session_factory))
+    app.include_router(create_runtime_admin_router(runtime_config))
     app.include_router(
         create_billing_router(
             session_factory,
@@ -133,6 +140,7 @@ def create_app(
         enabled=auth_enabled,
         cookie_secure=auth_cookie_secure,
         development_grant_emails=development_grant_emails,
+        runtime_config=runtime_config,
     )
     # This is deliberately independent of frontend behavior: even a hand-written
     # HTTP client cannot extract premium decision payloads from public match APIs.
