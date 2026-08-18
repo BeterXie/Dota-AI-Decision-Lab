@@ -88,15 +88,15 @@ def upgrade() -> None:
         sa.CheckConstraint(
             "(player_id IS NOT NULL AND staff_id IS NULL) OR "
             "(player_id IS NULL AND staff_id IS NOT NULL)",
-            name="ck_team_roster_memberships_roster_member_exactly_one_subject",
+            name="roster_member_exactly_one_subject",
         ),
         sa.CheckConstraint(
             "position IS NULL OR (position >= 1 AND position <= 5)",
-            name="ck_team_roster_memberships_roster_position_range",
+            name="roster_position_range",
         ),
         sa.CheckConstraint(
             "valid_to IS NULL OR valid_from IS NULL OR valid_to >= valid_from",
-            name="ck_team_roster_memberships_roster_valid_range",
+            name="roster_valid_range",
         ),
         sa.ForeignKeyConstraint(["player_id"], ["canonical_players.id"], ondelete="CASCADE"),
         sa.ForeignKeyConstraint(["staff_id"], ["canonical_staff.id"], ondelete="CASCADE"),
