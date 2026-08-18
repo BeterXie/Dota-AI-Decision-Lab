@@ -12,6 +12,7 @@ import type { AuthSessionState } from "../authApi";
 import { eventHref, eventName } from "../events";
 import { aiAccessScope, findMatchByRoute, type AiAccessScope } from "../matches";
 import { useI18n } from "../i18n";
+import { TeamCrest } from "./VisualIdentity";
 
 interface MatchPageProps {
   matches: MapSummary[];
@@ -86,13 +87,13 @@ export const MatchPage: React.FC<MatchPageProps> = ({
           {match.map_number ? <span>{locale === "zh-CN" ? `第 ${match.map_number} 局` : `Map ${match.map_number}`}</span> : null}
         </div>
         <div className="match-versus">
-          <TeamHero name={teamA} side="a" />
+          <TeamHero team={match.team_a} name={teamA} side="a" />
           <div className="match-score-block">
             <strong>{scoreText(match)}</strong>
             <span>{match.scheduled_at ? formatDateTime(match.scheduled_at, locale) : (locale === "zh-CN" ? "时间待确认" : "Time TBD")}</span>
             {resultWinner ? <em>{locale === "zh-CN" ? `${resultWinner} 获胜` : `${resultWinner} won`}</em> : null}
           </div>
-          <TeamHero name={teamB} side="b" />
+          <TeamHero team={match.team_b} name={teamB} side="b" />
         </div>
       </section>
 
@@ -147,9 +148,13 @@ const MatchNotFound: React.FC<{ locale: string }> = ({ locale }) => (
   </section>
 );
 
-const TeamHero: React.FC<{ name: string; side: "a" | "b" }> = ({ name, side }) => (
+const TeamHero: React.FC<{
+  team: MapSummary["team_a"];
+  name: string;
+  side: "a" | "b";
+}> = ({ team, name, side }) => (
   <div className={`match-team-hero side-${side}`}>
-    <i aria-hidden="true">{teamInitial(name)}</i>
+    <TeamCrest team={team} fallbackName={name} size="lg" />
     <h1>{name}</h1>
   </div>
 );
