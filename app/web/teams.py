@@ -164,8 +164,12 @@ def _team_payload(
     *,
     discovered_valve_team_id: int | None,
 ) -> dict:
-    valve_team_id = profile.valve_team_id if profile and profile.valve_team_id else discovered_valve_team_id
-    identity_source = "registry" if profile and profile.valve_team_id else "opendota" if valve_team_id else None
+    valve_team_id = (
+        profile.valve_team_id if profile and profile.valve_team_id else discovered_valve_team_id
+    )
+    identity_source = (
+        "registry" if profile and profile.valve_team_id else "opendota" if valve_team_id else None
+    )
     return {
         "id": str(team.id),
         "name": team.name,
