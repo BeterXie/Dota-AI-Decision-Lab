@@ -110,6 +110,9 @@ class AuthGuardMiddleware:
                     }
                 )
                 return
+            if path == "/ws/status":
+                await self._app(scope, receive, send)
+                return
             if not self._enabled:
                 await send(
                     {
@@ -492,13 +495,12 @@ def _http_access_requirement(path: str) -> tuple[str, str | None]:
     if path.startswith("/api/admin/"):
         return "AUTHENTICATED", None
     if path.startswith("/api/maps/") and path.endswith("/ai-decisions"):
-        return "AUTHENTICATED", None
-    if (
-        path == "/api/snapshots"
-        or path.startswith("/api/snapshots/")
-        or path == "/api/review"
-        or path.startswith("/api/review/")
-    ):
+        return "PUBLIC", None
+    if path == "/api/ai-performance":
+        return "PUBLIC", None
+    if path == "/api/review" or path.startswith("/api/review/"):
+        return "PUBLIC", None
+    if path == "/api/snapshots" or path.startswith("/api/snapshots/"):
         return "ENTITLED", AI_DECISIONS_ENTITLEMENT
     if path == "/metrics" or path == "/api/jobs/summary" or path.startswith("/api/account/"):
         return "AUTHENTICATED", None
