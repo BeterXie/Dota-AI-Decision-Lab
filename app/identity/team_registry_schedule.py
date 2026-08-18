@@ -15,7 +15,7 @@ from app.models import CanonicalEvent, CanonicalSeries, ProviderEventMapping
 @dataclass(frozen=True, slots=True)
 class TeamRegistryScheduleResult:
     events_considered: int
-    jobs_scheduled: int
+    jobs_enqueued: int
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,7 +45,7 @@ async def schedule_discovered_event_team_registry_refreshes(
 
     observed_at = now or datetime.now(UTC)
     events = await _raybet_event_teams(session, created_after=discovered_after)
-    scheduled = 0
+    enqueued = 0
     for event in events:
         if not event.team_ids:
             continue
@@ -56,8 +56,8 @@ async def schedule_discovered_event_team_registry_refreshes(
             cycle="discovered",
             observed_at=observed_at,
         )
-        scheduled += 1
-    return TeamRegistryScheduleResult(len(events), scheduled)
+        enqueued += 1
+    return TeamRegistryScheduleResult(len(events), enqueued)
 
 
 async def schedule_prestart_event_team_registry_refreshes(
@@ -77,7 +77,7 @@ async def schedule_prestart_event_team_registry_refreshes(
         raise ValueError("refresh_seconds must be positive")
     observed_at = now or datetime.now(UTC)
     events = await _raybet_event_teams(session)
-    scheduled = 0
+    enqueued = 0
     for event in events:
         if event.started_at is None or event.started_at <= observed_at:
             continue
@@ -94,8 +94,8 @@ async def schedule_prestart_event_team_registry_refreshes(
             cycle=f"prestart-{cycle_number}",
             observed_at=observed_at,
         )
-        scheduled += 1
-    return TeamRegistryScheduleResult(len(events), scheduled)
+        enqueued += 1
+    return TeamRegistryScheduleResult(len(events), enqueued)
 
 
 async def _raybet_event_teams(
