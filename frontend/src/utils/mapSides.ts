@@ -15,8 +15,9 @@ export interface VerifiedMapSides {
 }
 
 export function resolveVerifiedMapSides(match: MapSummary | MapDetail): VerifiedMapSides | null {
-  if (!("snapshot_payload" in match)) return null;
-  const sideIdentity = match.snapshot_payload?.identity?.side_identity;
+  const sideIdentity = match.side_identity ?? (
+    "snapshot_payload" in match ? match.snapshot_payload?.identity?.side_identity : null
+  );
   const teamA = match.team_a;
   const teamB = match.team_b;
   if (

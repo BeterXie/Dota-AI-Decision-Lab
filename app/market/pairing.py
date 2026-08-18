@@ -78,7 +78,10 @@ def evaluate_market_pair(
     if None in versions or len(versions) != 1:
         blockers.append("MARKET_PAIR_METADATA_MISMATCH")
 
-    statuses = {leg.normalized_status or "UNKNOWN" for leg in legs}
+    statuses = {
+        (leg.normalized_status or "UNKNOWN").strip().upper().replace("-", "_").replace(" ", "_")
+        for leg in legs
+    }
     if statuses & {"SUSPENDED", "CLOSED"}:
         blockers.append("MARKET_NOT_OPEN")
     elif statuses != {"OPEN_CONFIRMED"}:

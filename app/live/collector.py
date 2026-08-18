@@ -47,12 +47,24 @@ class DltvSocketCollector:
         is_match_event = event_name.startswith("__nd2_match_")
         async with self._session_factory() as session, session.begin():
             previous_socket_event = None
+            previous_series_event = None
             if is_match_event:
                 previous_socket_event = await session.scalar(
                     select(ProviderRawEvent)
                     .where(
                         ProviderRawEvent.provider == "dltv",
                         ProviderRawEvent.event_type == "DLTV_FAST_SOCKET",
+                        ProviderRawEvent.provider_key == event_name,
+                    )
+                    .order_by(ProviderRawEvent.received_at.desc())
+                    .limit(1)
+                )
+            elif event_name == "__nd2_series":
+                previous_series_event = await session.scalar(
+                    select(ProviderRawEvent)
+                    .where(
+                        ProviderRawEvent.provider == "dltv",
+                        ProviderRawEvent.event_type == "DLTV_SERIES",
                         ProviderRawEvent.provider_key == event_name,
                     )
                     .order_by(ProviderRawEvent.received_at.desc())
@@ -87,6 +99,34 @@ class DltvSocketCollector:
                             occurred_at=received_at,
                         ),
                     )
+                if (
+                    previous_series_event is not None
+                    and isinstance(previous_series_event.payload.get("live"), dict)
+                    and isinstance(payload.get("live"), dict)
+                ):
+                    previous_frame = parse_series_frame(previous_series_event.payload)
+                    for valve_match_id in previous_frame.live_maps.keys() - frame.live_maps.keys():
+                        canonical_map = await session.scalar(
+                            select(CanonicalMap).where(
+                                CanonicalMap.valve_match_id == valve_match_id
+                            )
+                        )
+                        if canonical_map is None:
+                            continue
+                        await self._events.record(
+                            session,
+                            DomainEvent(
+                                event_type=DomainEventType.MAP_ENDED,
+                                aggregate_type="canonical_map",
+                                aggregate_id=str(canonical_map.id),
+                                dedupe_key=f"map-ended:{canonical_map.id}",
+                                payload={
+                                    "canonical_map_id": str(canonical_map.id),
+                                    "valve_match_id": valve_match_id,
+                                },
+                                occurred_at=received_at,
+                            ),
+                        )
                 return
             if not is_match_event:
                 return

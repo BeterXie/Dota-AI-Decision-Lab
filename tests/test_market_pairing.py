@@ -13,7 +13,7 @@ def _leg(
     received_at: datetime,
     price: str = "2.00",
     stage: str = "Map 1",
-    status: str = "UNKNOWN",
+    status: str = "OPEN_CONFIRMED",
     series_id: UUID,
     map_id: UUID,
 ) -> MarketPairLeg:
@@ -48,7 +48,7 @@ def _quality(*legs: MarketPairLeg, expected_team_ids: frozenset[UUID] | None = N
     )
 
 
-def test_market_pair_accepts_exact_teams_and_exposes_unknown_status() -> None:
+def test_market_pair_accepts_exact_teams_with_confirmed_open_status() -> None:
     series_id, map_id, team_a, team_b = uuid4(), uuid4(), uuid4(), uuid4()
     now = datetime(2026, 8, 12, 12, 0, 8, tzinfo=UTC)
     quality = _quality(
@@ -57,8 +57,35 @@ def test_market_pair_accepts_exact_teams_and_exposes_unknown_status() -> None:
     )
 
     assert quality.eligible is True
-    assert quality.warnings == ("MARKET_STATUS_UNKNOWN",)
+    assert quality.blockers == ()
     assert remove_vig(2.0, 2.0) == (0.5, 0.5, 1.0)
+
+
+def test_market_pair_preserves_unknown_status_as_explicit_warning() -> None:
+    series_id, map_id, team_a, team_b = uuid4(), uuid4(), uuid4(), uuid4()
+    now = datetime(2026, 8, 12, 12, 0, 8, tzinfo=UTC)
+    quality = _quality(
+        _leg(
+            odds_id=1,
+            team_id=team_a,
+            received_at=now,
+            status="UNKNOWN",
+            series_id=series_id,
+            map_id=map_id,
+        ),
+        _leg(
+            odds_id=2,
+            team_id=team_b,
+            received_at=now,
+            status="OPEN_CONFIRMED",
+            series_id=series_id,
+            map_id=map_id,
+        ),
+    )
+
+    assert quality.eligible is True
+    assert quality.blockers == ()
+    assert quality.warnings == ("MARKET_STATUS_UNKNOWN",)
 
 
 def test_market_pair_rejects_duplicate_team_mixed_stage_stale_and_skewed_legs() -> None:

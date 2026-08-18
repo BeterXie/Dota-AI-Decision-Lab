@@ -9,6 +9,8 @@ const match: MapSummary = {
   phase: "LIVE",
   id: "summary-id",
   series_id: "series-1",
+  canonical_event_id: "event-1",
+  stage_key: "PAID_STAGE",
   canonical_map_id: "map-1",
   map_number: 1,
   valve_match_id: null,
@@ -60,7 +62,7 @@ describe("match routing", () => {
 });
 
 describe("match AI access", () => {
-  it("recognizes global, series and map access independently", () => {
+  it("recognizes global, event, series and map access independently", () => {
     expect(aiAccessScope(session({ entitlements: ["ai_decisions"] }), match)).toBe("GLOBAL");
     expect(
       aiAccessScope(
@@ -73,11 +75,27 @@ describe("match AI access", () => {
     expect(
       aiAccessScope(
         session({
+          grants: [{ entitlement: "ai_decisions", scope_type: "EVENT", scope_ref: "event-1", campaign_key: null, starts_at: null, expires_at: null }]
+        }),
+        match
+      )
+    ).toBe("EVENT");
+    expect(
+      aiAccessScope(
+        session({
           grants: [{ entitlement: "ai_decisions", scope_type: "MAP", scope_ref: "map-1", campaign_key: null, starts_at: null, expires_at: null }]
         }),
         match
       )
     ).toBe("MAP");
+  });
+
+  it("opens group-stage decisions for an authenticated Free account", () => {
+    expect(aiAccessScope(session({}), { ...match, stage_key: "GROUP_STAGE" })).toBe("FREE");
+  });
+
+  it("opens settled match decisions without an account", () => {
+    expect(aiAccessScope(undefined, { ...match, phase: "POSTMATCH" })).toBe("POSTMATCH");
   });
 
   it("does not treat unrelated grants as access", () => {

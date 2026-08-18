@@ -14,7 +14,7 @@ from app.providers.chat_access import (
     is_notification_resume_command,
 )
 from app.providers.chat_commands import command_reply, render_decision_notification
-from app.providers.qq_bot.models import QQInboundMessage
+from app.providers.qq_bot.models import QQContact, QQInboundMessage
 from app.providers.qq_bot.service import QQBotService as LegacyQQBotService
 
 _SUBSCRIBE_COMMANDS = {"订阅通知", "订阅决策", "订阅"}
@@ -41,7 +41,10 @@ class UserScopedQQBotService(LegacyQQBotService):
             snapshot_id=snapshot.snapshot_id,
             decision_ids=decision_ids,
         )
-        if not deliveries:
+        # Verified private-chat bindings are represented by Notification Center
+        # deliveries. Explicit operator targets and opted-in groups remain
+        # transport-local targets and must also wake the durable worker.
+        if not deliveries and not self._direct_decision_targets():
             return
         batch = ",".join(sorted(str(item) for item in decision_ids))
         await self._jobs.enqueue(
@@ -63,7 +66,8 @@ class UserScopedQQBotService(LegacyQQBotService):
             snapshot_id=snapshot.snapshot_id,
             decision_ids=decision_ids,
         )
-        if not delivery_ids:
+        direct_targets = self._direct_decision_targets()
+        if not delivery_ids and not direct_targets:
             return 0
         reason = self._decision_age_block_reason(snapshot)
         if reason is None:
@@ -81,18 +85,20 @@ class UserScopedQQBotService(LegacyQQBotService):
         text = render_decision_notification(snapshot, decisions, channel_label="QQ")
         sent = 0
         failures: list[Exception] = []
+        delivery_target_keys: set[tuple[str, str]] = set()
         for delivery_id in delivery_ids:
             target = await self._notification_center.start_delivery(delivery_id)
             if target is None:
                 continue
             scope = target.destination.get("scope")
             target_id = target.destination.get("target_id")
-            if scope != "c2c" or not isinstance(target_id, str) or not target_id:
+            if scope not in {"c2c", "group"} or not isinstance(target_id, str) or not target_id:
                 await self._notification_center.mark_expired(
                     delivery_id,
-                    "QQ paid notifications only support verified C2C bindings",
+                    "QQ notification binding is no longer backed by a valid target",
                 )
                 continue
+            delivery_target_keys.add((scope, target_id))
             try:
                 provider_message_id = await self._client.send_text(
                     scope=scope,
@@ -106,6 +112,24 @@ class UserScopedQQBotService(LegacyQQBotService):
                 continue
             await self._notification_center.mark_sent(delivery_id, provider_message_id)
             sent += 1
+        decision_batch_key = ",".join(sorted(str(item.id) for item in decisions))
+        for target in direct_targets:
+            if target.key in delivery_target_keys:
+                continue
+            try:
+                await self._client.send_text(
+                    scope=target.scope,
+                    target_id=target.target_id,
+                    text=text,
+                    idempotency_key=(
+                        f"qq-decision:{snapshot.snapshot_id}:{decision_batch_key}:"
+                        f"{target.scope}:{target.target_id}"
+                    ),
+                )
+            except Exception as exc:
+                failures.append(exc)
+                continue
+            sent += 1
         if failures:
             first = failures[0]
             raise RuntimeError(
@@ -113,6 +137,19 @@ class UserScopedQQBotService(LegacyQQBotService):
                 f"first={type(first).__name__}: {first}"
             ) from first
         return sent
+
+    def _direct_decision_targets(self) -> tuple[QQContact, ...]:
+        """Return explicit targets and subscribed groups for direct delivery."""
+        merged = {target.key: target for target in self._configured_targets}
+        subscribed_contacts = getattr(self._store, "subscribed_contacts", None)
+        if callable(subscribed_contacts):
+            for contact in subscribed_contacts():
+                # Private-chat recipients remain entitlement-scoped through
+                # Notification Center. Groups have no account binding and use
+                # the channel-local subscription state instead.
+                if contact.scope == "group":
+                    merged.setdefault(contact.key, contact)
+        return tuple(merged.values())
 
     async def _handle_message(self, session, message: QQInboundMessage) -> None:
         if not message.text.strip() or not message.sender_id or not self._message_allowed(message):
@@ -127,14 +164,23 @@ class UserScopedQQBotService(LegacyQQBotService):
             or is_notification_resume_command(message.text)
         )
         premium_query = is_ai_decision_query(message.text)
+        group = message.scope == "group"
+        group_subscription_command = (
+            normalized in _SUBSCRIBE_COMMANDS or normalized in _UNSUBSCRIBE_COMMANDS
+        )
         account_command = pairing_code is not None or preference_command or premium_query
-        if message.scope != "c2c" and account_command:
+        # Groups may opt in/out locally. Binding, premium queries, and
+        # per-user pause/resume remain private-chat operations.
+        if group and group_subscription_command:
+            await super()._handle_message(session, message)
+            return
+        if group and account_command:
             await self._client.send_text(
                 scope=message.scope,
                 target_id=message.target_id,
                 text=(
-                    "⚠️ AI 决策查询、账号绑定和订阅管理仅支持已绑定的 QQ 私聊。"
-                    "请私聊机器人发送「绑定 <配对码>」。"
+                    "⚠️ AI 决策查询、账号绑定和暂停/恢复通知仅支持已绑定的 QQ 私聊。"
+                    "群聊请使用「订阅通知」或「退订通知」。"
                 ),
                 msg_id=message.message_id,
             )

@@ -192,6 +192,8 @@ export interface MapSummary {
   phase: "PREMATCH" | "LIVE" | "AWAITING_RESULT" | "POSTMATCH" | "UNKNOWN";
   id: string;
   series_id: string;
+  canonical_event_id?: string | null;
+  stage_key?: "GROUP_STAGE" | "PAID_STAGE" | "UNKNOWN" | string;
   canonical_map_id: string | null;
   map_number: number | null;
   valve_match_id: number | null;
@@ -211,6 +213,8 @@ export interface MapSummary {
   market_quality: MarketQuality | null;
   /** Derived current market (vig-removed fair probabilities) evaluated at request time. */
   current_market_view?: CurrentMarketView | null;
+  /** Verified Radiant/Dire assignment for public Draft Intelligence presentation. */
+  side_identity?: MapSideIdentity | null;
   /** Market quality frozen inside the latest DecisionSnapshot. */
   snapshot_market_quality?: MarketQuality | null;
   draft: {

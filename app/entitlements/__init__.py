@@ -1,5 +1,6 @@
 from app.entitlements.models import UserEntitlementRecord
 from app.entitlements.service import (
+    ACCESS_SCOPE_EVENT,
     ACCESS_SCOPE_GLOBAL,
     ACCESS_SCOPE_MAP,
     ACCESS_SCOPE_SERIES,
@@ -14,6 +15,7 @@ from app.entitlements.service import (
 
 __all__ = [
     "ACCESS_SCOPE_GLOBAL",
+    "ACCESS_SCOPE_EVENT",
     "ACCESS_SCOPE_MAP",
     "ACCESS_SCOPE_SERIES",
     "ACCESS_SCOPES",

@@ -1,5 +1,6 @@
 .baseline-benchmark {
   margin: 24px 0 8px;
+  color: var(--product-text, #e8edf6);
 }
 
 .baseline-benchmark-heading {
@@ -8,7 +9,7 @@
 }
 
 .baseline-frozen-badge {
-  border: 1px solid var(--cds-border-subtle-01, #d6d6d6);
+  border: 1px solid var(--product-border, rgba(151, 177, 202, 0.16));
   border-radius: 999px;
   padding: 6px 10px;
   font-size: 11px;
@@ -19,8 +20,8 @@
 .baseline-contract-card,
 .baseline-experiment-card,
 .baseline-benchmark-state {
-  border: 1px solid var(--cds-border-subtle-01, #d6d6d6);
-  background: var(--cds-layer-01, #fff);
+  border: 1px solid var(--product-border, rgba(151, 177, 202, 0.16));
+  background: rgba(14, 25, 37, 0.82);
 }
 
 .baseline-contract-card {
@@ -45,7 +46,7 @@
 
 .baseline-contract-title span,
 .baseline-contract-card > p {
-  color: var(--cds-text-secondary, #525252);
+  color: var(--product-text-2, #b7c4d1);
   font-size: 13px;
   line-height: 1.5;
 }
@@ -67,14 +68,14 @@
   gap: 5px;
   min-width: 0;
   padding: 10px;
-  border: 1px solid var(--cds-border-subtle-01, #d6d6d6);
+  border: 1px solid var(--product-border, rgba(151, 177, 202, 0.16));
 }
 
 .baseline-contract-grid span,
 .baseline-metric span,
 .baseline-delta-strip span,
 .baseline-reference {
-  color: var(--cds-text-secondary, #525252);
+  color: var(--product-text-3, #718298);
   font-size: 11px;
 }
 
@@ -94,7 +95,7 @@
 
 .baseline-provider-filter button,
 .baseline-benchmark-state button {
-  border: 1px solid var(--cds-border-subtle-01, #d6d6d6);
+  border: 1px solid var(--product-border, rgba(151, 177, 202, 0.16));
   background: transparent;
   color: inherit;
   padding: 7px 11px;
@@ -102,7 +103,7 @@
 }
 
 .baseline-provider-filter button.active {
-  border-color: var(--cds-text-primary, #161616);
+  border-color: var(--product-teal, #4dd9df);
   font-weight: 700;
 }
 
@@ -134,7 +135,7 @@
 }
 
 .baseline-experiment-card > header small {
-  color: var(--cds-text-secondary, #525252);
+  color: var(--product-text-3, #718298);
   font-size: 11px;
   overflow-wrap: anywhere;
 }
@@ -160,7 +161,8 @@
   gap: 4px;
   min-width: 0;
   padding: 10px;
-  background: var(--cds-layer-02, #f4f4f4);
+  border: 1px solid rgba(151, 177, 202, 0.1);
+  background: rgba(255, 255, 255, 0.035);
 }
 
 .baseline-metric strong {
@@ -169,7 +171,7 @@
 }
 
 .baseline-metric small {
-  color: var(--cds-text-secondary, #525252);
+  color: var(--product-text-3, #718298);
   font-size: 10px;
 }
 
@@ -180,7 +182,7 @@
   align-items: center;
   margin-top: 10px;
   padding: 10px;
-  border: 1px dashed var(--cds-border-subtle-01, #d6d6d6);
+  border: 1px dashed var(--product-border, rgba(151, 177, 202, 0.16));
 }
 
 .baseline-delta-strip > div {
@@ -200,7 +202,7 @@
   gap: 12px;
   align-items: center;
   padding: 16px;
-  color: var(--cds-text-secondary, #525252);
+  color: var(--product-text-2, #b7c4d1);
 }
 
 @media (max-width: 1100px) {

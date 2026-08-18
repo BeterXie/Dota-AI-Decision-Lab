@@ -4,7 +4,6 @@ import {
   fetchMap,
   queryKeys,
   type AiDecision,
-  type CurrentMarketLeg,
   type MapDetail,
   type MapSummary
 } from "../api";
@@ -12,7 +11,11 @@ import type { AuthSessionState } from "../authApi";
 import { eventHref, eventName } from "../events";
 import { aiAccessScope, findMatchByRoute, type AiAccessScope } from "../matches";
 import { useI18n } from "../i18n";
-import { TeamCrest } from "./VisualIdentity";
+import { CanonicalMarketCard } from "./CanonicalMarketCard";
+import { LineupCard } from "./LineupCard";
+import { PlayerDraftAdvantageCard } from "./PlayerDraftAdvantageCard";
+import { TeamCrest, UiIcon } from "./VisualIdentity";
+import { resolveVerifiedMapSides } from "../utils/mapSides";
 
 interface MatchPageProps {
   matches: MapSummary[];
@@ -67,7 +70,10 @@ export const MatchPage: React.FC<MatchPageProps> = ({
   const teamA = match.team_a?.name || (locale === "zh-CN" ? "待定" : "TBD");
   const teamB = match.team_b?.name || (locale === "zh-CN" ? "待定" : "TBD");
   const event = eventName(match);
-  const resultWinner = winnerName(displayDetail, match);
+  const live = displayDetail?.live ?? match.live;
+  const winnerTeamId = displayDetail?.result?.winner_team_id ?? null;
+  const mapSides = resolveVerifiedMapSides(displayDetail ?? match);
+  const killScore = teamKillScore(match, live, mapSides);
 
   return (
     <div className="match-v2">
@@ -87,15 +93,33 @@ export const MatchPage: React.FC<MatchPageProps> = ({
           {match.map_number ? <span>{locale === "zh-CN" ? `第 ${match.map_number} 局` : `Map ${match.map_number}`}</span> : null}
         </div>
         <div className="match-versus">
-          <TeamHero team={match.team_a} name={teamA} side="a" />
-          <div className="match-score-block">
-            <strong>{scoreText(match)}</strong>
-            <span>{match.scheduled_at ? formatDateTime(match.scheduled_at, locale) : (locale === "zh-CN" ? "时间待确认" : "Time TBD")}</span>
-            {resultWinner ? <em>{locale === "zh-CN" ? `${resultWinner} 获胜` : `${resultWinner} won`}</em> : null}
-          </div>
-          <TeamHero team={match.team_b} name={teamB} side="b" />
+          <TeamHero team={match.team_a} name={teamA} side="a" outcome={teamOutcome(match.team_a?.id, winnerTeamId)} />
+          <MatchHeroScore
+            match={match}
+            live={live}
+            killScore={killScore}
+            locale={locale}
+          />
+          <TeamHero team={match.team_b} name={teamB} side="b" outcome={teamOutcome(match.team_b?.id, winnerTeamId)} />
         </div>
       </section>
+
+      {canonicalMapId ? <SeriesNavigator match={match} activeMapId={canonicalMapId} locale={locale} /> : null}
+
+      {canonicalMapId ? (
+        <section className="product-container match-ai-section product-section">
+          <AiMatchCard
+            match={match}
+            scope={scope}
+            signedIn={signedIn}
+            authEnabled={session?.enabled !== false}
+            loading={ai.isLoading}
+            data={ai.data}
+            locale={locale}
+            onLogin={onLogin}
+          />
+        </section>
+      ) : null}
 
       {!canonicalMapId ? (
         <section className="product-container match-identity-note product-section">
@@ -107,24 +131,17 @@ export const MatchPage: React.FC<MatchPageProps> = ({
         </section>
       ) : (
         <>
-          <section className="product-container match-public-grid product-section">
-            <LiveCard match={match} detail={displayDetail} locale={locale} />
-            <MarketCard match={match} detail={displayDetail} locale={locale} />
-            <MatchStateCard match={match} detail={displayDetail} locale={locale} />
+          <section className="product-container match-intelligence-grid product-section">
+            <CanonicalMarketCard match={displayDetail ?? match} />
+            <PlayerDraftAdvantageCard match={displayDetail ?? match} />
           </section>
 
-          <section className="product-container match-detail-grid product-section">
-            <DraftCard match={match} detail={displayDetail} locale={locale} />
-            <AiMatchCard
-              match={match}
-              scope={scope}
-              signedIn={signedIn}
-              authEnabled={session?.enabled !== false}
-              loading={ai.isLoading}
-              data={ai.data}
-              locale={locale}
-              onLogin={onLogin}
-            />
+          <section className="product-container match-lineup-section product-section">
+            <LineupCard match={displayDetail ?? match} />
+          </section>
+
+          <section className="product-container match-state-section product-section">
+            <MatchStateCard match={match} detail={displayDetail} locale={locale} />
           </section>
         </>
       )}
@@ -152,64 +169,88 @@ const TeamHero: React.FC<{
   team: MapSummary["team_a"];
   name: string;
   side: "a" | "b";
-}> = ({ team, name, side }) => (
-  <div className={`match-team-hero side-${side}`}>
+  outcome: "winner" | "loser" | null;
+}> = ({ team, name, side, outcome }) => (
+  <div className={`match-team-hero side-${side}${outcome ? ` outcome-${outcome}` : ""}`}>
     <TeamCrest team={team} fallbackName={name} size="lg" />
-    <h1>{name}</h1>
+    <div className="match-team-copy">
+      {outcome ? (
+        <span className={`match-team-result is-${outcome}`}>
+          {outcome === "winner" ? <UiIcon name="trophy" size={13} /> : null}
+          {outcome === "winner" ? "获胜" : "失败"}
+        </span>
+      ) : null}
+      <h1>{name}</h1>
+    </div>
   </div>
 );
 
-const LiveCard: React.FC<{ match: MapSummary; detail: MapDetail | undefined; locale: string }> = ({ match, detail, locale }) => {
-  const live = detail?.live ?? match.live;
+const MatchHeroScore: React.FC<{
+  match: MapSummary;
+  live: MapSummary["live"];
+  killScore: { teamA: number | null; teamB: number | null };
+  locale: string;
+}> = ({ match, live, killScore, locale }) => {
+  const hasKills = killScore.teamA != null || killScore.teamB != null;
+  if (!hasKills) {
+    return (
+      <div className="match-score-block">
+        <strong>{scoreText(match)}</strong>
+        <span>{match.scheduled_at ? formatDateTime(match.scheduled_at, locale) : (locale === "zh-CN" ? "时间待确认" : "Time TBD")}</span>
+      </div>
+    );
+  }
   return (
-    <article className={`match-signal-card ${match.phase === "LIVE" ? "is-live" : ""}`}>
-      <div className="match-card-kicker"><span aria-hidden="true">●</span>{locale === "zh-CN" ? "比赛进程" : "Match state"}</div>
-      {live ? (
-        <>
-          <div className="match-live-clock">{formatGameClock(live.game_time_seconds)}</div>
-          <div className="match-live-score"><strong>{live.radiant_kills ?? "—"}</strong><span>{locale === "zh-CN" ? "击杀" : "kills"}</span><strong>{live.dire_kills ?? "—"}</strong></div>
-          <p>{netWorthText(live.radiant_nw_lead, match, locale)}</p>
-        </>
-      ) : (
-        <EmptyCardMessage text={phaseEmptyText(match.phase, locale)} />
-      )}
-    </article>
+    <div className="match-score-block match-kill-score-block">
+      <div className="match-kill-score">
+        <strong>{killScore.teamA ?? "—"}</strong>
+        <div className="match-kill-duration">
+          <span>{locale === "zh-CN" ? "时长" : "Duration"}</span>
+          <b>{formatGameClock(live?.game_time_seconds ?? null)}</b>
+        </div>
+        <strong>{killScore.teamB ?? "—"}</strong>
+      </div>
+      <span>{locale === "zh-CN" ? "本局击杀" : "Map kills"}</span>
+    </div>
   );
 };
 
-const MarketCard: React.FC<{ match: MapSummary; detail: MapDetail | undefined; locale: string }> = ({ match, detail, locale }) => {
-  const market = detail?.current_market_view ?? match.current_market_view;
-  const fallback = market ? null : latestMarketPair(detail ?? match);
+const SeriesNavigator: React.FC<{ match: MapSummary; activeMapId: string; locale: string }> = ({ match, activeMapId, locale }) => {
+  const maps = [...(match.series_maps ?? [])].sort((left, right) => (left.map_number ?? 99) - (right.map_number ?? 99));
+  if (maps.length <= 1) return null;
+  const teamA = match.team_a?.name || (locale === "zh-CN" ? "队伍 A" : "Team A");
+  const teamB = match.team_b?.name || (locale === "zh-CN" ? "队伍 B" : "Team B");
   return (
-    <article className="match-signal-card">
-      <div className="match-card-kicker"><span aria-hidden="true">◇</span>{locale === "zh-CN" ? "市场快照" : "Market snapshot"}</div>
-      {market ? (
-        <div className="match-market-pair">
-          <MarketLeg leg={market.team_a} name={match.team_a?.name || "A"} locale={locale} />
-          <div className="match-market-overround"><strong>{market.overround == null ? "—" : `${(market.overround * 100).toFixed(1)}%`}</strong><span>{locale === "zh-CN" ? "市场水位差" : "overround"}</span></div>
-          <MarketLeg leg={market.team_b} name={match.team_b?.name || "B"} locale={locale} />
-        </div>
-      ) : fallback ? (
-        <div className="match-market-fallback">
-          <span><b>{match.team_a?.name || "A"}</b><strong>{fallback.a ?? "—"}</strong></span>
-          <em>vs</em>
-          <span><b>{match.team_b?.name || "B"}</b><strong>{fallback.b ?? "—"}</strong></span>
-        </div>
-      ) : (
-        <EmptyCardMessage text={locale === "zh-CN" ? "暂时没有可用的市场快照" : "No market snapshot available yet"} />
-      )}
-      <p className="match-card-note">{locale === "zh-CN" ? "这里只展示观测到的市场信息，不代表真实成交或收益。" : "Observed market context only; this does not represent real execution or returns."}</p>
-    </article>
+    <section className="product-container match-series-navigator" aria-label={locale === "zh-CN" ? "系列赛地图" : "Series maps"}>
+      <div className="match-series-summary">
+        <span>{locale === "zh-CN" ? `BO${match.best_of ?? maps.length} 系列赛` : `BO${match.best_of ?? maps.length} series`}</span>
+        <strong>{teamA} {scoreText(match)} {teamB}</strong>
+      </div>
+      <nav>
+        {maps.map((map, index) => {
+          const winner = map.winner_team_id === match.team_a?.id
+            ? teamA
+            : map.winner_team_id === match.team_b?.id
+              ? teamB
+              : null;
+          const mapNumber = map.map_number ?? index + 1;
+          const active = map.canonical_map_id === activeMapId;
+          return (
+            <a
+              key={map.canonical_map_id}
+              className={active ? "is-active" : ""}
+              href={`/matches/${encodeURIComponent(map.canonical_map_id)}`}
+              aria-current={active ? "page" : undefined}
+            >
+              <span>{locale === "zh-CN" ? `第 ${mapNumber} 局` : `Map ${mapNumber}`}</span>
+              <small>{winner ? (locale === "zh-CN" ? `${winner} 胜` : `${winner} won`) : (locale === "zh-CN" ? "待确认" : "Pending")}</small>
+            </a>
+          );
+        })}
+      </nav>
+    </section>
   );
 };
-
-const MarketLeg: React.FC<{ leg: CurrentMarketLeg; name: string; locale: string }> = ({ leg, name, locale }) => (
-  <div className="match-market-leg">
-    <span>{name}</span>
-    <strong>{formatOdds(leg.price)}</strong>
-    <small>{leg.fair_probability == null ? "—" : `${(leg.fair_probability * 100).toFixed(1)}%`} {locale === "zh-CN" ? "去水概率" : "fair"}</small>
-  </div>
-);
 
 const MatchStateCard: React.FC<{ match: MapSummary; detail: MapDetail | undefined; locale: string }> = ({ match, detail, locale }) => (
   <article className="match-signal-card">
@@ -224,38 +265,6 @@ const MatchStateCard: React.FC<{ match: MapSummary; detail: MapDetail | undefine
 );
 
 const StateLine: React.FC<{ label: string; value: string }> = ({ label, value }) => <div><span>{label}</span><strong>{value}</strong></div>;
-
-const DraftCard: React.FC<{ match: MapSummary; detail: MapDetail | undefined; locale: string }> = ({ match, detail, locale }) => {
-  const draft = detail?.draft ?? match.draft;
-  if (!draft) {
-    return <article className="match-draft-card"><PanelHeading kicker="DRAFT" title={locale === "zh-CN" ? "阵容与选手" : "Draft & players"} /><EmptyCardMessage text={locale === "zh-CN" ? "Draft 数据还没有到达" : "Draft data has not arrived yet"} /></article>;
-  }
-  const radiant = draft.slots.filter((slot) => slot.side === "radiant").sort((a, b) => a.position - b.position);
-  const dire = draft.slots.filter((slot) => slot.side === "dire").sort((a, b) => a.position - b.position);
-  return (
-    <article className="match-draft-card">
-      <PanelHeading kicker="DRAFT" title={locale === "zh-CN" ? "阵容与选手" : "Draft & players"} aside={draft.complete ? (locale === "zh-CN" ? "阵容已确认" : "Draft complete") : (locale === "zh-CN" ? "阵容采集中" : "Draft collecting")} />
-      <div className="match-draft-sides">
-        <DraftSide title={match.team_a?.name || (locale === "zh-CN" ? "队伍 A" : "Team A")} slots={radiant} locale={locale} />
-        <DraftSide title={match.team_b?.name || (locale === "zh-CN" ? "队伍 B" : "Team B")} slots={dire} locale={locale} />
-      </div>
-    </article>
-  );
-};
-
-const DraftSide: React.FC<{ title: string; slots: NonNullable<MapSummary["draft"]>["slots"]; locale: string }> = ({ title, slots, locale }) => (
-  <div className="match-draft-side">
-    <h3>{title}</h3>
-    <div className="match-draft-slots">
-      {slots.length > 0 ? slots.map((slot) => (
-        <div key={`${slot.side}-${slot.position}`}>
-          <i aria-hidden="true">{slot.hero_name ? teamInitial(slot.hero_name) : slot.position}</i>
-          <span><strong>{slot.hero_name || (locale === "zh-CN" ? "英雄待定" : "Hero TBD")}</strong><small>{slot.player_name || (locale === "zh-CN" ? `位置 ${slot.position}` : `Position ${slot.position}`)}</small></span>
-        </div>
-      )) : <EmptyCardMessage text={locale === "zh-CN" ? "阵容位置还没有确认" : "Draft slots are not confirmed yet"} />}
-    </div>
-  </div>
-);
 
 const AiMatchCard: React.FC<{
   match: MapSummary;
@@ -289,8 +298,8 @@ const AiMatchCard: React.FC<{
         <div className="match-ai-lock">
           <span aria-hidden="true">✦</span>
           <h3>{!authEnabled ? (locale === "zh-CN" ? "AI 权限当前不可用" : "AI access is unavailable") : !signedIn ? (locale === "zh-CN" ? "登录后查看 AI 判断" : "Sign in to view AI calls") : (locale === "zh-CN" ? "这场比赛的 AI 判断需要对应权限" : "AI calls for this match require access")}</h3>
-          <p>{locale === "zh-CN" ? "赛事、比分、Draft、Live 和市场信息继续公开；付费权限只解锁 AI 决策层。" : "Event, score, Draft, live and market information remain public; paid access unlocks only the AI decision layer."}</p>
-          {authEnabled && (!signedIn ? <button className="product-btn product-btn-primary" type="button" onClick={onLogin}>{locale === "zh-CN" ? "登录" : "Sign in"}<span>→</span></button> : <a className="product-btn product-btn-primary" href={billingHref}>{locale === "zh-CN" ? "查看 AI 权益" : "View AI access"}<span>→</span></a>)}
+          <p>{locale === "zh-CN" ? "小组赛 AI 决策免费开放；付费阶段的 AI 决策需要对应赛事或系列赛 Pass。赛事、比分、Draft、Live 和市场信息继续公开。" : "Group-stage AI decisions are free; paid-stage AI decisions require the relevant Event or Series Pass. Event, score, Draft, live and market information remain public."}</p>
+          {authEnabled && (!signedIn ? <button className="product-btn product-btn-primary" type="button" onClick={onLogin}>{locale === "zh-CN" ? "登录" : "Sign in"}<span>→</span></button> : <a className="product-btn product-btn-primary" href={billingHref}>{locale === "zh-CN" ? "查看赛事 Pass" : "View competition pass"}<span>→</span></a>)}
         </div>
       )}
       <p className="match-ai-disclaimer">{locale === "zh-CN" ? "AI 内容用于分析和 Shadow 验证，不代表真实下注执行或收益承诺。" : "AI content is for analysis and Shadow validation, not real betting execution or a promise of returns."}</p>
@@ -314,6 +323,24 @@ function scoreText(match: MapSummary): string {
   return match.series_score ? `${match.series_score.team_a} : ${match.series_score.team_b}` : "VS";
 }
 
+function teamOutcome(teamId: string | undefined, winnerTeamId: string | null): "winner" | "loser" | null {
+  if (!winnerTeamId || !teamId) return null;
+  return teamId === winnerTeamId ? "winner" : "loser";
+}
+
+function teamKillScore(
+  match: MapSummary,
+  live: MapSummary["live"],
+  sides: ReturnType<typeof resolveVerifiedMapSides>,
+): { teamA: number | null; teamB: number | null } {
+  if (!live || !sides) return { teamA: null, teamB: null };
+  const teamARadiant = sides?.radiant.id === match.team_a?.id;
+  return {
+    teamA: teamARadiant ? live.radiant_kills : live.dire_kills,
+    teamB: teamARadiant ? live.dire_kills : live.radiant_kills,
+  };
+}
+
 function formatDateTime(value: string, locale: string): string {
   return new Intl.DateTimeFormat(locale === "zh-CN" ? "zh-CN" : "en-US", { month: "numeric", day: "numeric", hour: "2-digit", minute: "2-digit", hour12: false }).format(new Date(value));
 }
@@ -324,32 +351,6 @@ function formatGameClock(seconds: number | null): string {
   const minutes = Math.floor(absolute / 60);
   const remainder = String(absolute % 60).padStart(2, "0");
   return `${minutes}:${remainder}`;
-}
-
-function formatOdds(value: number | string | null | undefined): string {
-  const numeric = Number(value);
-  return Number.isFinite(numeric) ? numeric.toFixed(2) : "—";
-}
-
-function teamInitial(name: string): string {
-  return name.trim().split(/\s+/).map((part) => part[0]).join("").slice(0, 2).toUpperCase();
-}
-
-function winnerName(detail: MapDetail | undefined, match: MapSummary): string | null {
-  const winner = detail?.result?.winner_team_id;
-  if (!winner) return null;
-  if (winner === match.team_a?.id) return match.team_a.name;
-  if (winner === match.team_b?.id) return match.team_b.name;
-  return null;
-}
-
-function latestMarketPair(match: MapSummary): { a: string | null; b: string | null } | null {
-  if (!match.market.length) return null;
-  const sorted = [...match.market].sort((left, right) => Date.parse(right.received_at) - Date.parse(left.received_at));
-  const a = sorted.find((item) => item.selection_team_id === match.team_a?.id);
-  const b = sorted.find((item) => item.selection_team_id === match.team_b?.id);
-  if (!a && !b) return null;
-  return { a: a ? formatOdds(a.price) : null, b: b ? formatOdds(b.price) : null };
 }
 
 function latestObservedAt(match: MapSummary, locale: string): string {
@@ -364,27 +365,31 @@ function latestObservedAt(match: MapSummary, locale: string): string {
   return formatDateTime(candidates[0], locale);
 }
 
-function netWorthText(value: number | null, match: MapSummary, locale: string): string {
-  if (value == null) return locale === "zh-CN" ? "经济领先暂不可用" : "Net worth lead unavailable";
-  const team = value >= 0 ? match.team_a?.name : match.team_b?.name;
-  const amount = Math.abs(value);
-  return locale === "zh-CN" ? `${team || "一方"} 经济领先 ${formatCompactNumber(amount)}` : `${team || "One side"} leads net worth by ${formatCompactNumber(amount)}`;
-}
-
-function formatCompactNumber(value: number): string {
-  if (value >= 1000) return `${(value / 1000).toFixed(value >= 10_000 ? 0 : 1)}k`;
-  return String(Math.round(value));
-}
-
-function phaseEmptyText(phase: MapSummary["phase"], locale: string): string {
-  if (phase === "PREMATCH" || phase === "UNKNOWN") return locale === "zh-CN" ? "比赛开始后会显示实时进程" : "Live state will appear after the match starts";
-  if (phase === "POSTMATCH" || phase === "AWAITING_RESULT") return locale === "zh-CN" ? "这场比赛没有可用的实时快照" : "No live snapshot is available for this match";
-  return locale === "zh-CN" ? "正在等待实时数据" : "Waiting for live data";
-}
-
 function scopeLabel(scope: Exclude<AiAccessScope, null>, locale: string): string {
-  if (locale !== "zh-CN") return scope === "GLOBAL" ? "Pro access" : scope === "SERIES" ? "Series access" : "Map access";
-  return scope === "GLOBAL" ? "Pro 权限" : scope === "SERIES" ? "系列赛权限" : "本局权限";
+  if (locale !== "zh-CN") {
+    return scope === "GLOBAL"
+      ? "Global access"
+      : scope === "EVENT"
+        ? "Event Pass"
+        : scope === "SERIES"
+        ? "Series Pass"
+          : scope === "FREE"
+            ? "Free group stage"
+            : scope === "POSTMATCH"
+              ? "Post-match public"
+              : "Map access";
+  }
+  return scope === "GLOBAL"
+    ? "全局权限"
+    : scope === "EVENT"
+      ? "赛事 Pass"
+      : scope === "SERIES"
+      ? "系列赛 Pass"
+      : scope === "FREE"
+        ? "Free 小组赛"
+        : scope === "POSTMATCH"
+          ? "赛后公开"
+          : "本局权限";
 }
 
 function actionLabel(decision: AiDecision, match: MapSummary, locale: string): string {

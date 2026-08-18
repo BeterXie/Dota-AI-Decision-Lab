@@ -6,11 +6,11 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.auth.models import UserAccountRecord
-from app.billing.models import BillingCheckoutRecord
 from app.db import Base
 from app.entitlements import PREMIUM_ENTITLEMENTS, EntitlementService, UserEntitlementRecord
+from app.models import CanonicalEvent
 from app.promotions import PromotionService, ReferralClaimError
-from app.promotions.models import ReferralAttributionRecord
+from app.promotions.models import CompetitionPassPurchaseRecord, ReferralAttributionRecord
 
 
 async def _fixture():
@@ -75,17 +75,18 @@ async def test_referral_cannot_be_claimed_after_first_paid_purchase() -> None:
     try:
         code = await service.ensure_referral_code(inviter_id)
         async with factory.begin() as session:
+            event = CanonicalEvent(name="Referral Event")
+            session.add(event)
+            await session.flush()
             session.add(
-                BillingCheckoutRecord(
+                CompetitionPassPurchaseRecord(
                     user_id=invited_id,
                     provider="paddle",
-                    checkout_ref="txn_already_paid",
+                    transaction_ref="txn_already_paid",
                     customer_ref="ctm_existing",
-                    offer_key="pro_30d",
                     price_ref="pri_existing",
-                    plan_key="PRO",
-                    recurring=False,
-                    grant_days=30,
+                    scope_type="EVENT",
+                    canonical_event_id=event.id,
                     status="COMPLETED",
                     completed_at=now,
                     created_at=now,

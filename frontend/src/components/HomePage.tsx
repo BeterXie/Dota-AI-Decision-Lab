@@ -1,15 +1,16 @@
 import React from "react";
 import type { MapSummary } from "../api";
-import { buildEventSummaries, eventHref, type EventStatus, type EventSummary } from "../events";
+import { buildEventSummaries, buildSeriesSummaries, eventHref, type EventStatus, type EventSummary } from "../events";
 import { useI18n } from "../i18n";
 import { matchHref } from "../matches";
 import { EventMark, TeamCrest, UiIcon } from "./VisualIdentity";
+
+const HOME_HERO_IMAGE = "/assets/heroes/home-hero-aegis.webp";
 
 interface HomePageProps {
   matches: MapSummary[];
   loading: boolean;
   signedIn: boolean;
-  hasPro: boolean;
   onLogin: () => void;
 }
 
@@ -17,18 +18,20 @@ export const HomePage: React.FC<HomePageProps> = ({
   matches,
   loading,
   signedIn,
-  hasPro,
   onLogin
 }) => {
   const { locale } = useI18n();
   const groups = React.useMemo(() => buildEventSummaries(matches), [matches]);
+  const series = React.useMemo(() => groups.flatMap((group) => buildSeriesSummaries(group)), [groups]);
   const featuredGroups = groups.filter((group) => group.status !== "COMPLETED").slice(0, 3);
-  const upcoming = matches
-    .filter((match) => match.phase === "PREMATCH")
+  const upcoming = series
+    .filter((item) => item.phase === "PREMATCH" || item.phase === "UNKNOWN")
+    .map((item) => item.representative)
     .sort(byScheduledAscending)
     .slice(0, 4);
-  const completed = matches
-    .filter((match) => match.phase === "POSTMATCH")
+  const completed = series
+    .filter((item) => item.phase === "POSTMATCH")
+    .map((item) => item.representative)
     .sort(byScheduledDescending)
     .slice(0, 4);
   const currentEventEmptyText = groups.length > 0
@@ -42,9 +45,10 @@ export const HomePage: React.FC<HomePageProps> = ({
   return (
     <div className="home-v2">
       <section className="home-hero product-container">
+        <img className="home-hero-background" src={HOME_HERO_IMAGE} alt="" loading="eager" decoding="async" />
         <div className="home-hero-copy">
           <span className="home-eyebrow">DOTA MATCH INTELLIGENCE</span>
-          <h1>{locale === "zh-CN" ? "看懂比赛，验证 AI，追踪赛后表现" : "Follow the match. Test the AI. See what held up."}</h1>
+          <h1>{locale === "zh-CN" ? "看懂比赛，验证 AI，追踪真实表现" : "Follow the match. Test the AI. Track real performance."}</h1>
           <p>
             {locale === "zh-CN"
               ? "追踪全球 Dota 赛事和比赛进程，对比 AI 在关键节点的判断，并在赛后用数据验证这些决策到底表现如何。"
@@ -52,14 +56,10 @@ export const HomePage: React.FC<HomePageProps> = ({
           </p>
           <div className="home-hero-actions">
             <a className="product-btn product-btn-primary" href="/events">{locale === "zh-CN" ? "探索赛事" : "Explore events"}<span>→</span></a>
-            <a className="product-btn product-btn-secondary" href="/performance">{locale === "zh-CN" ? "看看 AI 表现" : "See AI performance"}</a>
+            <a className="product-btn product-btn-secondary" href="#capabilities">{locale === "zh-CN" ? "了解功能" : "Explore features"}</a>
           </div>
         </div>
-        <div className="home-hero-art" aria-hidden="true">
-          <div className="hero-orbit orbit-one" /><div className="hero-orbit orbit-two" />
-          <div className="hero-aegis"><UiIcon name="trophy" size={48} /></div>
-          <div className="hero-grid-glow" />
-        </div>
+        <div className="home-hero-art" aria-hidden="true" />
       </section>
 
       <section className="product-container product-section" id="current-events">
@@ -90,19 +90,17 @@ export const HomePage: React.FC<HomePageProps> = ({
         </div>
       </section>
 
-      <section className="product-container product-section home-capabilities">
+      <section className="product-container product-section home-capabilities" id="capabilities">
         <article><span className="capability-icon radar-icon"><UiIcon name="clock" size={19} /></span><div><h3>{locale === "zh-CN" ? "比赛追踪" : "Match tracking"}</h3><p>{locale === "zh-CN" ? "赛程、比分、Draft、Live 数据和赛果都放在同一条比赛线上。" : "Schedule, score, Draft, live data and results in one match flow."}</p></div><a href="/events" aria-label={locale === "zh-CN" ? "进入比赛追踪" : "Open match tracking"}>›</a></article>
         <article><span className="capability-icon ai-icon"><UiIcon name="spark" size={19} /></span><div><h3>{locale === "zh-CN" ? "AI 决策对比" : "AI decision comparison"}</h3><p>{locale === "zh-CN" ? "查看不同模型在关键节点怎么判断，以及它们为什么做出不同选择。" : "Compare what models called at key moments and why they disagreed."}</p></div><a href="/review" aria-label={locale === "zh-CN" ? "查看 AI 决策" : "See AI decisions"}>›</a></article>
         <article><span className="capability-icon shadow-icon"><UiIcon name="layers" size={19} /></span><div><h3>{locale === "zh-CN" ? "Shadow 表现复盘" : "Shadow performance"}</h3><p>{locale === "zh-CN" ? "用相同模拟规则回看长期表现，不把模拟结果包装成真实收益。" : "Review long-run results under the same simulation rules without presenting them as real returns."}</p></div><a href="/performance" aria-label={locale === "zh-CN" ? "查看 AI 表现" : "See AI performance"}>›</a></article>
       </section>
 
-      {!hasPro && (
-        <section className="product-container home-pro-banner product-section">
-          <div className="home-pro-icon" aria-hidden="true"><UiIcon name="spark" size={24} /></div>
-          <div><h2>{locale === "zh-CN" ? "升级到 Pro，解锁 AI 决策、通知与完整复盘" : "Upgrade to Pro for AI decisions, alerts and full review"}</h2><p>{locale === "zh-CN" ? "比赛本身继续公开；Pro 解锁更深入的 AI 判断和跨赛事表现。" : "Matches stay public. Pro unlocks deeper AI calls and cross-event performance."}</p></div>
-          {signedIn ? <a className="product-btn pro-btn" href="/billing">{locale === "zh-CN" ? "查看 Pro 权益" : "See Pro plans"}<span>→</span></a> : <button className="product-btn pro-btn" type="button" onClick={onLogin}>{locale === "zh-CN" ? "登录并查看 Pro" : "Sign in for Pro"}<span>→</span></button>}
-        </section>
-      )}
+      <section className="product-container home-access-banner product-section">
+        <div className="home-access-icon" aria-hidden="true"><UiIcon name="spark" size={24} /></div>
+        <div><h2>{locale === "zh-CN" ? "先体验，再解锁你关心的比赛" : "Start free, then unlock the matches you follow"}</h2><p>{locale === "zh-CN" ? "小组赛 AI 决策、AI 表现和复盘免费开放；付费阶段的 AI 决策与实时通知按赛事或系列赛 Pass 解锁。" : "Group-stage AI decisions, AI Performance and Review are free; paid-stage AI and realtime alerts unlock with an Event or Series Pass."}</p></div>
+        {signedIn ? <a className="product-btn access-btn" href="/billing">{locale === "zh-CN" ? "查看赛事 Pass" : "View competition passes"}<span>→</span></a> : <button className="product-btn access-btn" type="button" onClick={onLogin}>{locale === "zh-CN" ? "登录后查看 Pass" : "Sign in to view passes"}<span>→</span></button>}
+      </section>
     </div>
   );
 };

@@ -73,8 +73,9 @@ test("keeps matches dominant and access guidance secondary on event detail", asy
     const asideBox = await aside.boundingBox();
     expect(scheduleBox).not.toBeNull();
     expect(asideBox).not.toBeNull();
-    expect(scheduleBox!.width).toBeGreaterThan(1000);
-    expect(asideBox!.y).toBeGreaterThanOrEqual(scheduleBox!.y + scheduleBox!.height - 1);
+    expect(scheduleBox!.width).toBeGreaterThan(800);
+    expect(asideBox!.x).toBeGreaterThan(scheduleBox!.x + scheduleBox!.width - 1);
+    expect(Math.abs(asideBox!.y - scheduleBox!.y)).toBeLessThan(2);
   }
 
   const noOverflow = await page.evaluate(

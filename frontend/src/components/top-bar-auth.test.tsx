@@ -34,11 +34,11 @@ function renderTopBar({
   return onLogin;
 }
 
-test("top bar exposes the real login action and Pro billing route", () => {
+test("top bar exposes the real login action and pass billing route", () => {
   const onLogin = vi.fn();
   renderTopBar({ onLogin });
 
-  expect(screen.getByRole("link", { name: /Get Pro/ })).toHaveAttribute("href", "/billing");
+  expect(screen.getByRole("link", { name: /View passes/ })).toHaveAttribute("href", "/billing");
   fireEvent.click(screen.getByRole("button", { name: "Log in" }));
   expect(onLogin).toHaveBeenCalledTimes(1);
 });
@@ -47,7 +47,7 @@ test("top bar makes disabled authentication visible instead of hiding the entry"
   renderTopBar({ authEnabled: false });
 
   expect(screen.getByRole("button", { name: "Login off" })).toBeDisabled();
-  expect(screen.getByRole("link", { name: /Get Pro/ })).toHaveAttribute("href", "/billing");
+  expect(screen.getByRole("link", { name: /View passes/ })).toHaveAttribute("href", "/billing");
 });
 
 test("signed-in users get explicit account and sign-out actions", () => {
@@ -56,7 +56,7 @@ test("signed-in users get explicit account and sign-out actions", () => {
   expect(screen.getByRole("link", { name: "Account" })).toHaveAttribute("href", "/billing");
   expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
   expect(screen.queryByRole("button", { name: "Log in" })).not.toBeInTheDocument();
-  expect(screen.getByRole("link", { name: /Get Pro/ })).toHaveAttribute("href", "/billing");
+  expect(screen.getByRole("link", { name: /View passes/ })).toHaveAttribute("href", "/billing");
 });
 
 test("sign-out failures are visible instead of silently leaving a stale account state", async () => {

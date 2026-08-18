@@ -21,6 +21,7 @@ from app.models import (
 from app.providers.common import TimedPayload
 from app.providers.raybet.http import RayBetHttpClient, RayBetHttpPool
 from app.providers.raybet.parser import (
+    normalize_odds_status,
     parse_matches,
     parse_odds_bootstrap,
     parse_odds_registry,
@@ -30,6 +31,13 @@ from app.providers.raybet.socket import RayBetSocketClient
 from app.repositories.raw import RawEventRepository
 
 FIXTURES = Path(__file__).parent / "fixtures"
+
+
+def test_raybet_status_normalization_only_trusts_explicit_labels() -> None:
+    assert normalize_odds_status("active") == "OPEN_CONFIRMED"
+    assert normalize_odds_status("suspended") == "SUSPENDED"
+    assert normalize_odds_status("settled") == "CLOSED"
+    assert normalize_odds_status(1) == "UNKNOWN"
 
 
 def test_raybet_hosts_prefer_list_then_legacy_singular_then_defaults() -> None:

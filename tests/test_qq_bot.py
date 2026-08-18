@@ -23,6 +23,7 @@ from app.providers.qq_bot.models import (
 )
 from app.providers.qq_bot.service import QQBotService
 from app.providers.qq_bot.storage import QQBotStore
+from app.providers.qq_bot.user_service import UserScopedQQBotService
 from app.snapshots.repository import SnapshotRepository
 
 
@@ -339,6 +340,80 @@ async def test_service_sends_decision_to_configured_and_subscribed_targets(tmp_p
 
 
 @pytest.mark.asyncio
+async def test_user_scoped_service_keeps_explicit_and_subscribed_group_targets(
+    tmp_path: Path,
+) -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    store = QQBotStore(tmp_path)
+    store.save_account(_account(tmp_path))
+    store.save_contact(_contact("group", "subscribed-group"))
+    store.save_contact(_contact("group", "disabled-group", subscribed=False))
+    client = RecordingBridgeClient()
+    service = UserScopedQQBotService(
+        client=client,
+        store=store,
+        session_factory=factory,
+        jobs=JobRepository(),
+        configured_targets=(
+            _contact("c2c", "configured-user"),
+            _contact("group", "configured-group"),
+        ),
+        max_decision_age_seconds=10**9,
+    )
+
+    async with factory() as session, session.begin():
+        snapshot = await SnapshotRepository().persist(
+            session,
+            canonical_map_id=None,
+            decision_at=datetime(2026, 8, 16, 12, 0, tzinfo=UTC),
+            mode="LIVE_BASIC",
+            identity={
+                "team_a": {"id": "team-a", "name": "OG"},
+                "team_b": {"id": "team-b", "name": "HULIGANI"},
+            },
+            market={},
+            draft=None,
+            history={},
+            live={"game_time_seconds": 600},
+            quality={"eligible": True, "blockers": [], "warnings": []},
+        )
+        decision = AiDecisionRecord(
+            id=uuid4(),
+            snapshot_id=snapshot.snapshot_id,
+            snapshot_hash=snapshot.snapshot_hash,
+            provider="openai",
+            model="gpt-test",
+            model_version="gpt-test",
+            prompt_version="prompt-v1",
+            decision_policy_version="policy-v1",
+            ai_view_version="ai-view-v2",
+            request_started_at=snapshot.decision_at,
+            response_received_at=snapshot.decision_at,
+            latency_seconds=1.0,
+            raw_response={},
+            normalized_response={"action": "BUY_A", "primary_reasons": ["draft"]},
+            parse_status="SUCCESS",
+        )
+        sent = await service.send_decision_notification(
+            snapshot=snapshot,
+            decisions=[decision],
+        )
+
+    assert sent == 3
+    assert {(item["scope"], item["target_id"]) for item in client.sent} == {
+        ("c2c", "configured-user"),
+        ("group", "configured-group"),
+        ("group", "subscribed-group"),
+    }
+    assert all(str(decision.id) in item["idempotency_key"] for item in client.sent)
+    await service.stop()
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_service_suppresses_stale_decision(tmp_path: Path) -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:
@@ -470,3 +545,56 @@ async def test_service_ignores_unmentioned_group_message_when_required(tmp_path:
     assert store.contact("group", "group-1") is None
     await service.stop()
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_user_scoped_group_subscription_honors_allowlist_and_mention(
+    tmp_path: Path,
+) -> None:
+    store = QQBotStore(tmp_path)
+    client = RecordingBridgeClient()
+    service = UserScopedQQBotService(
+        client=client,
+        store=store,
+        session_factory=object(),
+        jobs=object(),
+        allowed_group_ids=("allowed-group",),
+        group_require_mention=True,
+    )
+
+    def message(*, target_id: str, text: str, mentioned: bool) -> QQInboundMessage:
+        return QQInboundMessage(
+            event_cursor=1,
+            scope="group",
+            target_id=target_id,
+            sender_id="member-1",
+            message_id=f"{target_id}:{text}",
+            text=text,
+            bot_mentioned=mentioned,
+        )
+
+    await service._handle_message(
+        object(),
+        message(target_id="allowed-group", text="订阅通知", mentioned=True),
+    )
+    assert store.contact("group", "allowed-group").subscribed is True
+
+    sent_before = len(client.sent)
+    await service._handle_message(
+        object(),
+        message(target_id="other-group", text="订阅通知", mentioned=True),
+    )
+    await service._handle_message(
+        object(),
+        message(target_id="allowed-group", text="退订通知", mentioned=False),
+    )
+    assert len(client.sent) == sent_before
+    assert store.contact("group", "allowed-group").subscribed is True
+
+    await service._handle_message(
+        object(),
+        message(target_id="allowed-group", text="退订通知", mentioned=True),
+    )
+    assert store.contact("group", "allowed-group").subscribed is False
+    assert "已退订" in client.sent[-1]["text"]
+    await service.stop()

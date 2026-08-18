@@ -6,18 +6,18 @@ Dota AI Decision Lab uses passwordless email authentication as the identity foun
 
 Ordinary match browsing is public. A visitor does not need an account to view match identity, teams, draft/lineup information, market data, live state, or ordinary historical match context.
 
-Authentication is required for account-scoped or operational surfaces. Premium AI intelligence requires both a valid authenticated session and the `ai_decisions` entitlement. User-level real-time delivery requires the separate `realtime_notifications` entitlement so notification access can evolve independently from page access.
+Authentication is required for account-scoped or operational surfaces. AI decisions for an unsettled map require a valid authenticated session plus either Free group-stage access or the `ai_decisions` entitlement. Once a `MapResultRecord` confirms the map is settled, the map's safe AI decision projection is public. User-level real-time delivery requires the separate `realtime_notifications` entitlement so notification access can evolve independently from page access.
 
 The current HTTP policy is:
 
-- `PUBLIC`: `/health`, `/ready`, `/api/auth/*`, `/api/runtime`, `/api/matches`, ordinary `/api/maps/{id}` and other ordinary match-data APIs.
+- `PUBLIC`: `/health`, `/ready`, `/api/auth/*`, `/api/runtime`, `/api/matches`, ordinary `/api/maps/{id}`, settled `/api/maps/{id}/ai-decisions`, `/api/ai-performance`, `/api/review/*`, and other ordinary match-data APIs.
 - `AUTHENTICATED`: `/metrics`, `/api/jobs/summary`, and future `/api/account/*` routes.
-- `ENTITLED(ai_decisions)`: `/api/maps/{id}/ai-decisions`, `/api/snapshots/*`, and `/api/review/*`.
+- In-progress `/api/maps/{id}/ai-decisions` access is checked by the route; `/api/snapshots/*` remains entitlement-protected.
 - Notification Center endpoints under `/api/notifications/*` perform an authenticated-user and `realtime_notifications` entitlement check before reading or mutating user settings.
 
 `/ws/status` remains public because it carries ordinary live-refresh events used by the public match experience. Any future private WebSocket path must require authentication and, where appropriate, an explicit entitlement.
 
-Public match responses must never contain the premium decision payload. They may expose non-sensitive analysis readiness metadata such as whether a decision snapshot exists, when analysis last updated, and how many models completed. They must not expose BUY/PASS direction, confidence, fair probability, stake, primary reasons, counterarguments, frozen AI input payloads, or decision-linked future-odds captures.
+Ordinary public match responses must never contain the premium decision payload. They may expose non-sensitive analysis readiness metadata such as whether a decision snapshot exists, when analysis last updated, and how many models completed. The separate settled-map AI endpoint may expose the normalized decision and post-match evaluation, but never exposes token counts, bankroll/stake diagnostics, snapshot hashes, frozen AI input payloads, or decision-linked future-odds captures to an anonymous viewer.
 
 Authentication does **not** enable remote deployment by itself. The runtime remains loopback-only; TLS, reverse-proxy trust, origin policy, cookie security behind HTTPS, and remote deployment hardening must be designed as a separate explicit mode before non-loopback serving is allowed.
 
@@ -168,9 +168,10 @@ Changes to authentication, premium authorization, or Notification Center must re
 - session authentication, expiry/revocation behavior, and logout;
 - `HttpOnly` + `SameSite=Strict` cookie attributes;
 - anonymous ordinary match access;
-- `401` for unauthenticated premium access;
+- `401` for unauthenticated in-progress AI access;
 - `403` for authenticated users missing a required entitlement;
-- successful premium access only with an active entitlement;
+- successful in-progress AI access only with Free group-stage access or an active entitlement;
+- anonymous settled-map AI access through the redacted post-match projection;
 - expired/future/revoked entitlement handling;
 - public match payload redaction of AI decisions;
 - verified Notification Center destination ownership;
@@ -178,9 +179,9 @@ Changes to authentication, premium authorization, or Notification Center must re
 - per-target delivery idempotency;
 - preference and entitlement rechecks before send;
 - Free-user Notification Center lock state and entitled-user pairing flow;
-- authentication-disabled backward compatibility for public APIs while premium APIs remain closed;
+- authentication-disabled behavior for public settled-map AI while unsettled AI remains closed;
 - Alembic upgrade/check from a clean PostgreSQL database.
 
 ## Phase scope
 
-Phases 2-4 now cover public/premium API separation, capability entitlements, and the user Notification Center. They do **not** implement a payment processor, checkout, subscription renewal, webhook billing events, or production remote-host deployment hardening. Those systems should integrate with the existing entitlement records rather than bypass them.
+The current implementation covers public/premium API separation, capability entitlements, one-time competition-pass checkout/webhooks, and the user Notification Center. Production remote-host deployment hardening remains a separate explicit mode. Payment integrations must continue to use the server-owned purchase mapping and entitlement ledger.

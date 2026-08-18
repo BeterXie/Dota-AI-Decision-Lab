@@ -12,12 +12,13 @@ import {
   type AiQualityPolicy
 } from "../performanceApi";
 import { useI18n } from "../i18n";
+import { UiIcon } from "./VisualIdentity";
 import "./ai-performance.css";
 
 const IntelligenceChart = lazy(() => import("../Chart"));
 
 export function AiPerformancePage() {
-  const { locale, setLocale } = useI18n();
+  const { locale } = useI18n();
   const [selectedExperimentKey, setSelectedExperimentKey] = useState<string | null>(null);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [search, setSearch] = useState("");
@@ -104,54 +105,44 @@ export function AiPerformancePage() {
 
   return (
     <div className="performance-page">
-      <header className="performance-header">
-        <div className="performance-brand">
-          <a href="/" className="performance-back">
-            ← {locale === "zh-CN" ? "返回比赛" : "Back to matches"}
-          </a>
-          <div>
-            <span className="performance-kicker">AI SHADOW COMPETITION</span>
-            <h1>{locale === "zh-CN" ? "AI 盈利与质量" : "AI Performance"}</h1>
-          </div>
-        </div>
-        <div className="performance-header-actions">
-          <a href="/review">{locale === "zh-CN" ? "比赛复盘" : "Match review"}</a>
-          <button className={locale === "zh-CN" ? "active" : ""} onClick={() => setLocale("zh-CN")}>
-            中文
-          </button>
-          <button className={locale === "en" ? "active" : ""} onClick={() => setLocale("en")}>
-            EN
-          </button>
-          <button onClick={refresh}>{locale === "zh-CN" ? "刷新" : "Refresh"}</button>
-        </div>
-      </header>
-
-      <main className="performance-main">
+      <div className="performance-main">
         <section className="performance-intro">
           <div>
-            <span className="performance-kicker">SAME STARTING BANKROLL · SHADOW SETTLEMENT</span>
-            <h2>
+            <span className="performance-kicker">{locale === "zh-CN" ? "AI 表现 / SHADOW 结算" : "AI PERFORMANCE / SHADOW SETTLEMENT"}</span>
+            <h1>
               {locale === "zh-CN"
-                ? "同样的赛事模拟本金，谁的 Shadow 组合表现更好？"
-                : "Same shadow bankroll. Which AI portfolio performed best?"}
-            </h2>
+                ? "AI 表现榜"
+                : "AI Performance"}
+            </h1>
             <p>
               {locale === "zh-CN"
-                ? "每个 AI experiment 在每个赛事独立获得固定 Shadow 启动资金，所有 Map 共用同一资金池。这里展示的是按已记录赔率进行模拟结算后的 Shadow PnL，不代表真实账户下注、真实资金收益或博彩公司实际成交。先看收益与风险，再下钻到预测质量、赔率变化和逐笔仓位。"
-                : "Each AI experiment receives a fixed shadow bankroll per event and shares it across every map. Shadow P&L is simulated from recorded odds; it is not a live account return, real-money betting result, or bookmaker execution confirmation. Start with return and risk, then drill into prediction quality, odds movement, and every position."}
+                ? "所有模型使用同一份模拟资金和结算规则进行比较。榜单记录 Shadow 收益、命中率与风险，不涉及真实资金或真实下注。"
+                : "Every model is compared with the same simulated bankroll and settlement rules. The leaderboard tracks shadow return, hit rate and risk, not real money or real bets."}
             </p>
           </div>
-          <span className="performance-shadow-badge">SHADOW ONLY</span>
+          <div className="performance-intro-actions">
+            <span className="performance-shadow-badge">SHADOW ONLY</span>
+            <a href="/review">{locale === "zh-CN" ? "查看复盘" : "Open review"}</a>
+            <button type="button" onClick={refresh}>{locale === "zh-CN" ? "刷新" : "Refresh"}</button>
+          </div>
         </section>
 
         {leaderboard.isLoading ? (
           <StateBlock text={locale === "zh-CN" ? "正在计算 AI 排行榜…" : "Loading AI leaderboard…"} />
         ) : leaderboard.error ? (
           <StateBlock error text={locale === "zh-CN" ? "AI 排行榜加载失败。" : "Failed to load AI leaderboard."} onRetry={() => void leaderboard.refetch()} />
-        ) : filtered.length === 0 ? (
+        ) : (leaderboard.data?.experiments.length ?? 0) === 0 ? (
           <StateBlock text={locale === "zh-CN" ? "没有匹配的 AI experiment。" : "No matching AI experiments."} />
         ) : (
           <>
+            {selectedExperiment && (
+              <section className="performance-kpi-strip" aria-label={locale === "zh-CN" ? "AI 表现概览" : "AI performance overview"}>
+                <PerformanceKpi icon="spark" label={locale === "zh-CN" ? "Shadow 总收益" : "Shadow PnL"} value={signedMoney(selectedExperiment.realized_pnl, locale)} tone={tone(selectedExperiment.realized_pnl)} />
+                <PerformanceKpi icon="trophy" label={locale === "zh-CN" ? "命中率" : "Hit rate"} value={rate(selectedExperiment.hit_rate, locale)} />
+                <PerformanceKpi icon="layers" label={locale === "zh-CN" ? "最大回撤" : "Max drawdown"} value={rate(-selectedExperiment.worst_event_drawdown_pct, locale)} tone="negative" />
+                <PerformanceKpi icon="clock" label={locale === "zh-CN" ? "已结算场次" : "Settled positions"} value={`${selectedExperiment.bet_count}`} />
+              </section>
+            )}
             <section className="performance-overview-grid">
               <div className="performance-leaderboard-panel">
                 <div className="performance-section-heading">
@@ -177,7 +168,7 @@ export function AiPerformancePage() {
                   <span className="performance-col-dd">{locale === "zh-CN" ? "最差回撤" : "Worst DD"}</span>
                   <span className="performance-col-events">{locale === "zh-CN" ? "赛事" : "Events"}</span>
                 </div>
-                <div className="performance-leaderboard" role="list">
+                <div className="performance-leaderboard">
                   {filtered.map((row) => (
                     <LeaderboardRow
                       key={identityKey(row.experiment)}
@@ -191,6 +182,13 @@ export function AiPerformancePage() {
                       }}
                     />
                   ))}
+                  {filtered.length === 0 && (
+                    <div className="performance-filter-empty">
+                      {locale === "zh-CN"
+                        ? "没有匹配的 AI 模型，请清空或修改搜索词。"
+                        : "No AI models match. Clear or change the search query."}
+                    </div>
+                  )}
                 </div>
               </div>
 
@@ -216,6 +214,12 @@ export function AiPerformancePage() {
                     <span>{selectedExperiment.experiment.prompt_version}</span>
                     <span>{selectedExperiment.experiment.decision_policy_version}</span>
                     <span>{selectedExperiment.experiment.ai_view_version}</span>
+                  </div>
+                  <div className="performance-summary-guide">
+                    <strong>{locale === "zh-CN" ? "如何理解榜单" : "How to read this leaderboard"}</strong>
+                    <span>{locale === "zh-CN" ? "Shadow 资金：所有模型使用统一模拟本金。" : "Shadow capital: every model uses the same simulated bankroll."}</span>
+                    <span>{locale === "zh-CN" ? "统一口径：同一快照、时间和结算规则。" : "Same basis: identical snapshots, timing and settlement rules."}</span>
+                    <span>{locale === "zh-CN" ? "质量优先：收益需结合回撤与样本量判断。" : "Quality first: read return together with drawdown and sample size."}</span>
                   </div>
                 </section>
               )}
@@ -266,8 +270,27 @@ export function AiPerformancePage() {
             )}
           </>
         )}
-      </main>
+      </div>
     </div>
+  );
+}
+
+function PerformanceKpi({
+  icon,
+  label,
+  value,
+  tone: toneClass
+}: {
+  icon: "clock" | "layers" | "spark" | "trophy";
+  label: string;
+  value: string;
+  tone?: string;
+}) {
+  return (
+    <article className="performance-kpi">
+      <span className={`performance-kpi-icon is-${icon}`}><UiIcon name={icon} size={21} /></span>
+      <div><span>{label}</span><strong className={toneClass}>{value}</strong></div>
+    </article>
   );
 }
 

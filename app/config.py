@@ -123,12 +123,9 @@ class Settings(BaseSettings):
     # Optional approved Paddle checkout URL. Blank uses the account's default
     # payment link configured in Paddle.
     paddle_checkout_url: str | None = None
-    # Catalog price ids are intentionally configuration, not code. The monthly
-    # price is recurring; 30/365-day prices are one-time passes so WeChat Pay can
-    # be offered without pretending it supports recurring billing.
-    paddle_pro_monthly_price_id: str = ""
-    paddle_pro_30d_price_id: str = ""
-    paddle_pro_365d_price_id: str = ""
+    # Catalog price ids are one-time, non-expiring competition passes.
+    paddle_series_pass_price_id: str = ""
+    paddle_event_pass_price_id: str = ""
     paddle_timeout_seconds: float = Field(default=15.0, gt=0)
     paddle_webhook_tolerance_seconds: int = Field(default=5, ge=1, le=300)
 
@@ -312,14 +309,10 @@ class Settings(BaseSettings):
             missing.append("PADDLE_API_KEY")
         if self.paddle_webhook_secret is None:
             missing.append("PADDLE_WEBHOOK_SECRET")
-        if not any(
-            (
-                self.paddle_pro_monthly_price_id.strip(),
-                self.paddle_pro_30d_price_id.strip(),
-                self.paddle_pro_365d_price_id.strip(),
-            )
-        ):
-            missing.append("PADDLE_PRO_*_PRICE_ID")
+        if not self.paddle_series_pass_price_id.strip():
+            missing.append("PADDLE_SERIES_PASS_PRICE_ID")
+        if not self.paddle_event_pass_price_id.strip():
+            missing.append("PADDLE_EVENT_PASS_PRICE_ID")
         return tuple(missing)
 
 

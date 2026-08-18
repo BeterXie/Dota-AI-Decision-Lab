@@ -156,7 +156,7 @@ async def test_closing_capture_is_explicit_and_uses_same_market_pair() -> None:
                     selection_team_id=team_id,
                     price=Decimal(price),
                     implied_probability=1 / float(price),
-                    normalized_status="UNKNOWN",
+                    normalized_status="OPEN_CONFIRMED",
                     metadata_version="registry-v1",
                     received_at=decision_at - timedelta(seconds=1),
                     raw_event_id=uuid4(),

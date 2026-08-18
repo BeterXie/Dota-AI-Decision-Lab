@@ -13,7 +13,7 @@
 .account-v2-header h1 {
   margin: 8px 0 8px;
   font-size: clamp(30px, 4vw, 42px);
-  letter-spacing: -0.04em;
+  letter-spacing: 0;
 }
 
 .account-v2-header p,
@@ -139,7 +139,7 @@
 .account-v2-card h2 {
   margin: 0 0 4px;
   font-size: 16px;
-  letter-spacing: -0.02em;
+  letter-spacing: 0;
 }
 
 .account-v2-card-heading p {
@@ -272,7 +272,7 @@
 .account-v2-gate-card h1 {
   margin: 8px 0 12px;
   font-size: clamp(28px, 5vw, 40px);
-  letter-spacing: -0.04em;
+  letter-spacing: 0;
 }
 
 .account-v2-gate-card p {

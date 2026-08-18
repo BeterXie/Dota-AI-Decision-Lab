@@ -1,3 +1,8 @@
+from app.promotions.paddle_event import (
+    EventPassCheckoutConflict,
+    EventPassWebhookResult,
+    PaddleEventPassService,
+)
 from app.promotions.paddle_series import (
     PaddleSeriesPassService,
     SeriesPassCheckoutConflict,
@@ -11,9 +16,12 @@ from app.promotions.service import (
 
 __all__ = [
     "PaddleSeriesPassService",
+    "PaddleEventPassService",
     "PromotionDisabledError",
     "PromotionService",
     "ReferralClaimError",
     "SeriesPassCheckoutConflict",
     "SeriesPassWebhookResult",
+    "EventPassCheckoutConflict",
+    "EventPassWebhookResult",
 ]

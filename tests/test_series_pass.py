@@ -14,13 +14,14 @@ from app.entitlements import (
     REALTIME_NOTIFICATIONS_ENTITLEMENT,
     EntitlementService,
 )
-from app.models import CanonicalSeries, CanonicalTeam
-from app.promotions import SeriesPassCheckoutConflict
-from app.promotions.models import SeriesPassPurchaseRecord
+from app.models import CanonicalEvent, CanonicalSeries, CanonicalTeam
+from app.promotions.models import CompetitionPassPurchaseRecord
+from app.promotions.paddle_event import PaddleEventPassService
 from app.promotions.paddle_series import PaddleSeriesPassService
 
-_SECRET = "pdl_series_test_webhook_secret_long_enough"
-_PRICE = "pri_series_pass"
+_SECRET = "pdl_pass_test_webhook_secret_long_enough"
+_SERIES_PRICE = "pri_series_pass"
+_EVENT_PRICE = "pri_event_pass"
 
 
 async def _fixture():
@@ -30,58 +31,93 @@ async def _fixture():
     factory = async_sessionmaker(engine, expire_on_commit=False)
     now = datetime.now(UTC).replace(microsecond=0)
     async with factory.begin() as session:
+        event = CanonicalEvent(name="Test Event")
+        other_event = CanonicalEvent(name="Other Event")
         team_a = CanonicalTeam(name="Alpha")
         team_b = CanonicalTeam(name="Beta")
         team_c = CanonicalTeam(name="Gamma")
-        session.add_all([team_a, team_b, team_c])
+        session.add_all([event, other_event, team_a, team_b, team_c])
         await session.flush()
         series = CanonicalSeries(
+            event_id=event.id,
             team_a_id=team_a.id,
             team_b_id=team_b.id,
+            stage_key="PAID_STAGE",
             best_of=3,
             scheduled_at=now,
         )
         other_series = CanonicalSeries(
+            event_id=event.id,
             team_a_id=team_a.id,
             team_b_id=team_c.id,
+            stage_key="PAID_STAGE",
+            best_of=3,
+            scheduled_at=now,
+        )
+        foreign_series = CanonicalSeries(
+            event_id=other_event.id,
+            team_a_id=team_a.id,
+            team_b_id=team_c.id,
+            stage_key="PAID_STAGE",
             best_of=3,
             scheduled_at=now,
         )
         user = UserAccountRecord(
-            email="series@example.com",
+            email="pass@example.com",
             email_verified_at=now,
             last_login_at=now,
             created_at=now,
         )
-        session.add_all([series, other_series, user])
+        session.add_all([series, other_series, foreign_series, user])
         await session.flush()
-        series_id = series.id
-        other_series_id = other_series.id
-        user_id = user.id
+        ids = (event.id, other_event.id, series.id, other_series.id, foreign_series.id, user.id)
         session.add(
-            SeriesPassPurchaseRecord(
-                user_id=user_id,
+            CompetitionPassPurchaseRecord(
+                user_id=user.id,
                 provider="paddle",
                 transaction_ref="txn_series",
-                customer_ref="ctm_series",
-                canonical_series_id=series_id,
-                price_ref=_PRICE,
+                customer_ref="ctm_pass",
+                scope_type="SERIES",
+                canonical_series_id=series.id,
+                price_ref=_SERIES_PRICE,
                 status="PENDING",
                 payment_blocked=False,
                 created_at=now,
                 updated_at=now,
             )
         )
-    service = PaddleSeriesPassService(
+        session.add(
+            CompetitionPassPurchaseRecord(
+                user_id=user.id,
+                provider="paddle",
+                transaction_ref="txn_event",
+                customer_ref="ctm_pass",
+                scope_type="EVENT",
+                canonical_event_id=event.id,
+                price_ref=_EVENT_PRICE,
+                status="PENDING",
+                payment_blocked=False,
+                created_at=now,
+                updated_at=now,
+            )
+        )
+    series_service = PaddleSeriesPassService(
         factory,
         api_key="pdl_sdbx_test",
         webhook_secret=_SECRET,
         api_base_url="https://sandbox-api.paddle.com",
-        price_id=_PRICE,
-        access_days=3,
+        price_id=_SERIES_PRICE,
         webhook_tolerance_seconds=5,
     )
-    return engine, factory, service, user_id, series_id, other_series_id, now
+    event_service = PaddleEventPassService(
+        factory,
+        api_key="pdl_sdbx_test",
+        webhook_secret=_SECRET,
+        api_base_url="https://sandbox-api.paddle.com",
+        price_id=_EVENT_PRICE,
+        webhook_tolerance_seconds=5,
+    )
+    return engine, factory, series_service, event_service, ids, now
 
 
 def _body(*, event_id: str, event_type: str, occurred_at: datetime, data: dict) -> bytes:
@@ -96,7 +132,7 @@ def _body(*, event_id: str, event_type: str, occurred_at: datetime, data: dict) 
     ).encode()
 
 
-async def _deliver(service: PaddleSeriesPassService, body: bytes, *, now: datetime):
+async def _deliver(service, body: bytes, *, now: datetime):
     return await service.process_webhook(
         raw_body=body,
         signature_header=paddle_signature_for_test(
@@ -108,145 +144,133 @@ async def _deliver(service: PaddleSeriesPassService, body: bytes, *, now: dateti
     )
 
 
+def _transaction(*, transaction_ref: str, price: str, user_id, offer: str) -> dict:
+    return {
+        "id": transaction_ref,
+        "customer_id": "ctm_pass",
+        "status": "completed",
+        "items": [{"price": {"id": price}}],
+        "custom_data": {
+            "dota_user_id": str(user_id),
+            "dota_offer": offer,
+        },
+    }
+
+
 @pytest.mark.asyncio
-async def test_series_pass_grants_only_purchased_series_and_refund_revokes() -> None:
-    engine, factory, service, user_id, series_id, other_series_id, now = await _fixture()
+async def test_series_pass_is_permanent_and_only_covers_one_series() -> None:
+    engine, factory, series_service, _, ids, now = await _fixture()
+    _, _, series_id, other_series_id, _, user_id = ids
     entitlements = EntitlementService(factory)
     try:
-        purchase = _body(
+        body = _body(
             event_id="evt_series_paid",
             event_type="transaction.completed",
             occurred_at=now,
-            data={
-                "id": "txn_series",
-                "customer_id": "ctm_series",
-                "status": "completed",
-                "items": [{"price": {"id": _PRICE}}],
-                "custom_data": {
-                    "dota_user_id": str(user_id),
-                    "dota_offer": "series_pass",
-                },
-            },
+            data=_transaction(
+                transaction_ref="txn_series",
+                price=_SERIES_PRICE,
+                user_id=user_id,
+                offer="series_pass",
+            ),
         )
-        first = await _deliver(service, purchase, now=now)
-        duplicate = await _deliver(service, purchase, now=now)
-        assert first.activated is True
+        result = await _deliver(series_service, body, now=now)
+        duplicate = await _deliver(series_service, body, now=now)
+        assert result.activated is True
         assert duplicate.duplicate is True
-        assert await entitlements.active_entitlements(user_id, now=now) == ()
         for entitlement in (AI_DECISIONS_ENTITLEMENT, REALTIME_NOTIFICATIONS_ENTITLEMENT):
-            assert (
-                await entitlements.has_resource_entitlement(
-                    user_id,
-                    entitlement,
-                    canonical_series_id=series_id,
-                    now=now + timedelta(hours=1),
-                )
-                is True
+            assert await entitlements.has_resource_entitlement(
+                user_id,
+                entitlement,
+                canonical_series_id=series_id,
+                now=now + timedelta(days=365),
             )
-            assert (
-                await entitlements.has_resource_entitlement(
-                    user_id,
-                    entitlement,
-                    canonical_series_id=other_series_id,
-                    now=now + timedelta(hours=1),
-                )
-                is False
+            assert not await entitlements.has_resource_entitlement(
+                user_id,
+                entitlement,
+                canonical_series_id=other_series_id,
+                now=now + timedelta(days=365),
             )
+    finally:
+        await engine.dispose()
 
-        refunded_at = now + timedelta(hours=2)
+
+@pytest.mark.asyncio
+async def test_event_pass_covers_all_series_in_event_and_refund_revokes() -> None:
+    engine, factory, _, event_service, ids, now = await _fixture()
+    event_id, _, series_id, other_series_id, foreign_series_id, user_id = ids
+    entitlements = EntitlementService(factory)
+    try:
+        purchase = _body(
+            event_id="evt_event_paid",
+            event_type="transaction.completed",
+            occurred_at=now,
+            data=_transaction(
+                transaction_ref="txn_event",
+                price=_EVENT_PRICE,
+                user_id=user_id,
+                offer="event_pass",
+            ),
+        )
+        result = await _deliver(event_service, purchase, now=now)
+        assert result.activated is True
+        assert await entitlements.access_scope(
+            user_id,
+            AI_DECISIONS_ENTITLEMENT,
+            canonical_event_id=event_id,
+            canonical_series_id=series_id,
+            now=now + timedelta(days=365),
+        ) == "EVENT"
+        assert await entitlements.has_resource_entitlement(
+            user_id,
+            AI_DECISIONS_ENTITLEMENT,
+            canonical_series_id=other_series_id,
+            now=now + timedelta(days=365),
+        )
+        assert not await entitlements.has_resource_entitlement(
+            user_id,
+            AI_DECISIONS_ENTITLEMENT,
+            canonical_series_id=foreign_series_id,
+            now=now + timedelta(days=365),
+        )
+
+        refund_at = now + timedelta(hours=1)
         refund = _body(
-            event_id="evt_series_refund",
+            event_id="evt_event_refund",
             event_type="adjustment.updated",
-            occurred_at=refunded_at,
+            occurred_at=refund_at,
             data={
-                "id": "adj_series",
+                "id": "adj_event",
                 "action": "refund",
                 "type": "full",
                 "status": "approved",
-                "transaction_id": "txn_series",
+                "transaction_id": "txn_event",
             },
         )
-        result = await _deliver(service, refund, now=refunded_at)
-        assert result.revoked is True
-        assert (
-            await entitlements.has_resource_entitlement(
-                user_id,
-                AI_DECISIONS_ENTITLEMENT,
-                canonical_series_id=series_id,
-                now=refunded_at,
-            )
-            is False
+        revoked = await _deliver(event_service, refund, now=refund_at)
+        assert revoked.revoked is True
+        assert not await entitlements.has_resource_entitlement(
+            user_id,
+            AI_DECISIONS_ENTITLEMENT,
+            canonical_series_id=other_series_id,
+            now=refund_at,
         )
     finally:
         await engine.dispose()
 
 
 @pytest.mark.asyncio
-async def test_payment_block_prevents_later_completed_event_from_regranting() -> None:
-    engine, factory, service, user_id, series_id, _, now = await _fixture()
-    entitlements = EntitlementService(factory)
-    try:
-        refund = _body(
-            event_id="evt_block_first",
-            event_type="adjustment.updated",
-            occurred_at=now,
-            data={
-                "id": "adj_block",
-                "action": "chargeback",
-                "type": "full",
-                "status": "approved",
-                "transaction_id": "txn_series",
-            },
-        )
-        await _deliver(service, refund, now=now)
+async def test_pass_checkout_binds_the_selected_series_before_payment() -> None:
+    engine, factory, service, _, ids, _ = await _fixture()
+    _, _, series_id, _, _, user_id = ids
+    requests: list[dict] = []
 
-        later = now + timedelta(minutes=1)
-        purchase = _body(
-            event_id="evt_late_completed",
-            event_type="transaction.completed",
-            occurred_at=later,
-            data={
-                "id": "txn_series",
-                "customer_id": "ctm_series",
-                "status": "completed",
-                "items": [{"price": {"id": _PRICE}}],
-                "custom_data": {
-                    "dota_user_id": str(user_id),
-                    "dota_offer": "series_pass",
-                },
-            },
-        )
-        result = await _deliver(service, purchase, now=later)
-        assert result.activated is False
-        assert (
-            await entitlements.has_resource_entitlement(
-                user_id,
-                AI_DECISIONS_ENTITLEMENT,
-                canonical_series_id=series_id,
-                now=later,
-            )
-            is False
-        )
-    finally:
-        await engine.dispose()
-
-
-@pytest.mark.asyncio
-async def test_checkout_reservation_blocks_second_provider_transaction() -> None:
-    engine, factory, service, user_id, series_id, _, _ = await _fixture()
-    requests: list[str] = []
-
-    async def handler(request: httpx.Request) -> httpx.Response:
-        requests.append(request.url.path)
+    async def handler(request):
+        requests.append(json.loads(request.content))
         if request.url.path == "/transactions":
             return httpx.Response(
                 201,
-                json={
-                    "data": {
-                        "id": "txn_reserved_checkout",
-                        "checkout": {"url": "https://pay.paddle.test/series"},
-                    }
-                },
+                json={"data": {"id": "txn_new", "checkout": {"url": "https://pay.test"}}},
             )
         return httpx.Response(404)
 
@@ -256,34 +280,30 @@ async def test_checkout_reservation_blocks_second_provider_transaction() -> None
     )
     try:
         async with factory.begin() as session:
-            existing = await session.scalar(select(SeriesPassPurchaseRecord))
-            assert existing is not None
-            existing.status = "FAILED"
-
+            pending = await session.scalar(
+                select(CompetitionPassPurchaseRecord).where(
+                    CompetitionPassPurchaseRecord.transaction_ref == "txn_series"
+                )
+            )
+            assert pending is not None
+            pending.status = "FAILED"
         checkout = await service.create_checkout(
             user_id=user_id,
-            email="series@example.com",
+            email="pass@example.com",
             canonical_series_id=series_id,
             client=client,
         )
-        assert checkout.transaction_ref == "txn_reserved_checkout"
-        assert requests == ["/transactions"]
-
-        with pytest.raises(SeriesPassCheckoutConflict, match="still pending"):
-            await service.create_checkout(
-                user_id=user_id,
-                email="series@example.com",
-                canonical_series_id=series_id,
-                client=client,
-            )
-        assert requests == ["/transactions"]
+        assert checkout.transaction_ref == "txn_new"
+        assert requests[-1]["items"] == [{"price_id": _SERIES_PRICE, "quantity": 1}]
         async with factory() as session:
-            stored = await session.scalar(
-                select(SeriesPassPurchaseRecord).where(
-                    SeriesPassPurchaseRecord.transaction_ref == "txn_reserved_checkout"
+            purchase = await session.scalar(
+                select(CompetitionPassPurchaseRecord).where(
+                    CompetitionPassPurchaseRecord.transaction_ref == "txn_new"
                 )
             )
-            assert stored is not None and stored.status == "PENDING"
+            assert purchase is not None
+            assert purchase.scope_type == "SERIES"
+            assert purchase.canonical_series_id == series_id
     finally:
         await client.aclose()
         await engine.dispose()

@@ -15,6 +15,15 @@ def test_public_match_payload_strips_paid_ai_outputs_and_nested_internal_fields(
                 "internal_series_signal": "secret",
             }
         ],
+        "side_identity": {
+            "status": "RESOLVED",
+            "radiant_team_id": "team-a",
+            "dire_team_id": "team-b",
+            "source": "DLTV_DB_IS_RADIANT",
+            "confidence": 1.0,
+            "observed_at": "2026-08-17T00:00:00Z",
+            "raw_event_id": "private-raw-event",
+        },
         "market": [
             {
                 "odds_id": 1,
@@ -32,8 +41,20 @@ def test_public_match_payload_strips_paid_ai_outputs_and_nested_internal_fields(
             "warnings": [],
             "observed_at": "2026-08-17T00:00:00Z",
             "statistics_cutoff": "2026-08-16T23:59:00Z",
-            "features": {"pure_radiant_edge": 0.2},
-            "curve": [{"minute": 10, "adjusted_radiant_edge": 0.19}],
+            "features": {
+                "current_edge": 0.2,
+                "next_5m_edge": 0.3,
+                "player_analysis": {"private": True},
+            },
+            "curve": [
+                {
+                    "minute": 20,
+                    "pure_radiant_edge": 0.2,
+                    "adjusted_radiant_edge": 0.19,
+                    "confidence": 0.8,
+                    "private_point": "secret",
+                }
+            ],
             "model_version": "rosh-secret-v1",
             "data_version": "private-data-v1",
             "roster_ready_count": 10,
@@ -114,9 +135,24 @@ def test_public_match_payload_strips_paid_ai_outputs_and_nested_internal_fields(
     assert public["team_a"] == {"id": "team-a", "name": "Team Spirit"}
     assert "internal_series_signal" not in public["series_maps"][0]
     assert "internal_market_signal" not in public["market"][0]
+    assert public["side_identity"] == {
+        "status": "RESOLVED",
+        "radiant_team_id": "team-a",
+        "dire_team_id": "team-b",
+        "source": "DLTV_DB_IS_RADIANT",
+        "confidence": 1.0,
+        "observed_at": "2026-08-17T00:00:00Z",
+    }
     assert public["draft"]["complete"] is True
-    assert "features" not in public["draft"]
-    assert "curve" not in public["draft"]
+    assert public["draft"]["features"] == {"current_edge": 0.2, "next_5m_edge": 0.3}
+    assert public["draft"]["curve"] == [
+        {
+            "minute": 20,
+            "pure_radiant_edge": 0.2,
+            "adjusted_radiant_edge": 0.19,
+            "confidence": 0.8,
+        }
+    ]
     assert "model_version" not in public["draft"]
     assert "data_version" not in public["draft"]
     assert "internal_slot_feature" not in public["draft"]["slots"][0]

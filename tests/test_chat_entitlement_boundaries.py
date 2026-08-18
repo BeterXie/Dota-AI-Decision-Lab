@@ -14,7 +14,11 @@ from app.notifications.secure_center import NotificationCenterService
 from app.providers.qq_bot import user_service as qq_user_service
 from app.providers.qq_bot.models import QQInboundMessage
 from app.providers.wechat_clawbot import user_service as wechat_user_service
-from app.providers.wechat_clawbot.models import MESSAGE_TYPE_USER, WeChatInboundMessage
+from app.providers.wechat_clawbot.models import (
+    MESSAGE_TYPE_USER,
+    WeChatAccount,
+    WeChatInboundMessage,
+)
 from app.runtime.health import HealthRegistry
 from app.web import create_app
 
@@ -236,7 +240,7 @@ async def test_wechat_ai_query_and_pause_use_bound_account_state(monkeypatch) ->
     entitlements = _Entitlements(False)
     service._notification_center = center
     service._entitlements = entitlements
-    account = SimpleNamespace(account_id="bot-account")
+    account = SimpleNamespace(account_id="bot-account", user_id=None)
 
     called = False
 
@@ -253,6 +257,7 @@ async def test_wechat_ai_query_and_pause_use_bound_account_state(monkeypatch) ->
     user_id = uuid4()
     center.user_id = user_id
     entitlements.allowed = True
+    account.user_id = "wechat-user"
     await service._handle_message(object(), account, _wechat_message("为什么买 OG"))
     assert client.sent[-1]["text"] == "wechat-premium"
     assert entitlements.calls[-1] == (user_id, AI_DECISIONS_ENTITLEMENT)
@@ -260,6 +265,51 @@ async def test_wechat_ai_query_and_pause_use_bound_account_state(monkeypatch) ->
     await service._handle_message(object(), account, _wechat_message("暂停通知"))
     assert center.preference_calls[-1][2] is False
     assert "已关闭" in client.sent[-1]["text"]
+
+
+@pytest.mark.asyncio
+async def test_wechat_pairing_binds_account_and_rejects_other_sender(monkeypatch) -> None:
+    client = _WeChatClient()
+    account = WeChatAccount(
+        account_id="bot-account",
+        token="token",
+        user_id=None,
+        created_at=datetime.now(UTC),
+    )
+
+    class _Store:
+        def __init__(self) -> None:
+            self.saved: list[WeChatAccount] = []
+
+        def save_account(self, value: WeChatAccount) -> None:
+            self.saved.append(value)
+
+    store = _Store()
+
+    class _Center:
+        async def consume_pairing_code(self, **kwargs):
+            return object()
+
+    service = wechat_user_service.UserScopedWeChatClawBotService(
+        client=client,
+        store=store,
+        session_factory=object(),
+        jobs=object(),
+    )
+    service._notification_center = _Center()
+    monkeypatch.setattr(wechat_user_service, "_pairing_code_from_text", lambda _: "PAIR")
+
+    await service._handle_message(object(), account, _wechat_message("绑定 PAIR"))
+
+    assert store.saved and store.saved[-1].user_id == "wechat-user"
+    assert "已绑定" in client.sent[-1]["text"]
+
+    bound = store.saved[-1]
+    sent_before = len(client.sent)
+    for text in ("当前比赛", "订阅通知"):
+        foreign = _wechat_message(text).model_copy(update={"from_user_id": "other-user"})
+        await service._handle_message(object(), bound, foreign)
+    assert len(client.sent) == sent_before
 
 
 @pytest.mark.asyncio

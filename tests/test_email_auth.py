@@ -1,4 +1,4 @@
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
 import pytest
@@ -10,7 +10,7 @@ from app.auth.models import EmailLoginChallengeRecord, UserAccountRecord
 from app.auth.service import EmailAuthService, InvalidLoginCodeError, normalize_email
 from app.db import Base
 from app.entitlements import AI_DECISIONS_ENTITLEMENT, EntitlementService
-from app.models import CanonicalMap
+from app.models import CanonicalMap, MapResultRecord
 from app.runtime.health import HealthRegistry
 from app.web import create_app
 from app.web.auth import AuthGuardMiddleware
@@ -227,13 +227,24 @@ async def test_auth_api_keeps_matches_public_and_requires_entitlement_for_ai(tmp
             assert logged_out.status_code == 200
             assert (await client.get("/api/matches")).status_code == 200
             assert (await client.get(premium_path)).status_code == 401
+
+            async with factory() as db_session, db_session.begin():
+                db_session.add(
+                    MapResultRecord(
+                        canonical_map_id=premium_map_id,
+                        basic_first_usable_at=datetime.now(UTC),
+                    )
+                )
+            settled = await client.get(premium_path)
+            assert settled.status_code == 200
+            assert settled.json()["canonical_map_id"] == str(premium_map_id)
     finally:
         await service.close()
         await engine.dispose()
 
 
 @pytest.mark.asyncio
-async def test_auth_guard_requires_authentication_for_all_websockets() -> None:
+async def test_auth_guard_keeps_status_websocket_public_and_protects_others() -> None:
     engine, factory, _, service = await _auth_fixture()
     called: list[str] = []
     sent: list[dict] = []
@@ -282,14 +293,8 @@ async def test_auth_guard_requires_authentication_for_all_websockets() -> None:
 
         sent.clear()
         await middleware(scope("/ws/status"), receive, send)  # type: ignore[arg-type]
-        assert called == []
-        assert sent == [
-            {
-                "type": "websocket.close",
-                "code": 4401,
-                "reason": "authentication required",
-            }
-        ]
+        assert called == ["/ws/status"]
+        assert sent == []
     finally:
         await service.close()
         await engine.dispose()
@@ -302,6 +307,9 @@ async def test_auth_disabled_preserves_public_access_but_closes_protected_apis(t
         await connection.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, expire_on_commit=False)
     try:
+        unfinished_map_id = UUID("11111111-1111-1111-1111-111111111111")
+        async with factory() as session, session.begin():
+            session.add(CanonicalMap(id=unfinished_map_id, map_number=1))
         app = create_app(
             factory,
             HealthRegistry(),
@@ -323,11 +331,11 @@ async def test_auth_disabled_preserves_public_access_but_closes_protected_apis(t
             assert (await client.get("/api/matches")).status_code == 200
             assert (await client.get("/metrics")).status_code == 503
             premium = await client.get(
-                "/api/maps/11111111-1111-1111-1111-111111111111/ai-decisions"
+                f"/api/maps/{unfinished_map_id}/ai-decisions"
             )
-            assert premium.status_code == 503
+            assert premium.status_code == 401
             assert premium.json() == {
-                "detail": "authentication is disabled for this protected endpoint"
+                "detail": "authentication required"
             }
     finally:
         await engine.dispose()

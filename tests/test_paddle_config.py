@@ -8,13 +8,14 @@ def test_paddle_billing_is_optional_and_sandbox_by_default() -> None:
     assert settings.paddle_api_base_url == "https://sandbox-api.paddle.com"
 
 
-def test_enabled_paddle_requires_auth_secrets_and_catalog_price() -> None:
+def test_enabled_paddle_requires_auth_secrets_and_scoped_catalog_prices() -> None:
     incomplete = Settings(_env_file=None, paddle_enabled=True)
     assert incomplete.paddle_configuration_errors == (
         "AUTH_ENABLED=true",
         "PADDLE_API_KEY",
         "PADDLE_WEBHOOK_SECRET",
-        "PADDLE_PRO_*_PRICE_ID",
+        "PADDLE_SERIES_PASS_PRICE_ID",
+        "PADDLE_EVENT_PASS_PRICE_ID",
     )
 
     configured = Settings(
@@ -23,7 +24,8 @@ def test_enabled_paddle_requires_auth_secrets_and_catalog_price() -> None:
         paddle_enabled=True,
         paddle_api_key="pdl_sdbx_apikey_test",
         paddle_webhook_secret="pdl_ntfset_test",
-        paddle_pro_monthly_price_id="pri_monthly",
+        paddle_series_pass_price_id="pri_series",
+        paddle_event_pass_price_id="pri_event",
     )
     assert configured.paddle_configuration_errors == ()
 

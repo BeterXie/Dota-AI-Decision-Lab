@@ -214,6 +214,13 @@ async def test_review_api_uses_frozen_rosh_canonical_ai_rounds_and_closing_odds(
     assert response.status_code == 200
     payload = response.json()
     assert payload["summary"]["settled_maps"] == 1
+    assert payload["pagination"] == {
+        "limit": 100,
+        "offset": 0,
+        "returned": 1,
+        "has_more": False,
+        "next_offset": None,
+    }
     assert payload["summary"]["rosh"]["pure"] == {
         "evaluated": 1,
         "correct": 1,
@@ -434,4 +441,5 @@ async def test_review_api_empty_contract() -> None:
     assert payload["matches"] == []
     assert payload["summary"]["settled_maps"] == 0
     assert payload["summary"]["rosh"]["adjusted"]["accuracy"] is None
+    assert payload["pagination"]["returned"] == 0
     await engine.dispose()

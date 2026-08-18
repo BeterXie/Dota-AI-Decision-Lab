@@ -1,7 +1,11 @@
 from datetime import UTC, datetime, timedelta
+from types import SimpleNamespace
+from uuid import uuid4
 
 import pytest
 
+from app.main import _restore_email_health
+from app.notifications.models import NotificationDeliveryRecord
 from app.runtime.health import HealthRegistry
 
 
@@ -99,3 +103,39 @@ async def test_all_registered_ai_providers_requiring_action_blocks_readiness() -
     snapshot = await health.snapshot()
 
     assert snapshot["overall"] == "ACTION_REQUIRED"
+
+
+@pytest.mark.asyncio
+async def test_email_health_restores_from_current_user_delivery_record() -> None:
+    sent_at = datetime.now(UTC) - timedelta(minutes=2)
+    latest = SimpleNamespace(
+        id=uuid4(),
+        status="SENT",
+        sent_at=sent_at,
+        last_error=None,
+    )
+
+    class _Session:
+        async def __aenter__(self):
+            return self
+
+        async def __aexit__(self, *_args) -> None:
+            return None
+
+        async def scalar(self, statement):
+            assert statement.column_descriptions[0]["entity"] is NotificationDeliveryRecord
+            assert "EMAIL" in statement.compile().params.values()
+            return latest
+
+    health = HealthRegistry()
+    await _restore_email_health(
+        health,
+        session_factory=_Session,
+        configured=True,
+    )
+
+    dependency = (await health.snapshot())["dependencies"]["EMAIL"]
+    assert dependency["status"] == "READY"
+    assert dependency["last_success_at"] == sent_at
+    assert dependency["metadata"]["recipient_count"] == 1
+    assert dependency["metadata"]["notification_id"] == str(latest.id)

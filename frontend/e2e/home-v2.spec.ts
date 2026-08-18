@@ -73,7 +73,10 @@ test("2.0 homepage explains the product and surfaces live, upcoming and complete
   await mockHomeApi(page);
   await page.goto("/");
 
-  await expect(page.getByRole("heading", { name: "看懂比赛，验证 AI，追踪赛后表现" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "看懂比赛，验证 AI，追踪真实表现" })).toBeVisible();
+  if ((page.viewportSize()?.width ?? 0) <= 760) {
+    await page.getByRole("button", { name: "打开主导航" }).click();
+  }
   await expect(page.getByRole("link", { name: "首页" })).toHaveAttribute("aria-current", "page");
   await expect(page.getByText("正在进行与即将开始", { exact: true })).toBeVisible();
   await expect(page.getByText("TI15 国际邀请赛", { exact: true })).toBeVisible();

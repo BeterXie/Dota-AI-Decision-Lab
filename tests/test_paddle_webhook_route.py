@@ -24,7 +24,8 @@ async def test_paddle_webhook_rejects_oversized_body_before_signature_processing
                 paddle_enabled=True,
                 paddle_api_key="pdl_sdbx_apikey_test",
                 paddle_webhook_secret="pdl_ntfset_test",
-                paddle_pro_30d_price_id="pri_test_pro_30d",
+                paddle_series_pass_price_id="pri_test_series",
+                paddle_event_pass_price_id="pri_test_event",
             ),
         )
     )

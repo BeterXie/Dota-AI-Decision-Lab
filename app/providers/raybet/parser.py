@@ -8,6 +8,31 @@ from app.domain.market import OddsDelta, OddsMeta
 
 PARSER_VERSION = "raybet-v1"
 
+_NORMALIZED_STATUS_ALIASES = {
+    "OPEN": "OPEN_CONFIRMED",
+    "ACTIVE": "OPEN_CONFIRMED",
+    "OPEN_CONFIRMED": "OPEN_CONFIRMED",
+    "SUSPENDED": "SUSPENDED",
+    "PAUSED": "SUSPENDED",
+    "CLOSED": "CLOSED",
+    "SETTLED": "CLOSED",
+}
+
+
+def normalize_odds_status(value: object) -> str:
+    """Normalize only explicit provider labels; unknown numeric values stay unknown.
+
+    RayBet's numeric status codes are not stable enough to infer business
+    meaning from the recorded fixtures.  Keeping those values as UNKNOWN
+    preserves the raw evidence while still allowing an explicit CLOSED or
+    SUSPENDED payload to block the market gate.
+    """
+
+    if not isinstance(value, str):
+        return "UNKNOWN"
+    token = value.strip().upper().replace("-", "_").replace(" ", "_")
+    return _NORMALIZED_STATUS_ALIASES.get(token, "UNKNOWN")
+
 
 def parse_matches(
     payload: dict[str, Any],
@@ -73,6 +98,7 @@ def parse_odds_registry(payload: dict[str, Any]) -> list[OddsMeta]:
                 group_short_name=_optional_string(item.get("group_short_name")),
                 match_stage=_optional_string(item.get("match_stage")),
                 raw_status=_optional_int(item.get("status")),
+                normalized_status=normalize_odds_status(item.get("status")),
             )
         )
     return metadata
@@ -104,6 +130,7 @@ def parse_odds_bootstrap(payload: dict[str, Any]) -> list[OddsDelta]:
                 price=price,
                 raw_status=_optional_int(item.get("status")),
                 provider_updated_at=_parse_epoch(item.get("last_update")),
+                normalized_status=normalize_odds_status(item.get("status")),
             )
         )
     return deltas
@@ -151,6 +178,7 @@ def parse_socket_publish(message: str | dict[str, Any]) -> list[OddsDelta]:
                 price=price,
                 raw_status=_optional_int(item.get("status")),
                 provider_updated_at=_parse_epoch(item.get("last_update")),
+                normalized_status=normalize_odds_status(item.get("status")),
             )
         )
     return deltas

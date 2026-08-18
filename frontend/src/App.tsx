@@ -67,15 +67,10 @@ function AuthenticatedApp() {
     retry: 1
   });
   const session = auth.data;
-  const hasAiAccess = Boolean(session?.entitlements?.includes(AI_DECISIONS_ENTITLEMENT));
   const hasNotificationAccess = Boolean(
     session?.entitlements?.includes(REALTIME_NOTIFICATIONS_ENTITLEMENT) ||
       session?.grants?.some((grant) => grant.entitlement === REALTIME_NOTIFICATIONS_ENTITLEMENT)
   );
-  const hasGlobalNotificationAccess = Boolean(
-    session?.entitlements?.includes(REALTIME_NOTIFICATIONS_ENTITLEMENT)
-  );
-  const hasPro = hasAiAccess && hasGlobalNotificationAccess;
   const isSignedIn = Boolean(session?.enabled && session.authenticated && session.user);
 
   const handleAuthenticated = (next: AuthSessionState) => {
@@ -116,10 +111,9 @@ function AuthenticatedApp() {
   let content: React.ReactNode;
   if (billingRoute) {
     content = (
-      <Suspense fallback={<div className="auth-bootstrap">Pro Billing</div>}>
+        <Suspense fallback={<div className="auth-bootstrap">Billing</div>}>
         <BillingPage
           authenticated={isSignedIn}
-          hasPro={hasPro}
           onLogin={() => setLoginOpen(true)}
         />
       </Suspense>
@@ -143,30 +137,16 @@ function AuthenticatedApp() {
       );
     }
   } else if (performanceRoute) {
-    content = hasAiAccess ? (
+    content = (
       <Suspense fallback={<div className="auth-bootstrap">AI Performance</div>}>
         <AiPerformancePage />
       </Suspense>
-    ) : (
-      <PremiumAnalyticsGate
-        surface="performance"
-        authenticated={isSignedIn}
-        authEnabled={session?.enabled !== false}
-        onLogin={() => setLoginOpen(true)}
-      />
     );
   } else if (reviewRoute) {
-    content = hasAiAccess ? (
+    content = (
       <Suspense fallback={<div className="auth-bootstrap">Dota AI Decision Lab</div>}>
         <ReviewPage />
       </Suspense>
-    ) : (
-      <PremiumAnalyticsGate
-        surface="review"
-        authenticated={isSignedIn}
-        authEnabled={session?.enabled !== false}
-        onLogin={() => setLoginOpen(true)}
-      />
     );
   } else {
     content = (
@@ -271,7 +251,10 @@ function DashboardApp({
     session,
     AI_DECISIONS_ENTITLEMENT,
     selectedSeriesId,
-    selectedCanonicalMapId
+    selectedCanonicalMapId,
+    selectedMatch?.canonical_event_id ?? null,
+    selectedMatch?.stage_key ?? null,
+    selectedMatch?.phase ?? null
   );
   const hasSelectedAiAccess = aiScope !== null;
 
@@ -335,10 +318,25 @@ function accessScopeForResource(
   session: AuthSessionState | undefined,
   entitlement: string,
   seriesId: string | null,
-  mapId: string | null
-): "GLOBAL" | "SERIES" | "MAP" | null {
+  mapId: string | null,
+  eventId: string | null,
+  stageKey: string | null,
+  phase: string | null
+): "GLOBAL" | "EVENT" | "SERIES" | "MAP" | "FREE" | "POSTMATCH" | null {
   if (session?.entitlements?.includes(entitlement)) return "GLOBAL";
+  if (phase === "POSTMATCH") return "POSTMATCH";
   const grants = session?.grants ?? [];
+  if (
+    eventId &&
+    grants.some(
+      (grant) =>
+        grant.entitlement === entitlement &&
+        grant.scope_type === "EVENT" &&
+        grant.scope_ref === eventId
+    )
+  ) {
+    return "EVENT";
+  }
   if (
     seriesId &&
     grants.some(
@@ -359,6 +357,7 @@ function accessScopeForResource(
   ) {
     return "MAP";
   }
+  if (session?.enabled && session.authenticated && stageKey === "GROUP_STAGE") return "FREE";
   return null;
 }
 
@@ -412,62 +411,6 @@ async function fetchPremiumAi(id: string): Promise<PremiumAiPayload> {
   return response.json() as Promise<PremiumAiPayload>;
 }
 
-function PremiumAnalyticsGate({
-  surface,
-  authenticated,
-  authEnabled,
-  onLogin
-}: {
-  surface: "review" | "performance";
-  authenticated: boolean;
-  authEnabled: boolean;
-  onLogin: () => void;
-}) {
-  const { locale } = useI18n();
-  const performance = surface === "performance";
-  const title = locale === "zh-CN"
-    ? performance ? "AI Performance 属于 Pro 权限" : "AI 复盘属于 Pro 权限"
-    : performance ? "AI Performance is a Pro feature" : "AI Review is a Pro feature";
-  const description = locale === "zh-CN"
-    ? performance
-      ? "普通比赛数据保持公开；跨比赛模型成绩、实验版本对比和完整决策追溯属于全局 Pro。单个系列赛通行证不会开放全局模型历史。"
-      : "普通比赛数据保持公开；跨比赛 AI 历史复盘属于全局 Pro。单个系列赛通行证只解锁所购买比赛的 AI 与实时通知。"
-    : performance
-      ? "Match data stays public. Cross-match model performance, experiment comparison and decision audit history require global Pro; a series pass does not unlock global model history."
-      : "Match data stays public. Cross-match AI review requires global Pro; a series pass unlocks only the purchased series AI and alerts.";
-  const denied = locale === "zh-CN"
-    ? performance ? "当前账号尚未拥有全局 AI Performance 权限。" : "当前账号尚未拥有全局 AI Review 权限。"
-    : performance ? "This account does not have global AI Performance access yet." : "This account does not have global AI Review access yet.";
-
-  return (
-    <main className="auth-page">
-      <section className="auth-card">
-        <div className="auth-card-header">
-          <div className="auth-brand-mark">◆</div>
-          <div>
-            <div className="auth-eyebrow">PRO INTELLIGENCE</div>
-            <h1>{title}</h1>
-          </div>
-        </div>
-        <p className="auth-description">{description}</p>
-        {!authenticated && authEnabled && (
-          <button className="auth-primary-btn" type="button" onClick={onLogin}>
-            {locale === "zh-CN" ? "登录以查看权限" : "Sign in to check access"}
-          </button>
-        )}
-        {authenticated && <div className="auth-error" role="status">{denied}</div>}
-        {!authEnabled && (
-          <div className="auth-error" role="status">
-            {locale === "zh-CN"
-              ? "当前运行环境尚未启用登录，因此 Pro AI 接口保持关闭。"
-              : "Authentication is disabled in this runtime, so premium AI access remains closed."}
-          </div>
-        )}
-      </section>
-    </main>
-  );
-}
-
 function NotificationAccessGate({
   authenticated,
   authEnabled,
@@ -484,7 +427,7 @@ function NotificationAccessGate({
         <div className="auth-card-header">
           <div className="auth-brand-mark">◆</div>
           <div>
-            <div className="auth-eyebrow">REALTIME PRO</div>
+            <div className="auth-eyebrow">REALTIME NOTIFICATIONS</div>
             <h1>
               {locale === "zh-CN"
                 ? "实时 Notification Center 属于付费权限"
@@ -494,8 +437,8 @@ function NotificationAccessGate({
         </div>
         <p className="auth-description">
           {locale === "zh-CN"
-            ? "全局 Pro 或有效的系列赛通行证都可以绑定邮箱、QQ 和微信；实际通知只会发送你拥有权限的比赛。"
-            : "Global Pro or an active series pass can bind Email, QQ and WeChat. Alerts are sent only for matches covered by your access grants."}
+            ? "有效的赛事或系列赛 Pass 可以绑定邮箱、QQ 和微信；实际通知只会发送你拥有权限的比赛。"
+            : "An active Event or Series Pass can bind Email, QQ and WeChat. Alerts are sent only for matches covered by your access grants."}
         </p>
         {!authenticated && authEnabled && (
           <button className="auth-primary-btn" type="button" onClick={onLogin}>

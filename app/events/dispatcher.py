@@ -1,9 +1,11 @@
+from collections import defaultdict
 from collections.abc import Awaitable, Callable
 from datetime import UTC, datetime
 from uuid import UUID
 
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
+from sqlalchemy.orm import load_only
 
 from app.ai.jobs import ai_job_dedupe_key_for_experiment, ai_job_payload, ai_job_priority
 from app.domain.events import DomainEventType
@@ -62,10 +64,57 @@ class DomainEventDispatcher:
                 )
             ).all()
         )
-        for record in records:
-            event_type = DomainEventType(record.event_type)
+        typed_records = [(record, DomainEventType(record.event_type)) for record in records]
+        ai_snapshot_ids = {
+            snapshot_id
+            for record, event_type in typed_records
+            if event_type is DomainEventType.AI_DECISION_REQUESTED
+            and (snapshot_id := _payload_uuid(record.payload, "snapshot_id")) is not None
+        }
+        ended_map_ids = {
+            canonical_map_id
+            for record, event_type in typed_records
+            if event_type is DomainEventType.MAP_ENDED
+            and (canonical_map_id := _payload_uuid(record.payload, "canonical_map_id")) is not None
+        }
+        snapshots = (
+            list(
+                (
+                    await session.scalars(
+                        select(DecisionSnapshotRecord)
+                        .options(
+                            load_only(
+                                DecisionSnapshotRecord.id,
+                                DecisionSnapshotRecord.canonical_map_id,
+                                DecisionSnapshotRecord.mode,
+                                DecisionSnapshotRecord.snapshot_hash,
+                            )
+                        )
+                        .where(
+                            or_(
+                                DecisionSnapshotRecord.id.in_(ai_snapshot_ids),
+                                DecisionSnapshotRecord.canonical_map_id.in_(ended_map_ids),
+                            )
+                        )
+                    )
+                ).all()
+            )
+            if ai_snapshot_ids or ended_map_ids
+            else []
+        )
+        snapshot_by_id = {snapshot.id: snapshot for snapshot in snapshots}
+        snapshot_ids_by_map: dict[UUID, list[UUID]] = defaultdict(list)
+        for snapshot in snapshots:
+            if snapshot.canonical_map_id is not None:
+                snapshot_ids_by_map[snapshot.canonical_map_id].append(snapshot.id)
+
+        for record, event_type in typed_records:
             if event_type is DomainEventType.AI_DECISION_REQUESTED:
-                await self._enqueue_ai_provider_jobs(session, record)
+                snapshot_id = _payload_uuid(record.payload, "snapshot_id")
+                await self._enqueue_ai_provider_jobs(
+                    session,
+                    snapshot=snapshot_by_id.get(snapshot_id),
+                )
             else:
                 job_type = EVENT_JOB_MAP[event_type]
                 await self._jobs.enqueue(
@@ -83,14 +132,20 @@ class DomainEventDispatcher:
                     payload={**record.payload, "domain_event_id": str(record.id)},
                 )
             if event_type is DomainEventType.MAP_ENDED:
-                await self._enqueue_closing_captures(session, record)
+                canonical_map_id = _payload_uuid(record.payload, "canonical_map_id")
+                await self._enqueue_closing_captures(
+                    session,
+                    record,
+                    snapshot_ids=snapshot_ids_by_map.get(canonical_map_id, ()),
+                )
             record.processed_at = utc_now()
         return len(records)
 
     async def _enqueue_ai_provider_jobs(
         self,
         session: AsyncSession,
-        record: DomainEventRecord,
+        *,
+        snapshot: DecisionSnapshotRecord | None,
     ) -> None:
         """Fan out one AI_DECISION_REQUESTED event into one durable job per
         configured (provider, model) experiment.
@@ -98,14 +153,6 @@ class DomainEventDispatcher:
         Each job commits its own result as soon as that provider finishes, so
         a slow model no longer delays the UI for the faster models.
         """
-        snapshot_id_value = record.payload.get("snapshot_id")
-        if not isinstance(snapshot_id_value, str):
-            return
-        try:
-            snapshot_id = UUID(snapshot_id_value)
-        except ValueError:
-            return
-        snapshot = await session.get(DecisionSnapshotRecord, snapshot_id)
         if snapshot is None:
             return
         priority = ai_job_priority(snapshot.mode)
@@ -122,23 +169,9 @@ class DomainEventDispatcher:
         self,
         session: AsyncSession,
         record: DomainEventRecord,
+        *,
+        snapshot_ids: tuple[UUID, ...] | list[UUID],
     ) -> None:
-        canonical_map_id = record.payload.get("canonical_map_id")
-        if not isinstance(canonical_map_id, str):
-            return
-        try:
-            canonical_map_uuid = UUID(canonical_map_id)
-        except ValueError:
-            return
-        snapshot_ids = list(
-            (
-                await session.scalars(
-                    select(DecisionSnapshotRecord.id).where(
-                        DecisionSnapshotRecord.canonical_map_id == canonical_map_uuid
-                    )
-                )
-            ).all()
-        )
         for snapshot_id in snapshot_ids:
             await self._jobs.enqueue(
                 session,
@@ -151,6 +184,16 @@ class DomainEventDispatcher:
                 },
                 not_before=record.occurred_at,
             )
+
+
+def _payload_uuid(payload: dict, field: str) -> UUID | None:
+    value = payload.get(field)
+    if not isinstance(value, str):
+        return None
+    try:
+        return UUID(value)
+    except ValueError:
+        return None
 
 
 class OutboxDispatcher:

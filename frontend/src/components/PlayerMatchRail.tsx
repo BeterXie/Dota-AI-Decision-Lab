@@ -3,6 +3,7 @@ import type { MapSummary } from "../api";
 import { useI18n } from "../i18n";
 import { formatOdds, getMatchDisplayPhase, primaryMarketPair, targetProbability } from "../utils/presentation";
 import { getTeamLogoUrl, getTeamAbbreviation } from "../utils/dotaAssets";
+import { getOfficialEventDisplayName } from "../utils/officialVisuals";
 
 interface PlayerMatchRailProps {
   matches: MapSummary[];
@@ -204,7 +205,7 @@ export const PlayerMatchRail: React.FC<PlayerMatchRailProps> = ({ matches, selec
                     <div className="rail-card-top">
                       <span className={`phase-badge ${phase === "LIVE" ? "badge-live" : "badge-upcoming"}`}>{headline}</span>
                       <span className="league-info">
-                        {match.tournament_name || t("unknownTournament")}
+                        {getOfficialEventDisplayName(match.tournament_name || t("unknownTournament"))}
                         {bestOf ? ` · BO${bestOf}` : match.round ? ` · ${match.round.toUpperCase()}` : ""}
                         {match.map_number ? ` · M${match.map_number}` : ""}
                       </span>

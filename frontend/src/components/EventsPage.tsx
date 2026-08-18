@@ -15,15 +15,17 @@ import { matchHref } from "../matches";
 import { EventMark, TeamCrest, UiIcon } from "./VisualIdentity";
 
 type EventFilter = "ALL" | "LIVE" | "UPCOMING" | "COMPLETED";
+type EventDetailTab = "OVERVIEW" | "SCHEDULE" | "UPCOMING" | "LIVE" | "COMPLETED";
 
 interface EventsPageProps {
   matches: MapSummary[];
   loading: boolean;
+  error: boolean;
+  onRetry: () => void;
   pathname: string;
-  hasPro: boolean;
 }
 
-export const EventsPage: React.FC<EventsPageProps> = ({ matches, loading, pathname, hasPro }) => {
+export const EventsPage: React.FC<EventsPageProps> = ({ matches, loading, error, onRetry, pathname }) => {
   const { locale } = useI18n();
   const events = React.useMemo(() => buildEventSummaries(matches), [matches]);
   const selectedKey = eventNameFromPath(pathname);
@@ -32,22 +34,24 @@ export const EventsPage: React.FC<EventsPageProps> = ({ matches, loading, pathna
     const selected = events.find(
       (event) => event.name === selectedKey || eventSlug(event.name) === selectedKey
     ) ?? null;
-    return <EventDetail event={selected} loading={loading} locale={locale} hasPro={hasPro} />;
+    return <EventDetail event={selected} loading={loading} error={error} onRetry={onRetry} locale={locale} />;
   }
 
-  return <EventIndex events={events} loading={loading} locale={locale} />;
+  return <EventIndex events={events} loading={loading} error={error} onRetry={onRetry} locale={locale} />;
 };
 
-const EventIndex: React.FC<{ events: EventSummary[]; loading: boolean; locale: string }> = ({
+const EventIndex: React.FC<{ events: EventSummary[]; loading: boolean; error: boolean; onRetry: () => void; locale: string }> = ({
   events,
   loading,
+  error,
+  onRetry,
   locale
 }) => {
   const [filter, setFilter] = React.useState<EventFilter>("ALL");
   const [query, setQuery] = React.useState("");
   const normalizedQuery = query.trim().toLocaleLowerCase();
   const filtered = events.filter((event) => {
-    const matchesFilter = filter === "ALL" || event.status === filter;
+    const matchesFilter = filter === "ALL" || event.status === filter || (filter === "COMPLETED" && event.status === "SETTLING");
     const matchesQuery = !normalizedQuery || event.name.toLocaleLowerCase().includes(normalizedQuery);
     return matchesFilter && matchesQuery;
   });
@@ -62,8 +66,8 @@ const EventIndex: React.FC<{ events: EventSummary[]; loading: boolean; locale: s
           <h1>{locale === "zh-CN" ? "全球 Dota 赛事，一处追踪" : "One place for the Dota events that matter"}</h1>
           <p>
             {locale === "zh-CN"
-              ? "先看赛事进度，再进入具体对局。赛程、对阵和赛果保持公开；需要更深的 AI 判断时，再进入对应的 Pro 权益。"
-              : "Start with the event, then drill into the match. Schedules, matchups and results stay public; deeper AI intelligence sits behind the relevant Pro access."}
+              ? "先看赛事进度，再进入具体对局。赛程、对阵和赛果保持公开；付费阶段的 AI 决策和实时通知按赛事或系列赛 Pass 解锁。"
+              : "Start with the event, then drill into the match. Schedules, matchups and results stay public; paid-stage AI decisions and realtime alerts unlock with an Event or Series Pass."}
           </p>
         </div>
         <div className="events-hero-stats" aria-label={locale === "zh-CN" ? "赛事概览" : "Event overview"}>
@@ -107,6 +111,8 @@ const EventIndex: React.FC<{ events: EventSummary[]; loading: boolean; locale: s
           <div className="events-card-grid">
             {[0, 1, 2, 3, 4, 5].map((item) => <div className="event-directory-card is-skeleton" key={item} />)}
           </div>
+        ) : error ? (
+          <EventLoadError locale={locale} onRetry={onRetry} />
         ) : filtered.length > 0 ? (
           <div className="events-card-grid">
             {filtered.map((event, index) => <EventDirectoryCard key={event.name} event={event} index={index} locale={locale} />)}
@@ -126,11 +132,23 @@ const EventIndex: React.FC<{ events: EventSummary[]; loading: boolean; locale: s
 const EventDetail: React.FC<{
   event: EventSummary | null;
   loading: boolean;
+  error: boolean;
+  onRetry: () => void;
   locale: string;
-  hasPro: boolean;
-}> = ({ event, loading, locale, hasPro }) => {
+}> = ({ event, loading, error, onRetry, locale }) => {
+  const [activeTab, setActiveTab] = React.useState<EventDetailTab>("OVERVIEW");
+  const [followed, setFollowed] = React.useState(false);
+
+  React.useEffect(() => {
+    if (!event || typeof window === "undefined") return;
+    setFollowed(window.localStorage.getItem(`followed-event:${eventSlug(event.name)}`) === "1");
+  }, [event]);
+
   if (loading) {
     return <div className="product-container event-detail-loading"><div className="event-detail-hero is-skeleton" /></div>;
+  }
+  if (error) {
+    return <EventLoadError locale={locale} onRetry={onRetry} />;
   }
   if (!event) {
     return (
@@ -144,8 +162,19 @@ const EventDetail: React.FC<{
   }
 
   const series = buildSeriesSummaries(event);
+  const visibleSeries = filterEventSeries(series, activeTab);
   const featured = event.matches.find((match) => match.phase === "LIVE") ?? event.nextMatch;
-  const stages = groupSeriesByStage(series, locale);
+  const stages = groupSeriesByStage(visibleSeries, locale);
+  const teams = eventTeams(event);
+  const completedSeries = series.filter((item) => item.phase === "POSTMATCH").length;
+  const isTi15 = event.name === "The International 2026";
+  const toggleFollow = () => {
+    const next = !followed;
+    setFollowed(next);
+    if (typeof window !== "undefined") {
+      window.localStorage.setItem(`followed-event:${eventSlug(event.name)}`, next ? "1" : "0");
+    }
+  };
 
   return (
     <div className="event-detail-v2">
@@ -153,7 +182,8 @@ const EventDetail: React.FC<{
         <a href="/events">{locale === "zh-CN" ? "赛事" : "Events"}</a><span>›</span><strong>{event.name}</strong>
       </section>
 
-      <section className="product-container event-detail-hero">
+      <section className={`product-container event-detail-hero${isTi15 ? " is-ti15" : ""}`}>
+        {isTi15 ? <img className="event-detail-hero-background" src="/assets/heroes/event-ti15-hero.webp" alt="" loading="eager" decoding="async" /> : null}
         <div className="event-detail-emblem event-detail-emblem-rich">
           <EventMark eventName={event.name} size="lg" />
         </div>
@@ -162,6 +192,16 @@ const EventDetail: React.FC<{
           <h1>{event.name}</h1>
           <p><UiIcon name="calendar" size={12} />{eventDateRange(event, locale)}</p>
         </div>
+        <button
+          type="button"
+          className={`event-follow-button ${followed ? "is-followed" : ""}`}
+          aria-pressed={followed}
+          title={locale === "zh-CN" ? "保存在此浏览器" : "Saved in this browser"}
+          onClick={toggleFollow}
+        >
+          <span aria-hidden="true">{followed ? "★" : "☆"}</span>
+          {followed ? (locale === "zh-CN" ? "已收藏" : "Saved") : (locale === "zh-CN" ? "收藏" : "Save")}
+        </button>
         <div className="event-detail-stats">
           <EventHeroStat value={event.seriesCount} label={locale === "zh-CN" ? "系列赛" : "Series"} />
           <EventHeroStat value={event.teamCount} label={locale === "zh-CN" ? "参赛队伍" : "Teams"} />
@@ -169,7 +209,22 @@ const EventDetail: React.FC<{
         </div>
       </section>
 
-      {featured && (
+      <nav className="product-container event-detail-tabs" aria-label={locale === "zh-CN" ? "赛事详情" : "Event detail"}>
+        {(["OVERVIEW", "SCHEDULE", "UPCOMING", "LIVE", "COMPLETED"] as EventDetailTab[]).map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            className={activeTab === tab ? "is-active" : undefined}
+            aria-pressed={activeTab === tab}
+            onClick={() => setActiveTab(tab)}
+          >
+            {eventTabLabel(tab, locale)}
+          </button>
+        ))}
+        <a href="/review">{locale === "zh-CN" ? "AI 复盘" : "AI review"}</a>
+      </nav>
+
+      {featured && activeTab === "OVERVIEW" && (
         <section className="product-container event-featured-match product-section">
           <div className="event-featured-kicker">
             <span className={featured.phase === "LIVE" ? "is-live" : undefined} />
@@ -192,8 +247,8 @@ const EventDetail: React.FC<{
       <div className="product-container event-detail-layout product-section">
         <section className="event-schedule-panel">
           <div className="event-panel-title">
-            <div><span className="home-eyebrow">MATCHES</span><h2>{locale === "zh-CN" ? "对阵与赛果" : "Matches & results"}</h2></div>
-            <span>{locale === "zh-CN" ? `${series.length} 个系列赛` : `${series.length} series`}</span>
+            <div><span className="home-eyebrow">MATCHES</span><h2>{eventScheduleTitle(activeTab, locale)}</h2></div>
+            <span>{locale === "zh-CN" ? `${visibleSeries.length} 个系列赛` : `${visibleSeries.length} series`}</span>
           </div>
           {Array.from(stages.entries()).map(([stage, stageSeries]) => (
             <div className="event-stage" key={stage}>
@@ -203,16 +258,34 @@ const EventDetail: React.FC<{
               </div>
             </div>
           ))}
-          {series.length === 0 && <div className="events-empty is-compact"><p>{locale === "zh-CN" ? "这个赛事暂时还没有确认的对阵。" : "No confirmed matchups for this event yet."}</p></div>}
+          {visibleSeries.length === 0 && <div className="events-empty is-compact"><p>{locale === "zh-CN" ? "这个分类暂时没有确认的对阵。" : "No confirmed matchups in this category yet."}</p></div>}
         </section>
 
         <aside className="event-detail-aside">
+          <article className="event-overview-card">
+            <div className="event-aside-title"><span aria-hidden="true">▣</span><h2>{locale === "zh-CN" ? "赛事概览" : "Event overview"}</h2></div>
+            <div className="event-overview-grid">
+              <EventOverviewMetric label={locale === "zh-CN" ? "比赛阶段" : "Status"} value={statusLabel(event.status, locale)} />
+              <EventOverviewMetric label={locale === "zh-CN" ? "已完成" : "Completed"} value={`${completedSeries} / ${series.length}`} />
+              <EventOverviewMetric label={locale === "zh-CN" ? "参赛队伍" : "Teams"} value={`${event.teamCount}`} />
+              <EventOverviewMetric label={locale === "zh-CN" ? "赛段" : "Stages"} value={`${event.stages.length || 1}`} />
+              <EventOverviewMetric label={locale === "zh-CN" ? "主要赛制" : "Formats"} value={seriesFormats(series)} />
+              <EventOverviewMetric label={locale === "zh-CN" ? "比赛记录" : "Map records"} value={`${event.matches.length}`} />
+            </div>
+          </article>
+          <article className="event-team-card">
+            <div className="event-aside-title"><span aria-hidden="true">♙</span><div><h2>{locale === "zh-CN" ? "参赛队伍" : "Participating teams"}</h2><small>{locale === "zh-CN" ? `${teams.length} 支队伍` : `${teams.length} teams`}</small></div></div>
+            <div className="event-team-rail">
+              {teams.slice(0, 8).map((team) => <TeamCrest key={team.id || team.name} team={team} fallbackName={team.name} size="md" />)}
+              {teams.length > 8 && <span className="event-team-more">+{teams.length - 8}</span>}
+            </div>
+          </article>
           <article className="event-access-card">
             <span className="home-eyebrow">ACCESS</span>
             <h2>{locale === "zh-CN" ? "比赛公开，AI 按权限解锁" : "Matches public. AI unlocked by access."}</h2>
             <div className="event-access-row"><i>✓</i><div><strong>{locale === "zh-CN" ? "公开赛事层" : "Public event layer"}</strong><p>{locale === "zh-CN" ? "赛程、对阵、比分、赛果与基础比赛情报无需登录。" : "Schedules, matchups, scores, results and core match intelligence require no sign-in."}</p></div></div>
-            <div className="event-access-row is-pro"><i>✦</i><div><strong>{locale === "zh-CN" ? "AI 与实时通知" : "AI & realtime alerts"}</strong><p>{locale === "zh-CN" ? "AI 决策、关键节点通知和完整复盘根据你的 Pro 或赛事权限开放。" : "AI decisions, key-moment alerts and full review open according to your Pro or event access."}</p></div></div>
-            <a href="/billing">{hasPro ? (locale === "zh-CN" ? "查看我的 Pro 权益" : "View my Pro access") : (locale === "zh-CN" ? "查看 AI 权益" : "Explore AI access")}<span>→</span></a>
+            <div className="event-access-row is-pro"><i>✦</i><div><strong>{locale === "zh-CN" ? "付费阶段 AI 与实时通知" : "Paid-stage AI & realtime alerts"}</strong><p>{locale === "zh-CN" ? "小组赛 AI、AI 表现和复盘免费开放；付费阶段 AI 决策和通知按赛事或系列赛 Pass 解锁。" : "Group-stage AI, AI Performance and Review are free; paid-stage AI decisions and alerts unlock by Event or Series Pass."}</p></div></div>
+            <a href={event.canonicalEventId ? `/billing?event=${encodeURIComponent(event.canonicalEventId)}` : "/billing"}>{locale === "zh-CN" ? "查看赛事 Pass" : "View Event Pass"}<span>→</span></a>
           </article>
           <article className="event-trust-card">
             <span aria-hidden="true">◎</span>
@@ -286,6 +359,18 @@ const EventHeroStat: React.FC<{ value: number; label: string; accent?: boolean }
   <div className={accent ? "is-accent" : undefined}><strong>{value}</strong><span>{label}</span></div>
 );
 
+const EventOverviewMetric: React.FC<{ label: string; value: string }> = ({ label, value }) => (
+  <div><span>{label}</span><strong>{value}</strong></div>
+);
+
+const EventLoadError: React.FC<{ locale: string; onRetry: () => void }> = ({ locale, onRetry }) => (
+  <section className="product-container events-load-error" role="alert">
+    <h2>{locale === "zh-CN" ? "赛事数据加载失败" : "Failed to load events"}</h2>
+    <p>{locale === "zh-CN" ? "当前无法读取赛事，请重试。" : "Event data is unavailable right now. Try again."}</p>
+    <button className="product-btn product-btn-secondary" type="button" onClick={onRetry}>{locale === "zh-CN" ? "重试" : "Retry"}</button>
+  </section>
+);
+
 const StatusPill: React.FC<{ status: EventStatus; locale: string }> = ({ status, locale }) => (
   <span className={`event-v2-status status-${status.toLowerCase()}`}><i aria-hidden="true" />{statusLabel(status, locale)}</span>
 );
@@ -305,6 +390,40 @@ const PhasePill: React.FC<{ phase: MapSummary["phase"]; locale: string }> = ({ p
 function filterLabel(filter: EventFilter, locale: string): string {
   if (locale !== "zh-CN") return filter === "ALL" ? "All" : filter === "LIVE" ? "Live" : filter === "UPCOMING" ? "Upcoming" : "Completed";
   return filter === "ALL" ? "全部" : filter === "LIVE" ? "进行中" : filter === "UPCOMING" ? "即将开始" : "已结束";
+}
+
+function eventTabLabel(tab: EventDetailTab, locale: string): string {
+  if (locale !== "zh-CN") return tab === "OVERVIEW" ? "Overview" : tab === "SCHEDULE" ? "Schedule" : tab === "UPCOMING" ? "Upcoming" : tab === "LIVE" ? "Live" : "Completed";
+  return tab === "OVERVIEW" ? "总览" : tab === "SCHEDULE" ? "赛程" : tab === "UPCOMING" ? "即将开始" : tab === "LIVE" ? "进行中" : "已结束";
+}
+
+function eventScheduleTitle(tab: EventDetailTab, locale: string): string {
+  if (tab === "UPCOMING") return locale === "zh-CN" ? "即将开始的比赛" : "Upcoming matches";
+  if (tab === "LIVE") return locale === "zh-CN" ? "进行中的比赛" : "Live matches";
+  if (tab === "COMPLETED") return locale === "zh-CN" ? "已结束的比赛" : "Completed matches";
+  return locale === "zh-CN" ? "对阵与赛果" : "Matches & results";
+}
+
+function filterEventSeries(series: EventSeriesSummary[], tab: EventDetailTab): EventSeriesSummary[] {
+  if (tab === "UPCOMING") return series.filter((item) => item.phase === "PREMATCH" || item.phase === "UNKNOWN");
+  if (tab === "LIVE") return series.filter((item) => item.phase === "LIVE");
+  if (tab === "COMPLETED") return series.filter((item) => item.phase === "POSTMATCH" || item.phase === "AWAITING_RESULT");
+  return series;
+}
+
+function eventTeams(event: EventSummary): NonNullable<MapSummary["team_a"]>[] {
+  const teams = new Map<string, NonNullable<MapSummary["team_a"]>>();
+  for (const match of event.matches) {
+    for (const team of [match.team_a, match.team_b]) {
+      if (team) teams.set(team.id || team.name, team);
+    }
+  }
+  return Array.from(teams.values());
+}
+
+function seriesFormats(series: EventSeriesSummary[]): string {
+  const formats = Array.from(new Set(series.map((item) => item.bestOf).filter((value): value is number => Boolean(value))));
+  return formats.length > 0 ? formats.map((value) => `BO${value}`).join(" / ") : "—";
 }
 
 function statusLabel(status: EventStatus, locale: string): string {

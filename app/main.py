@@ -61,7 +61,6 @@ from app.market.odds_registry import OddsRegistry
 from app.market.registry_refresh import RayBetRegistryRefreshService
 from app.models import (
     CanonicalSeries,
-    DecisionEmailNotificationRecord,
     DltvLiveObservationRecord,
     HistoricalMapRecord,
     HistoricalPlayerMapRecord,
@@ -69,6 +68,7 @@ from app.models import (
     ProviderMatchMapping,
 )
 from app.notifications import DecisionEmailNotificationService, ResendEmailSender
+from app.notifications.models import NotificationDeliveryRecord
 from app.observability import Metrics, configure_logging, configure_tracing
 from app.providers.dltv.bootstrap import DltvBootstrapClient
 from app.providers.dltv.results import DltvResultProvider
@@ -368,7 +368,34 @@ async def run() -> None:
     async def discover() -> None:
         async with session_factory() as session, session.begin():
             count = await discovery.discover_once(session)
-        await health.dependency("RAYBET_HTTP", "READY", matches_discovered=count)
+        await health.dependency(
+            "RAYBET_HTTP",
+            "READY" if count else "DEGRADED",
+            message=None if count else "RayBet discovery produced no matches",
+            matches_discovered=count,
+        )
+        if discovery.liquipedia_seed_error is not None:
+            await health.dependency(
+                "LIQUIPEDIA",
+                "DEGRADED",
+                message=discovery.liquipedia_seed_error,
+            )
+        elif (
+            discovery.liquipedia_seed_result is not None
+            and discovery.liquipedia_seed_result.source is not None
+        ):
+            seed_result = discovery.liquipedia_seed_result
+            await health.dependency(
+                "LIQUIPEDIA",
+                "READY" if seed_result.observations else "DEGRADED",
+                message=(
+                    None
+                    if seed_result.observations
+                    else f"Liquipedia {seed_result.source} produced no observations"
+                ),
+                source=seed_result.source,
+                observations=seed_result.observations,
+            )
 
     async def maintain_partitions() -> None:
         await ensure_weekly_partitions(engine)
@@ -700,6 +727,7 @@ async def run() -> None:
         if stratz_history is not None:
             await stratz_history.close()
         await dltv_http.close()
+        await discovery.close()
         await raybet_http.close()
         await raybet_curl.close()
         await engine.dispose()
@@ -918,7 +946,7 @@ async def _initialize_dependency_health(
     ai_provider_names: tuple[str, ...],
     qq_store: QQBotStore | None = None,
 ) -> None:
-    for dependency in ("RAYBET_HTTP", "DLTV_DRAFT"):
+    for dependency in ("RAYBET_HTTP", "LIQUIPEDIA", "DLTV_DRAFT"):
         await health.dependency(dependency, "UNKNOWN")
     for dependency in ("RAYBET_SOCKET", "DLTV_SOCKET"):
         await health.dependency(
@@ -1030,8 +1058,9 @@ async def _restore_email_health(health, *, session_factory, configured: bool) ->
         return
     async with session_factory() as session:
         latest = await session.scalar(
-            select(DecisionEmailNotificationRecord)
-            .order_by(DecisionEmailNotificationRecord.created_at.desc())
+            select(NotificationDeliveryRecord)
+            .where(NotificationDeliveryRecord.channel == "EMAIL")
+            .order_by(NotificationDeliveryRecord.created_at.desc())
             .limit(1)
         )
     if latest is None:
@@ -1041,7 +1070,7 @@ async def _restore_email_health(health, *, session_factory, configured: bool) ->
             "EMAIL",
             "READY",
             last_success_at=latest.sent_at,
-            recipient_count=len(latest.recipients),
+            recipient_count=1,
             notification_id=str(latest.id),
         )
     elif latest.status == "FAILED":

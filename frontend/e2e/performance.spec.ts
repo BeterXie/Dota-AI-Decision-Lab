@@ -319,11 +319,10 @@ test("compares AI portfolios and drills into an auditable event position", async
   await page.goto("/performance");
 
   await expect(page.getByRole("heading", { name: "AI 表现榜", exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "AI 盈利与质量" })).toBeVisible();
   await expect(page.getByText("跨赛事 Shadow 排行")).toBeVisible();
   await expect(page.getByText(/排序规则：已实现 ROI 从高到低/)).toBeVisible();
-  await expect(page.getByText("不代表真实下注", { exact: true })).toBeVisible();
-  await expect(page.getByText("SAME STARTING BANKROLL · SHADOW SETTLEMENT", { exact: true })).toBeHidden();
+  await expect(page.getByText(/不涉及真实资金或真实下注/)).toBeVisible();
+  await expect(page.getByText("SAME STARTING BANKROLL · SHADOW SETTLEMENT", { exact: true })).toHaveCount(0);
   await expect(page.getByText("REAL SETTLEMENT", { exact: true })).toHaveCount(0);
 
   const gptRow = page.getByRole("button", { name: /#1 GPT gpt-5\.6/ });

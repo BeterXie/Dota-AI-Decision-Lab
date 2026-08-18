@@ -11,7 +11,7 @@ from app.identity.raybet_linking import RayBetExistingSeriesLinker
 from app.identity.resolver import IdentityAmbiguousError
 from app.models import RayBetMatch
 from app.providers.common import TimedPayload
-from app.providers.liquipedia.runtime import LiquipediaRuntimeSeeder
+from app.providers.liquipedia.runtime import LiquipediaRuntimeSeeder, LiquipediaSeedResult
 from app.providers.raybet.parser import PARSER_VERSION, parse_matches
 from app.repositories.raw import RawEventRepository
 
@@ -46,6 +46,16 @@ class RayBetDiscoveryService:
         self._on_match = on_match
         self._liquipedia = liquipedia_seeder or LiquipediaRuntimeSeeder(raw_events)
         self._existing_series_linker = existing_series_linker or RayBetExistingSeriesLinker()
+        self._liquipedia_seed_result: LiquipediaSeedResult | None = None
+        self._liquipedia_seed_error: str | None = None
+
+    @property
+    def liquipedia_seed_result(self) -> LiquipediaSeedResult | None:
+        return self._liquipedia_seed_result
+
+    @property
+    def liquipedia_seed_error(self) -> str | None:
+        return self._liquipedia_seed_error
 
     async def discover_once(self, session: AsyncSession) -> int:
         await self._seed_liquipedia_without_blocking_raybet(session)
@@ -128,16 +138,20 @@ class RayBetDiscoveryService:
         await self._liquipedia.close()
 
     async def _seed_liquipedia_without_blocking_raybet(self, session: AsyncSession) -> None:
+        self._liquipedia_seed_result = None
+        self._liquipedia_seed_error = None
         try:
             async with session.begin_nested():
                 result = await self._liquipedia.refresh_one_due(session)
         except Exception as exc:
+            self._liquipedia_seed_error = f"{type(exc).__name__}: {exc}"
             logger.warning(
                 "liquipedia_seed_failed",
                 error_type=type(exc).__name__,
                 error=str(exc),
             )
             return
+        self._liquipedia_seed_result = result
         if result.source is not None:
             logger.info(
                 "liquipedia_seed_completed",

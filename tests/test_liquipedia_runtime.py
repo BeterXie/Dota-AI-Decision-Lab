@@ -181,6 +181,8 @@ async def test_liquipedia_seed_failure_does_not_block_raybet_discovery_transacti
         discovered = await discovery.discover_once(session)
 
     assert discovered == 0
+    assert discovery.liquipedia_seed_result is None
+    assert discovery.liquipedia_seed_error == "RuntimeError: Liquipedia unavailable"
     async with factory() as session:
         raybet_raw = await session.scalar(
             select(func.count())

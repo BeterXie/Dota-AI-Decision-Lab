@@ -1,6 +1,6 @@
 import React from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { cleanup, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import { BillingPage } from "./BillingPage";
@@ -12,7 +12,7 @@ afterEach(() => {
 
 function renderPage(props?: Partial<React.ComponentProps<typeof BillingPage>>) {
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  const defaults = { authenticated: false, hasPro: false, onLogin: vi.fn() };
+  const defaults = { authenticated: false, onLogin: vi.fn() };
   const merged = { ...defaults, ...props };
   render(
     <QueryClientProvider client={queryClient}>
@@ -28,78 +28,49 @@ const offers = {
   provider: "paddle",
   enabled: true,
   environment: "sandbox",
-  offers: [
-    {
-      key: "pro_monthly",
-      label: "Pro Monthly",
-      kind: "subscription",
-      grant_days: null,
-      entitlements: ["ai_decisions", "realtime_notifications"],
-      payment_methods: {
-        card: "subscription",
-        alipay: "subscription",
-        wechat_pay: "not_supported_for_subscription"
-      }
-    },
-    {
-      key: "pro_30d",
-      label: "Pro 30-day Pass",
-      kind: "fixed_term",
-      grant_days: 30,
-      entitlements: ["ai_decisions", "realtime_notifications"],
-      payment_methods: { card: "one_time", alipay: "one_time", wechat_pay: "one_time" }
-    }
-  ],
-  series_pass: { enabled: false },
+  series_pass: {
+    enabled: true,
+    key: "series_pass",
+    scope_type: "SERIES",
+    non_expiring: true,
+    payment_methods: { card: "one_time", alipay: "one_time", wechat_pay: "one_time" }
+  },
+  event_pass: {
+    enabled: true,
+    key: "event_pass",
+    scope_type: "EVENT",
+    non_expiring: true,
+    payment_methods: { card: "one_time", alipay: "one_time", wechat_pay: "one_time" }
+  },
   referral: { enabled: false, campaign_key: "referral-v1" },
   local_payment_notes: { alipay: "eligible", wechat_pay: "one time" },
-  crypto: {
-    enabled: false,
-    architecture: "separate_provider_adapter",
-    status: "disabled_by_default"
-  }
+  crypto: { enabled: false, architecture: "separate_provider_adapter", status: "disabled_by_default" }
 };
 
-const account = { entitlements: [], grants: [], subscriptions: [], series_passes: [] };
+const account = { entitlements: [], grants: [], passes: [] };
 
-test("shows WeChat Pay only on fixed-term offers and asks anonymous users to sign in", async () => {
+test("shows Free, Series Pass and Event Pass tiers", async () => {
   vi.stubGlobal(
     "fetch",
-    vi.fn(
-      async () =>
-        new Response(JSON.stringify(offers), {
-          status: 200,
-          headers: { "Content-Type": "application/json" }
-        })
-    )
+    vi.fn(async () => new Response(JSON.stringify(offers), { status: 200 }))
   );
-  const props = renderPage();
+  renderPage();
 
-  const monthly = (await screen.findByText("Pro Monthly")).closest("article");
-  const pass = screen.getByText("Pro 30-day Pass").closest("article");
-  expect(monthly).not.toBeNull();
-  expect(pass).not.toBeNull();
-  expect(within(monthly!).getByText("WeChat Pay · —")).toBeInTheDocument();
-  expect(within(pass!).getByText("WeChat Pay · One-time")).toBeInTheDocument();
-
-  fireEvent.click(within(pass!).getByRole("button", { name: "Sign in to buy" }));
-  expect(props.onLogin).toHaveBeenCalledTimes(1);
+  expect(await screen.findByText("Free Access")).toBeInTheDocument();
+  expect(screen.getAllByText("Series Pass").length).toBeGreaterThan(0);
+  expect(screen.getAllByText("Event Pass").length).toBeGreaterThan(0);
 });
 
 test("does not call checkout while Paddle is disabled", async () => {
-  const disabled = { ...offers, enabled: false, offers: [] };
+  const disabled = { ...offers, enabled: false, series_pass: { enabled: false }, event_pass: { enabled: false } };
   const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
     const path = new URL(String(input), "http://localhost").pathname;
     const payload = path === "/api/billing/account" ? account : disabled;
-    return new Response(JSON.stringify(payload), {
-      status: 200,
-      headers: { "Content-Type": "application/json" }
-    });
+    return new Response(JSON.stringify(payload), { status: 200 });
   });
   vi.stubGlobal("fetch", fetchMock);
   renderPage({ authenticated: true });
 
   expect(await screen.findByText("Paddle is not enabled yet")).toBeInTheDocument();
-  expect(screen.queryByText("Continue to secure checkout")).not.toBeInTheDocument();
   expect(fetchMock).toHaveBeenCalledTimes(2);
 });
