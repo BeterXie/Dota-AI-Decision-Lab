@@ -92,7 +92,7 @@ describe("DecisionReadinessPanel", () => {
     );
 
     expect(screen.getByText("真实比赛决策就绪度")).toBeTruthy();
-    expect(screen.getByText("33%")).toBeTruthy();
+    expect(screen.getAllByText("33%").length).toBeGreaterThan(0);
     expect(screen.getByText("Aurora")).toBeTruthy();
     expect(screen.getByText("Team Falcons")).toBeTruthy();
 
