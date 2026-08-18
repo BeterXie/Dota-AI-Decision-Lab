@@ -5,6 +5,7 @@ from uuid import UUID
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.domain.jobs import DurableJob
+from app.history.identity import HistoricalTeamResolver
 from app.identity.team_registry_population import TeamRegistryPopulationService
 from app.providers.opendota.client import OpenDotaClient
 from app.repositories.raw import RawEventRepository
@@ -21,6 +22,7 @@ class TeamRegistryJobHandler:
         opendota: OpenDotaClient,
     ) -> None:
         self._session_factory = session_factory
+        self._identity = HistoricalTeamResolver(raw_events)
         self._population = TeamRegistryPopulationService(raw_events)
         self._opendota = opendota
 
@@ -36,6 +38,14 @@ class TeamRegistryJobHandler:
             raise ValueError("canonical_team_ids must contain only UUID strings")
 
         async with self._session_factory() as session, session.begin():
+            # A newly discovered RayBet team may not have an OpenDota identity
+            # yet. Resolve that provider identity first, then enrich the same
+            # canonical team. This never rewrites RayBet provider mappings.
+            await self._identity.refresh_opendota_catalog(
+                session,
+                self._opendota,
+                canonical_team_ids=team_ids,
+            )
             await self._population.populate(
                 session,
                 self._opendota,
