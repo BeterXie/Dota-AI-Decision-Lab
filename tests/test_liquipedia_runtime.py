@@ -74,7 +74,9 @@ class FailingSeeder:
 
 
 class EmptyRayBetClient:
-    async def get_matches(self, _match_type: int, _page: int = 1) -> app.providers.common.TimedPayload:
+    async def get_matches(
+        self, _match_type: int, _page: int = 1
+    ) -> app.providers.common.TimedPayload:
         now = datetime(2026, 8, 18, 5, 0, tzinfo=UTC)
         return app.providers.common.TimedPayload(
             payload={"result": []},
@@ -116,7 +118,9 @@ async def test_runtime_seeder_refreshes_schedule_first_then_tournament_directory
     assert third.source is None
     assert client.calls == ["Liquipedia:Matches", "Liquipedia:Tournaments"]
     async with factory() as session:
-        assert await session.scalar(select(func.count()).select_from(app.models.CanonicalSeries)) == 1
+        assert (
+            await session.scalar(select(func.count()).select_from(app.models.CanonicalSeries)) == 1
+        )
         raw_types = set(
             (
                 await session.scalars(
