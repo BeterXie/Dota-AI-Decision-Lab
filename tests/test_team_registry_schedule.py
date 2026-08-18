@@ -83,21 +83,28 @@ async def test_registry_refresh_runs_on_discovery_then_each_24h_before_event_sta
     assert discovery_job.payload["refresh_cycle"] == "discovered"
     assert set(discovery_job.payload["canonical_team_ids"]) == {str(team_a.id), str(team_b.id)}
 
-    after_25h = discovered_at + timedelta(hours=25)
+    exact_24h = discovered_at + timedelta(hours=24)
     async with factory.begin() as session:
+        discovery_at_boundary = await schedule_discovered_event_team_registry_refreshes(
+            session,
+            jobs,
+            discovered_after=exact_24h - timedelta(hours=24),
+            now=exact_24h,
+        )
         first_periodic = await schedule_prestart_event_team_registry_refreshes(
             session,
             jobs,
             refresh_seconds=86_400,
-            now=after_25h,
+            now=exact_24h,
         )
         repeated_periodic = await schedule_prestart_event_team_registry_refreshes(
             session,
             jobs,
             refresh_seconds=86_400,
-            now=after_25h + timedelta(minutes=30),
+            now=exact_24h + timedelta(minutes=30),
         )
 
+    assert discovery_at_boundary.jobs_enqueued == 0
     assert first_periodic.jobs_enqueued == 1
     assert repeated_periodic.jobs_enqueued == 1
     async with factory() as session:
