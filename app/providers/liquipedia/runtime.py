@@ -42,17 +42,24 @@ class LiquipediaRuntimeSeeder:
         schedule_refresh_seconds: float = LIQUIPEDIA_SCHEDULE_REFRESH_SECONDS,
         tournament_refresh_seconds: float = LIQUIPEDIA_TOURNAMENT_REFRESH_SECONDS,
         failure_retry_seconds: float = LIQUIPEDIA_FAILURE_RETRY_SECONDS,
+        minimum_parse_interval_seconds: float = LIQUIPEDIA_PARSE_INTERVAL_SECONDS,
     ) -> None:
         if schedule_refresh_seconds <= 0 or tournament_refresh_seconds <= 0:
             raise ValueError("Liquipedia refresh intervals must be positive")
         if failure_retry_seconds <= 0:
             raise ValueError("Liquipedia failure retry interval must be positive")
-        self._client = client or LiquipediaMediaWikiClient()
-        self._discovery = LiquipediaDiscoveryService(self._client, raw_events)
+        if minimum_parse_interval_seconds < 0:
+            raise ValueError("Liquipedia minimum parse interval must be non-negative")
+        self._raw_events = raw_events
+        self._client = client
+        self._discovery = (
+            LiquipediaDiscoveryService(client, raw_events) if client is not None else None
+        )
         self._projector = LiquipediaCanonicalProjector()
         self._schedule_refresh_seconds = schedule_refresh_seconds
         self._tournament_refresh_seconds = tournament_refresh_seconds
         self._failure_retry_seconds = failure_retry_seconds
+        self._minimum_parse_interval_seconds = minimum_parse_interval_seconds
         self._last_schedule_at: float | None = None
         self._last_tournament_at: float | None = None
         self._last_parse_attempt_at: float | None = None
@@ -64,23 +71,24 @@ class LiquipediaRuntimeSeeder:
             return LiquipediaSeedResult(source=None)
         if (
             self._last_parse_attempt_at is not None
-            and now - self._last_parse_attempt_at < LIQUIPEDIA_PARSE_INTERVAL_SECONDS
+            and now - self._last_parse_attempt_at < self._minimum_parse_interval_seconds
         ):
             return LiquipediaSeedResult(source=None)
 
         source = self._next_due_source(now)
         if source is None:
             return LiquipediaSeedResult(source=None)
+        discovery = self._ensure_discovery()
         self._last_parse_attempt_at = now
         try:
             if source == "schedule":
-                observations = await self._discovery.discover_global_schedule(session)
+                observations = await discovery.discover_global_schedule(session)
                 if not observations:
                     raise ValueError("Liquipedia global schedule produced no observations")
                 projection = await self._projector.project_series(session, observations)
                 self._last_schedule_at = monotonic()
             else:
-                observations = await self._discovery.discover_tournaments(session)
+                observations = await discovery.discover_tournaments(session)
                 if not observations:
                     raise ValueError("Liquipedia tournament directory produced no observations")
                 projection = await self._projector.project_tournaments(session, observations)
@@ -96,7 +104,17 @@ class LiquipediaRuntimeSeeder:
         )
 
     async def close(self) -> None:
-        await self._client.close()
+        if self._client is not None:
+            await self._client.close()
+            self._client = None
+            self._discovery = None
+
+    def _ensure_discovery(self) -> LiquipediaDiscoveryService:
+        if self._discovery is not None:
+            return self._discovery
+        self._client = LiquipediaMediaWikiClient()
+        self._discovery = LiquipediaDiscoveryService(self._client, self._raw_events)
+        return self._discovery
 
     def _next_due_source(self, now: float) -> str | None:
         if (
