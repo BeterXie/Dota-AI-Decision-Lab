@@ -141,7 +141,11 @@ class AiBaselineBenchmarkService:
             acc.action_counts[decision.action] += 1
 
             map_id = canonical_map.id
-            if evaluation is not None and evaluation.clv is not None and map_id not in acc.clv_by_map:
+            if (
+                evaluation is not None
+                and evaluation.clv is not None
+                and map_id not in acc.clv_by_map
+            ):
                 acc.clv_by_map[map_id] = float(evaluation.clv)
 
             if (
@@ -243,11 +247,12 @@ class AiBaselineBenchmarkService:
         ]
         comparable_ai_briers = [sample[2] for sample in comparable]
         accuracy = _average(
-            [1.0 if ((probability >= 0.5) == outcome) else 0.0 for probability, outcome in zip(probabilities, outcomes, strict=True)]
+            [
+                1.0 if ((probability >= 0.5) == outcome) else 0.0
+                for probability, outcome in zip(probabilities, outcomes, strict=True)
+            ]
         )
-        abstentions = sum(
-            acc.action_counts[action] for action in ("NO_BUY", "INSUFFICIENT_DATA")
-        )
+        abstentions = sum(acc.action_counts[action] for action in ("NO_BUY", "INSUFFICIENT_DATA"))
         action_total = sum(acc.action_counts.values())
         portfolio_metrics = _portfolio_metrics(portfolio)
         return {
@@ -452,7 +457,7 @@ def _market_probability_a(
             continue
         try:
             price = float(item.get("price"))
-        except (TypeError, ValueError):
+        except TypeError, ValueError:
             continue
         if price <= 1:
             continue
