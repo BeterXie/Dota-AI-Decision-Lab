@@ -17,6 +17,7 @@ from app.models import AiDecisionRecord, DecisionEmailNotificationRecord, Durabl
 from app.notifications.email import DecisionEmailNotificationService, OutgoingEmail
 from app.runtime.health import HealthRegistry
 from app.runtime_config.ai_coordinator import RuntimeAiCoordinator
+from app.runtime_config.service import _clear_active_experiment_cache
 from app.snapshots.repository import SnapshotRepository
 
 
@@ -64,6 +65,7 @@ class _BuyProvider:
 
 @pytest.mark.asyncio
 async def test_runtime_notification_waits_for_the_scheduled_provider_batch() -> None:
+    _clear_active_experiment_cache()
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
