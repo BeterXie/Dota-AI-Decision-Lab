@@ -6,6 +6,7 @@ export interface TeamDirectoryEntry {
   slug: string | null;
   short_name: string | null;
   valve_team_id: number | null;
+  identity_source: "registry" | "opendota" | null;
   country_code: string | null;
   logo_url: string | null;
   logo_source: string | null;
