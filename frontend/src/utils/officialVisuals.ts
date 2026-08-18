@@ -51,18 +51,23 @@ const VALVE_AEGIS: OfficialEventArtwork = {
   objectPosition: "50% 50%"
 };
 
+export function getValveTeamLogoUrl(teamId: string | number | null | undefined): string | null {
+  if (teamId == null) return null;
+  const normalized = String(teamId).trim();
+  if (!/^\d{1,12}$/.test(normalized)) return null;
+  return `${VALVE_TEAM_LOGO_BASE}/${normalized}.png`;
+}
+
 export function getOfficialTeamLogoUrl(team: TeamIdentity): string | null {
   if (!team) return null;
-  const directId = team.id?.trim();
-  if (directId && /^\d{1,12}$/.test(directId)) {
-    return `${VALVE_TEAM_LOGO_BASE}/${directId}.png`;
-  }
+  const direct = getValveTeamLogoUrl(team.id);
+  if (direct) return direct;
 
   const normalized = team.name?.trim().toLowerCase();
   if (!normalized) return null;
   for (const [name, teamId] of Object.entries(TEAM_NAME_TO_VALVE_ID)) {
     if (normalized === name || normalized.includes(name)) {
-      return `${VALVE_TEAM_LOGO_BASE}/${teamId}.png`;
+      return getValveTeamLogoUrl(teamId);
     }
   }
   return null;
