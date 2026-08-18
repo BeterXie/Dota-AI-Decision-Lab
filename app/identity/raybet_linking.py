@@ -127,18 +127,13 @@ class RayBetExistingSeriesLinker:
 
         series = candidates[0]
         reconciled = existing_series_id is not None and existing_series_id != series.id
-        await self._attach_event_mapping(
-            session,
-            match,
-            series,
-            allow_provisional_rebind=reconciled,
-        )
+        await self._attach_event_mapping(session, match, series)
+        exact_best_of = best_of is not None and series.best_of == best_of
         if series.best_of is None:
             series.best_of = best_of
         if series.scheduled_at is None:
             series.scheduled_at = match.scheduled_at
 
-        exact_best_of = best_of is not None and series.best_of == best_of
         prefix = "LIQUIPEDIA_RECONCILED" if reconciled else "LIQUIPEDIA"
         resolved_by = f"{prefix}_TEAMS_TIME_BO" if exact_best_of else f"{prefix}_TEAMS_TIME"
         confidence = 0.99 if exact_best_of else 0.97
@@ -313,7 +308,11 @@ class RayBetExistingSeriesLinker:
         if not event_ids:
             return []
         events = list(
-            (await session.scalars(select(CanonicalEvent).where(CanonicalEvent.id.in_(event_ids)))).all()
+            (
+                await session.scalars(
+                    select(CanonicalEvent).where(CanonicalEvent.id.in_(event_ids))
+                )
+            ).all()
         )
         compatible_ids = {
             event.id for event in events if _event_names_compatible(event_name, event.name)
@@ -325,8 +324,6 @@ class RayBetExistingSeriesLinker:
         session: AsyncSession,
         match: ProviderMatch,
         series: CanonicalSeries,
-        *,
-        allow_provisional_rebind: bool,
     ) -> None:
         if match.tournament_id is None or series.event_id is None:
             return
@@ -349,8 +346,6 @@ class RayBetExistingSeriesLinker:
         if mapping.canonical_event_id == series.event_id:
             return
         if await self._event_is_liquipedia_backed(session, mapping.canonical_event_id):
-            raise IdentityAmbiguousError("RAYBET_EVENT_SERIES_CONFLICT")
-        if not allow_provisional_rebind:
             raise IdentityAmbiguousError("RAYBET_EVENT_SERIES_CONFLICT")
         mapping.canonical_event_id = series.event_id
 
@@ -379,8 +374,12 @@ def _event_name_keys(value: str) -> frozenset[str]:
     if without_articles:
         keys.add(" ".join([*without_articles, *numbers]))
         keys.add("".join([*without_articles, *numbers]))
-        if len(without_articles) >= 2:
-            acronym = "".join(token[0] for token in without_articles)
-            keys.add(" ".join([acronym, *numbers]))
-            keys.add("".join([acronym, *numbers]))
+    if len(words) >= 2:
+        acronym = "".join(token[0] for token in words)
+        keys.add(" ".join([acronym, *numbers]))
+        keys.add("".join([acronym, *numbers]))
+    if len(without_articles) >= 2:
+        acronym = "".join(token[0] for token in without_articles)
+        keys.add(" ".join([acronym, *numbers]))
+        keys.add("".join([acronym, *numbers]))
     return frozenset(key for key in keys if key)
