@@ -29,9 +29,7 @@ def upgrade() -> None:
         sa.Column("source_url", sa.Text(), nullable=True),
         sa.Column("observed_at", sa.DateTime(timezone=True), nullable=True),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
-        sa.ForeignKeyConstraint(
-            ["canonical_team_id"], ["canonical_teams.id"], ondelete="CASCADE"
-        ),
+        sa.ForeignKeyConstraint(["canonical_team_id"], ["canonical_teams.id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("canonical_team_id"),
         sa.UniqueConstraint("slug", name="uq_team_profiles_slug"),
         sa.UniqueConstraint("valve_team_id", name="uq_team_profiles_valve_team_id"),
