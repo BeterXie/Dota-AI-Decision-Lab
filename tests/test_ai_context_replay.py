@@ -83,8 +83,15 @@ async def test_planner_selects_earliest_evaluable_settled_baseline_and_dedupes_p
         await session.flush()
 
         earliest = await _baseline_snapshot(session, map_one.id, NOW)
-        await _baseline_snapshot(session, map_one.id, NOW + timedelta(minutes=5))
-        await _baseline_snapshot(session, map_unsettled.id, NOW + timedelta(minutes=10), result=False)
+        await _baseline_snapshot(
+            session,
+            map_one.id,
+            NOW + timedelta(minutes=5),
+            result=False,
+        )
+        await _baseline_snapshot(
+            session, map_unsettled.id, NOW + timedelta(minutes=10), result=False
+        )
         await _baseline_snapshot(
             session,
             map_conflict.id,
@@ -205,7 +212,7 @@ async def test_executor_requires_exact_confirmation_evaluates_and_never_records_
 
 
 @pytest.mark.asyncio
-async def test_executor_commits_each_call_so_partial_failure_keeps_progress() -> None:
+async def test_executor_commits_each_call_and_keeps_failed_attempt_audit() -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
@@ -233,6 +240,9 @@ async def test_executor_commits_each_call_so_partial_failure_keeps_progress() ->
 
     assert result["succeeded"] == 2
     assert result["failed"] == 1
+    failed = [item for item in result["results"] if item["status"] == "FAILED"]
+    assert failed[0]["parse_status"] == "FAILED"
+    assert "fixture provider failure" in failed[0]["error"]
     async with factory() as session:
         persisted = list(
             (
@@ -243,7 +253,9 @@ async def test_executor_commits_each_call_so_partial_failure_keeps_progress() ->
                 )
             ).all()
         )
-        assert len(persisted) == 2
+        assert len(persisted) == 3
+        assert sum(row.parse_status == "SUCCESS" for row in persisted) == 2
+        assert sum(row.parse_status == "FAILED" for row in persisted) == 1
     await coordinator.close()
     await engine.dispose()
 
