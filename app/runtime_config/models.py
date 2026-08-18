@@ -1,7 +1,16 @@
 from datetime import datetime
 from uuid import UUID, uuid4
 
-from sqlalchemy import Boolean, DateTime, Float, Integer, LargeBinary, String, Text, UniqueConstraint
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Float,
+    Integer,
+    LargeBinary,
+    String,
+    Text,
+    UniqueConstraint,
+)
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import JSON_DOCUMENT, Base
@@ -33,9 +42,7 @@ class RuntimeSecretRecord(Base):
 
 class AiProviderConfigRecord(Base):
     __tablename__ = "ai_provider_configs"
-    __table_args__ = (
-        UniqueConstraint("provider", "slot", name="uq_ai_provider_config_slot"),
-    )
+    __table_args__ = (UniqueConstraint("provider", "slot", name="uq_ai_provider_config_slot"),)
 
     id: Mapped[UUID] = mapped_column(primary_key=True, default=uuid4)
     provider: Mapped[str] = mapped_column(String(32), nullable=False)
