@@ -10,8 +10,10 @@ import { LoginDialog } from "./components/LoginDialog";
 import { MatchPage } from "./components/MatchPage";
 import { PremiumSurface, type PremiumSurfaceKey } from "./components/PremiumSurface";
 import { ProductShell, type ProductNavKey } from "./components/ProductShell";
+import { TeamPage } from "./components/TeamPage";
 import { I18nProvider } from "./i18n";
 import { matchIdFromPath } from "./matches";
+import { teamSlugFromPath } from "./teams";
 
 const authSessionKey = ["auth", "session"] as const;
 
@@ -28,6 +30,7 @@ function ProductExperience({ pathname }: { pathname: string }) {
   const accountRoute = pathname === "/account" || pathname.startsWith("/account/");
   const isHome = pathname === "/";
   const matchRouteId = matchIdFromPath(pathname);
+  const teamRouteSlug = teamSlugFromPath(pathname);
   const needsMatchDirectory = premiumSurface === null && !accountRoute;
   const auth = useQuery({
     queryKey: authSessionKey,
@@ -94,6 +97,14 @@ function ProductExperience({ pathname }: { pathname: string }) {
         signedIn={signedIn}
         hasPro={hasPro}
         onLogin={() => setLoginOpen(true)}
+      />
+    );
+  } else if (teamRouteSlug) {
+    page = (
+      <TeamPage
+        slug={teamRouteSlug}
+        matches={matches.data ?? []}
+        matchesLoading={matches.isLoading}
       />
     );
   } else if (matchRouteId) {
@@ -163,6 +174,7 @@ function isProductRoute(pathname: string): boolean {
     pathname === "/events" ||
     pathname.startsWith("/events/") ||
     pathname.startsWith("/matches/") ||
+    pathname.startsWith("/teams/") ||
     pathname === "/account" ||
     pathname.startsWith("/account/") ||
     premiumSurfaceForPath(pathname) !== null
