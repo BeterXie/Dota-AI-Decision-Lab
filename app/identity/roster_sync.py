@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from typing import Protocol
 from uuid import UUID
 
 from sqlalchemy import select
@@ -8,8 +9,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.identity.roster_models import TeamRosterMembership
 from app.models import CanonicalPlayer, CanonicalTeam, ProviderTeamMapping
-from app.providers.opendota.client import OpenDotaClient
+from app.providers.common import TimedPayload
 from app.repositories.raw import RawEventRepository
+
+
+class TeamRosterClient(Protocol):
+    normalizer_version: str
+
+    async def get_team_players(self, team_id: str | int) -> TimedPayload: ...
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,7 +37,7 @@ class TeamRosterSyncService:
     async def sync_team(
         self,
         session: AsyncSession,
-        client: OpenDotaClient,
+        client: TeamRosterClient,
         *,
         canonical_team_id: UUID,
     ) -> RosterSyncResult:
