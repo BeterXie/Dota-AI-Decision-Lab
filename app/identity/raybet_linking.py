@@ -188,7 +188,9 @@ class RayBetExistingSeriesLinker:
         candidates: list[CanonicalSeries],
         event_name: str,
     ) -> list[CanonicalSeries]:
-        event_ids = {candidate.event_id for candidate in candidates if candidate.event_id is not None}
+        event_ids = {
+            candidate.event_id for candidate in candidates if candidate.event_id is not None
+        }
         if not event_ids:
             return []
         matching_ids = set(
