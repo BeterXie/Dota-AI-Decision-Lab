@@ -75,6 +75,17 @@ describe("event aggregation", () => {
     expect(series[0].phase).toBe("POSTMATCH");
   });
 
+  it("keeps a partial score in settling state when one map awaits confirmation", () => {
+    const [event] = buildEventSummaries([
+      match({ id: "map-1", series_id: "series-a", phase: "POSTMATCH", series_score: { team_a: 1, team_b: 0 } }),
+      match({ id: "map-2", series_id: "series-a", phase: "AWAITING_RESULT", map_number: 2, series_score: { team_a: 1, team_b: 0 } })
+    ]);
+    const [series] = buildSeriesSummaries(event);
+
+    expect(series.phase).toBe("AWAITING_RESULT");
+    expect(series.score).toEqual({ team_a: 1, team_b: 0 });
+  });
+
   it("uses readable ASCII slugs for public event URLs", () => {
     expect(eventName(match({}))).toBe("The International 2026");
     expect(eventSlug("TI15 国际邀请赛")).toBe("the-international-2026");

@@ -252,17 +252,25 @@ const SeriesNavigator: React.FC<{ match: MapSummary; activeMapId: string; locale
   );
 };
 
-const MatchStateCard: React.FC<{ match: MapSummary; detail: MapDetail | undefined; locale: string }> = ({ match, detail, locale }) => (
-  <article className="match-signal-card">
-    <div className="match-card-kicker"><span aria-hidden="true">◎</span>{locale === "zh-CN" ? "数据状态" : "Data status"}</div>
-    <div className="match-state-list">
-      <StateLine label={locale === "zh-CN" ? "身份" : "Identity"} value={match.identity_status === "RESOLVED" ? (locale === "zh-CN" ? "已确认" : "Resolved") : (locale === "zh-CN" ? "确认中" : "Pending")} />
-      <StateLine label={locale === "zh-CN" ? "Draft" : "Draft"} value={match.draft?.complete ? (locale === "zh-CN" ? "完整" : "Complete") : match.draft ? (locale === "zh-CN" ? "采集中" : "Collecting") : (locale === "zh-CN" ? "暂无" : "Not available")} />
-      <StateLine label={locale === "zh-CN" ? "赛果" : "Result"} value={detail?.result ? (locale === "zh-CN" ? "已确认" : "Confirmed") : match.phase === "POSTMATCH" ? (locale === "zh-CN" ? "等待确认" : "Awaiting confirmation") : "—"} />
-      <StateLine label={locale === "zh-CN" ? "最新数据" : "Latest data"} value={latestObservedAt(detail ?? match, locale)} />
-    </div>
-  </article>
-);
+const MatchStateCard: React.FC<{ match: MapSummary; detail: MapDetail | undefined; locale: string }> = ({ match, detail, locale }) => {
+  const resultConfirmed = Boolean(detail?.result?.winner_team_id && !detail.result.provider_conflict);
+  const resultLabel = resultConfirmed
+    ? (locale === "zh-CN" ? "已确认" : "Confirmed")
+    : match.phase === "POSTMATCH" || match.phase === "AWAITING_RESULT"
+      ? (locale === "zh-CN" ? "等待确认" : "Awaiting confirmation")
+      : "—";
+  return (
+    <article className="match-signal-card">
+      <div className="match-card-kicker"><span aria-hidden="true">◎</span>{locale === "zh-CN" ? "数据状态" : "Data status"}</div>
+      <div className="match-state-list">
+        <StateLine label={locale === "zh-CN" ? "身份" : "Identity"} value={match.identity_status === "RESOLVED" ? (locale === "zh-CN" ? "已确认" : "Resolved") : (locale === "zh-CN" ? "确认中" : "Pending")} />
+        <StateLine label={locale === "zh-CN" ? "Draft" : "Draft"} value={match.draft?.complete ? (locale === "zh-CN" ? "完整" : "Complete") : match.draft ? (locale === "zh-CN" ? "采集中" : "Collecting") : (locale === "zh-CN" ? "暂无" : "Not available")} />
+        <StateLine label={locale === "zh-CN" ? "赛果" : "Result"} value={resultLabel} />
+        <StateLine label={locale === "zh-CN" ? "最新数据" : "Latest data"} value={latestObservedAt(detail ?? match, locale)} />
+      </div>
+    </article>
+  );
+};
 
 const StateLine: React.FC<{ label: string; value: string }> = ({ label, value }) => <div><span>{label}</span><strong>{value}</strong></div>;
 

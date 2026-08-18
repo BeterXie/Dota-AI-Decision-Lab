@@ -30,7 +30,7 @@ from app.models import (
     TeamRatingSnapshotRecord,
 )
 from app.runtime.health import HealthRegistry
-from app.web.api import _decision_payload, _match_phase, create_app
+from app.web.api import _confirmed_result, _decision_payload, _match_phase, create_app
 
 
 def test_match_phase_uses_result_and_fresh_live_facts() -> None:
@@ -89,7 +89,31 @@ def test_match_phase_uses_result_and_fresh_live_facts() -> None:
             observed_at=now,
             live_state_max_age_seconds=45,
         )
+        == "AWAITING_RESULT"
+    )
+    result.winner_team_id = uuid4()
+    assert _confirmed_result(result) is True
+    assert (
+        _match_phase(
+            scheduled_at=now - timedelta(hours=1),
+            live=live,
+            result=result,
+            observed_at=now,
+            live_state_max_age_seconds=45,
+        )
         == "POSTMATCH"
+    )
+    result.provider_conflict = True
+    assert _confirmed_result(result) is False
+    assert (
+        _match_phase(
+            scheduled_at=now - timedelta(hours=1),
+            live=live,
+            result=result,
+            observed_at=now,
+            live_state_max_age_seconds=45,
+        )
+        == "AWAITING_RESULT"
     )
 
 

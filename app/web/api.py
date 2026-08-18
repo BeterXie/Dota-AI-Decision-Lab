@@ -399,7 +399,7 @@ async def _map_summary_payloads(
         if sm.series_id is not None:
             maps_by_series.setdefault(sm.series_id, []).append(sm)
             res = result_by_map_id.get(sm.id)
-            if res is not None and res.winner_team_id is not None:
+            if _confirmed_result(res):
                 s = series_by_id.get(sm.series_id)
                 if s is not None:
                     if res.winner_team_id == s.team_a_id:
@@ -618,9 +618,11 @@ async def _map_summary_payloads(
                         "canonical_map_id": str(m.id),
                         "map_number": m.map_number,
                         "valve_match_id": m.valve_match_id,
-                        "winner_team_id": str(result_by_map_id[m.id].winner_team_id)
-                        if m.id in result_by_map_id and result_by_map_id[m.id].winner_team_id
-                        else None,
+                        "winner_team_id": (
+                            str(result_by_map_id[m.id].winner_team_id)
+                            if _confirmed_result(result_by_map_id.get(m.id))
+                            else None
+                        ),
                     }
                     for m in s_maps
                 ],
@@ -840,6 +842,8 @@ async def _map_payload(
     s_score = {"team_a": 0, "team_b": 0}
     if series:
         for res in sibling_results:
+            if not _confirmed_result(res):
+                continue
             if res.winner_team_id == series.team_a_id:
                 s_score["team_a"] += 1
             elif res.winner_team_id == series.team_b_id:
@@ -1173,9 +1177,11 @@ async def _map_payload(
                 "canonical_map_id": str(m.id),
                 "map_number": m.map_number,
                 "valve_match_id": m.valve_match_id,
-                "winner_team_id": str(sibling_result_by_id[m.id].winner_team_id)
-                if m.id in sibling_result_by_id and sibling_result_by_id[m.id].winner_team_id
-                else None,
+                "winner_team_id": (
+                    str(sibling_result_by_id[m.id].winner_team_id)
+                    if _confirmed_result(sibling_result_by_id.get(m.id))
+                    else None
+                ),
             }
             for m in sibling_maps
         ],
@@ -1364,7 +1370,7 @@ def _match_phase(
     live_state_max_age_seconds: float,
 ) -> str:
     if result is not None:
-        return "POSTMATCH"
+        return "POSTMATCH" if _confirmed_result(result) else "AWAITING_RESULT"
     if live is not None:
         message_age = elapsed_seconds(observed_at, live.last_message_received_at)
         if 0 <= message_age <= live_state_max_age_seconds:
@@ -1373,6 +1379,15 @@ def _match_phase(
     if scheduled_at is not None and ensure_utc(scheduled_at) >= ensure_utc(observed_at):
         return "PREMATCH"
     return "UNKNOWN"
+
+
+def _confirmed_result(result: MapResultRecord | None) -> bool:
+    """Only a non-conflicting winner is a publishable final result."""
+    return (
+        result is not None
+        and result.winner_team_id is not None
+        and not result.provider_conflict
+    )
 
 
 async def _draft_slot_payloads(
