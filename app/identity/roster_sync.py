@@ -60,11 +60,11 @@ class TeamRosterSyncService:
         response = await client.get_team_players(source_team_id)
         payload = response.payload
         if not isinstance(payload, list):
-            return RosterSyncResult(
-                canonical_team_id, source_team_id, 0, 0, 0, 0, skipped=True
-            )
+            return RosterSyncResult(canonical_team_id, source_team_id, 0, 0, 0, 0, skipped=True)
         raw_players = [item for item in payload if isinstance(item, dict)]
-        current_players = [item for item in raw_players if item.get("is_current_team_member") is True]
+        current_players = [
+            item for item in raw_players if item.get("is_current_team_member") is True
+        ]
         await self._raw_events.append(
             session,
             provider="opendota",
@@ -78,9 +78,7 @@ class TeamRosterSyncService:
         # An empty roster can mean a source-side coverage gap. Do not close a
         # previously known roster solely because one discovery response is empty.
         if not current_players:
-            return RosterSyncResult(
-                canonical_team_id, source_team_id, 0, 0, 0, 0, skipped=True
-            )
+            return RosterSyncResult(canonical_team_id, source_team_id, 0, 0, 0, 0, skipped=True)
 
         active = list(
             (
@@ -93,9 +91,7 @@ class TeamRosterSyncService:
                 )
             ).all()
         )
-        active_by_player = {
-            item.player_id: item for item in active if item.player_id is not None
-        }
+        active_by_player = {item.player_id: item for item in active if item.player_id is not None}
         incoming_player_ids: set[UUID] = set()
         created_players = created_memberships = 0
 
