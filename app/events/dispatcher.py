@@ -10,6 +10,7 @@ from app.domain.events import DomainEventType
 from app.domain.jobs import JobType
 from app.jobs.repository import JobRepository
 from app.models import DecisionSnapshotRecord, DomainEventRecord, OutboxEventRecord
+from app.runtime_config import active_ai_experiments
 
 EVENT_JOB_MAP: dict[DomainEventType, JobType] = {
     DomainEventType.MARKET_DISCOVERED: JobType.REFRESH_ODDS_REGISTRY,
@@ -92,12 +93,7 @@ class DomainEventDispatcher:
         session: AsyncSession,
         record: DomainEventRecord,
     ) -> None:
-        """Fan out one AI_DECISION_REQUESTED event into one durable job per
-        configured (provider, model) experiment.
-
-        Each job commits its own result as soon as that provider finishes, so
-        a slow model no longer delays the UI for the faster models.
-        """
+        """Fan out using the provider set active at scheduling time."""
         snapshot_id_value = record.payload.get("snapshot_id")
         if not isinstance(snapshot_id_value, str):
             return
@@ -109,7 +105,8 @@ class DomainEventDispatcher:
         if snapshot is None:
             return
         priority = ai_job_priority(snapshot.mode)
-        for experiment in self._ai_experiments:
+        experiments = await active_ai_experiments(session, self._ai_experiments)
+        for experiment in experiments:
             await self._jobs.enqueue(
                 session,
                 job_type=JobType.RUN_AI_PROVIDER,
