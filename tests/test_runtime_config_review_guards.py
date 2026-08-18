@@ -4,6 +4,7 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+import app.runtime_config.service as runtime_service
 from app.ai.base import ai_experiment_key
 from app.db import Base
 from app.evaluation.benchmark import AiBaselineBenchmarkService, _ExperimentAccumulator
@@ -15,7 +16,6 @@ from app.runtime_config.ai_coordinator import (
 from app.runtime_config.models import AiProviderConfigRecord
 from app.runtime_config.policy import AiDecisionPolicySnapshot
 from app.runtime_config.provider_safety import validate_provider_base_url
-import app.runtime_config.service as runtime_service
 from app.web.feature_flags import RuntimeFeatureFlagMiddleware
 from app.web.runtime_admin import _validated_provider_changes
 
@@ -146,14 +146,26 @@ def test_execution_fingerprint_tracks_semantic_runtime_config_without_secrets() 
     assert "api_key" not in version
 
 
-def test_benchmark_blocks_mixed_runtime_execution_config_comparisons() -> None:
-    acc = _ExperimentAccumulator(
-        attempts=2,
-        successful_attempts=2,
-        model_versions={
+@pytest.mark.parametrize(
+    "versions",
+    [
+        {
             "gpt-5.6-terra@cfg:aaaaaaaaaaaa",
             "gpt-5.6-terra@cfg:bbbbbbbbbbbb",
         },
+        {
+            "gpt-5.6-terra",
+            "gpt-5.6-terra@cfg:aaaaaaaaaaaa",
+        },
+    ],
+)
+def test_benchmark_blocks_mixed_runtime_execution_config_comparisons(
+    versions: set[str],
+) -> None:
+    acc = _ExperimentAccumulator(
+        attempts=2,
+        successful_attempts=2,
+        model_versions=versions,
     )
     row = AiBaselineBenchmarkService()._build_experiment_row(
         ai_experiment_key("openai", "gpt-5.6-terra"),

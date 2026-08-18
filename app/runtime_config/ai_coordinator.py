@@ -100,9 +100,7 @@ class RuntimeAiCoordinator(StaticAiCoordinator):
             ).all()
         )
         if len(rows) > 1:
-            raise ValueError(
-                f"AI provider experiment identity is ambiguous: {provider}/{model}"
-            )
+            raise ValueError(f"AI provider experiment identity is ambiguous: {provider}/{model}")
         provider_row = rows[0] if rows else None
         if provider_row is not None:
             validate_provider_base_url(provider_row.provider, provider_row.base_url)

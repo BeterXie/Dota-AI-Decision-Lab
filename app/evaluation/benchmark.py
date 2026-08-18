@@ -29,10 +29,8 @@ BASELINE_AI_VIEW_VERSION = "ai-view-v6"
 CALIBRATION_POLICY_VERSION = "ece-equal-width-10-v1"
 CALIBRATION_BIN_COUNT = 10
 _RUNTIME_CONFIG_MARKER = "@cfg:"
+_LEGACY_EXECUTION_SIGNATURE = "LEGACY_UNFINGERPRINTED"
 
-# These are intentionally frozen repository defaults from BASELINE_FROZEN_AT_COMMIT.
-# Do not import current Settings defaults here: future model changes are challengers,
-# not mutations of the baseline.
 BASELINE_MODELS_BY_PROVIDER: dict[str, str] = {
     "openai": "gpt-5.6-terra",
     "anthropic": "claude-sonnet-4-6",
@@ -58,12 +56,7 @@ class _ExperimentAccumulator:
 
 
 class AiBaselineBenchmarkService:
-    """Cross-event benchmark for immutable AI experiment identities.
-
-    Forecast metrics use the first evaluable forecast per map so repeated live
-    checkpoints cannot inflate sample size. The frozen baseline literals above
-    deliberately do not follow future runtime version constants.
-    """
+    """Cross-event benchmark for immutable AI experiment identities."""
 
     def __init__(self, leaderboard: TournamentLeaderboardService | None = None) -> None:
         self._leaderboard = leaderboard or TournamentLeaderboardService()
@@ -175,7 +168,6 @@ class AiBaselineBenchmarkService:
                 market_probability,
             )
 
-        # Portfolio rows may exist even if there are currently no mapped forecast rows.
         all_keys = set(accumulators) | set(portfolio_by_key)
         experiments = [
             self._build_experiment_row(
@@ -271,11 +263,7 @@ class AiBaselineBenchmarkService:
                 "runtime_fingerprints": fingerprints,
                 "mixed": mixed_execution_config,
                 "comparison_eligible": comparison_eligible,
-                "blocker": (
-                    "MIXED_RUNTIME_EXECUTION_CONFIG"
-                    if mixed_execution_config
-                    else None
-                ),
+                "blocker": ("MIXED_RUNTIME_EXECUTION_CONFIG" if mixed_execution_config else None),
             },
             "baseline_role": "BASELINE" if _is_baseline_key(key) else "CHALLENGER",
             "samples": {
@@ -309,9 +297,7 @@ class AiBaselineBenchmarkService:
                     else None
                 ),
                 "abstention_rate": (
-                    abstentions / action_total
-                    if action_total and comparison_eligible
-                    else None
+                    abstentions / action_total if action_total and comparison_eligible else None
                 ),
                 "action_counts": dict(sorted(acc.action_counts.items())),
                 "parse_status_counts": dict(sorted(acc.parse_statuses.items())),
@@ -319,9 +305,7 @@ class AiBaselineBenchmarkService:
             "latency": {
                 "sample_count": len(acc.latencies),
                 "average_seconds": _average(acc.latencies) if comparison_eligible else None,
-                "p95_seconds": (
-                    _percentile(acc.latencies, 0.95) if comparison_eligible else None
-                ),
+                "p95_seconds": (_percentile(acc.latencies, 0.95) if comparison_eligible else None),
             },
             "portfolio": portfolio_metrics,
             "baseline_reference": None,
@@ -390,11 +374,12 @@ def _is_baseline_key(key: ExperimentKey) -> bool:
 
 
 def _runtime_config_fingerprints(model_versions: set[str]) -> list[str]:
-    fingerprints = {
-        value.rsplit(_RUNTIME_CONFIG_MARKER, 1)[1]
-        for value in model_versions
-        if _RUNTIME_CONFIG_MARKER in value
-    }
+    fingerprints = set()
+    for value in model_versions:
+        if _RUNTIME_CONFIG_MARKER in value:
+            fingerprints.add(value.rsplit(_RUNTIME_CONFIG_MARKER, 1)[1])
+        else:
+            fingerprints.add(_LEGACY_EXECUTION_SIGNATURE)
     return sorted(fingerprints)
 
 
@@ -501,7 +486,7 @@ def _market_probability_a(
             continue
         try:
             price = float(item.get("price"))
-        except TypeError, ValueError:
+        except (TypeError, ValueError):
             continue
         if price <= 1:
             continue

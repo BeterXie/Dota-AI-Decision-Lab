@@ -43,9 +43,7 @@ def validate_provider_base_url(provider: str, base_url: str) -> str:
         raise ValueError(f"{provider_key} base_url must use https")
     if parsed.hostname.lower() not in allowed_hosts:
         allowed = ", ".join(sorted(allowed_hosts))
-        raise ValueError(
-            f"{provider_key} base_url must use an approved provider host: {allowed}"
-        )
+        raise ValueError(f"{provider_key} base_url must use an approved provider host: {allowed}")
     return value
 
 

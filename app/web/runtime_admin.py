@@ -183,9 +183,7 @@ async def _validated_provider_changes(
             None,
         )
         if secret is None or not bool(secret.get("operational")):
-            raise ValueError(
-                f"AI provider credential is not operational: {provider}/{slot}"
-            )
+            raise ValueError(f"AI provider credential is not operational: {provider}/{slot}")
     return changes
 
 

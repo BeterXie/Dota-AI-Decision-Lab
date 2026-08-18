@@ -8,6 +8,7 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+import app.runtime_config.service as runtime_service
 from app.ai.base import (
     AI_VIEW_VERSION,
     DECISION_POLICY_VERSION,
@@ -23,7 +24,6 @@ from app.runtime_config.models import (
     RuntimeSettingRecord,
 )
 from app.runtime_config.provider_safety import provider_base_url_is_allowed
-import app.runtime_config.service as runtime_service
 from app.runtime_config.service import AUTH_SECRET_KEY, RuntimeControlSettings
 
 AI_DECISION_SETTING_KEYS = frozenset(
@@ -50,13 +50,7 @@ class AiDecisionPolicySnapshot:
 
 
 class RuntimePolicyService:
-    """Runtime-safe policy settings that can change without rebuilding workers.
-
-    This service intentionally excludes process-lifecycle switches such as QQ,
-    WeChat, RayBet and DLTV worker construction. Those remain visible to the
-    control plane as lifecycle-managed capabilities until the supervisor can
-    add/remove long-running workers dynamically.
-    """
+    """Runtime-safe policy settings that can change without rebuilding workers."""
 
     def __init__(
         self,
@@ -305,9 +299,6 @@ async def _secret_runtime_status(
         database_decryptable = await _database_secret_decryptable(session, key, bootstrap)
     operational = database_decryptable or (not db_configured and fallback_available)
     if db_configured and not database_decryptable and fallback_available:
-        # Runtime secret resolution only falls back to process configuration when
-        # DB decryption is not attempted. A configured-but-unreadable DB secret is
-        # therefore an error, not a silent fallback.
         operational = False
     storage = (
         "DATABASE_ENCRYPTED"
