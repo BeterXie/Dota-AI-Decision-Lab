@@ -25,7 +25,7 @@ const matches = [
   },
   {
     id: "upcoming-map",
-    series_id: "ti15-series",
+    series_id: "ti15-series-b",
     canonical_map_id: "upcoming-map",
     phase: "PREMATCH",
     scheduled_at: "2026-08-18T12:00:00Z",
