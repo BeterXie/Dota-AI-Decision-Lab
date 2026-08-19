@@ -2,6 +2,9 @@ from uuid import UUID
 
 from app.notifications.email import OutgoingEmail, ResendEmailSender
 
+_LEGACY_SUBJECT_PREFIX = "[Dota AI Decision Lab]"
+_DEFAULT_SUBJECT_PREFIX = "[DotaScope]"
+
 
 class ResendLoginCodeSender:
     def __init__(
@@ -11,7 +14,7 @@ class ResendLoginCodeSender:
         sender_from: str,
         base_url: str,
         timeout_seconds: float,
-        subject_prefix: str = "[DotaScope]",
+        subject_prefix: str = _DEFAULT_SUBJECT_PREFIX,
     ) -> None:
         self._sender = ResendEmailSender(
             api_key=api_key,
@@ -19,7 +22,11 @@ class ResendLoginCodeSender:
             timeout_seconds=timeout_seconds,
         )
         self._sender_from = sender_from
-        self._subject_prefix = subject_prefix
+        self._subject_prefix = (
+            _DEFAULT_SUBJECT_PREFIX
+            if subject_prefix == _LEGACY_SUBJECT_PREFIX
+            else subject_prefix
+        )
 
     async def send_login_code(
         self,
