@@ -101,7 +101,7 @@ class AuthGuardMiddleware:
                 )
                 return
         elif scope_type == "websocket":
-            if not _websocket_origin_allowed(_scope_origin(scope)):
+            if not _websocket_origin_allowed(_scope_origin(scope), _scope_host(scope)):
                 await send(
                     {
                         "type": "websocket.close",
@@ -224,6 +224,11 @@ def _auth_router(
             "user": _user_payload(user) if user is not None else None,
             "entitlements": list(active),
             "grants": grants,
+            "runtime_admin": bool(
+                runtime_config is not None
+                and user is not None
+                and runtime_config.is_admin_email(user.email)
+            ),
             "providers": {
                 key: enabled and value for key, value in auth_config.provider_payload.items()
             },
@@ -496,6 +501,8 @@ def _http_access_requirement(path: str) -> tuple[str, str | None]:
         return "AUTHENTICATED", None
     if path.startswith("/api/maps/") and path.endswith("/ai-decisions"):
         return "PUBLIC", None
+    if path.startswith("/api/access/maps/"):
+        return "PUBLIC", None
     if path == "/api/ai-performance":
         return "PUBLIC", None
     if path == "/api/review" or path.startswith("/api/review/"):
@@ -535,14 +542,27 @@ def _scope_origin(scope: Scope) -> str | None:
     return None
 
 
-def _websocket_origin_allowed(origin: str | None) -> bool:
+def _scope_host(scope: Scope) -> str | None:
+    for name, value in scope.get("headers", []):
+        if name.lower() == b"host":
+            return value.decode("latin-1").strip()
+    return None
+
+
+def _websocket_origin_allowed(origin: str | None, host: str | None = None) -> bool:
     if origin is None:
         return True
     try:
         parsed = urlsplit(origin)
     except ValueError:
         return False
-    return parsed.scheme in {"http", "https"} and parsed.hostname in _LOOPBACK_ORIGIN_HOSTS
+    if parsed.scheme not in {"http", "https"} or parsed.hostname is None:
+        return False
+    if parsed.hostname in _LOOPBACK_ORIGIN_HOSTS:
+        return True
+    if not host:
+        return False
+    return parsed.netloc.lower() == host.lower()
 
 
 async def _json_error(
