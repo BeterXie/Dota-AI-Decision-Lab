@@ -90,12 +90,13 @@ describe("match AI access", () => {
     ).toBe("MAP");
   });
 
-  it("opens group-stage decisions for an authenticated Free account", () => {
-    expect(aiAccessScope(session({}), { ...match, stage_key: "GROUP_STAGE" })).toBe("FREE");
+  it("opens group-stage decisions as anonymous Free Access", () => {
+    expect(aiAccessScope(undefined, { ...match, stage_key: "GROUP_STAGE" })).toBe("FREE");
   });
 
-  it("opens settled match decisions without an account", () => {
-    expect(aiAccessScope(undefined, { ...match, phase: "POSTMATCH" })).toBe("POSTMATCH");
+  it("keeps settled paid-stage decisions locked without a pass", () => {
+    expect(aiAccessScope(undefined, { ...match, phase: "POSTMATCH" })).toBeNull();
+    expect(aiAccessScope(session({}), { ...match, phase: "POSTMATCH" })).toBeNull();
   });
 
   it("does not treat unrelated grants as access", () => {
