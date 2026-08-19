@@ -1,16 +1,11 @@
 from uuid import UUID
 
-from fastapi import APIRouter, HTTPException, Request, status
+from fastapi import APIRouter, HTTPException, Request
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.access_policy import resolve_map_access
 from app.auth import AuthenticatedUser
-from app.domain.competition import is_group_stage
-from app.entitlements import (
-    AI_DECISIONS_ENTITLEMENT,
-    REALTIME_NOTIFICATIONS_ENTITLEMENT,
-    EntitlementService,
-)
-from app.models import CanonicalMap, CanonicalSeries
+from app.entitlements import EntitlementService
 
 
 def create_access_router(
@@ -21,54 +16,38 @@ def create_access_router(
 
     @router.get("/maps/{canonical_map_id}")
     async def map_access(canonical_map_id: UUID, request: Request) -> dict:
-        user = _request_user(request)
+        user = _optional_request_user(request)
         async with session_factory() as session:
-            canonical_map = await session.get(CanonicalMap, canonical_map_id)
-            series = (
-                await session.get(CanonicalSeries, canonical_map.series_id)
-                if canonical_map is not None and canonical_map.series_id is not None
-                else None
+            access = await resolve_map_access(
+                session,
+                entitlements,
+                canonical_map_id,
+                user=user,
             )
-        if canonical_map is None:
+        if access is None:
             raise HTTPException(status_code=404, detail="map not found")
-        ai_scope = await entitlements.access_scope(
-            user.id,
-            AI_DECISIONS_ENTITLEMENT,
-            canonical_event_id=series.event_id if series is not None else None,
-            canonical_series_id=canonical_map.series_id,
-            canonical_map_id=canonical_map.id,
-        )
-        notification_scope = await entitlements.access_scope(
-            user.id,
-            REALTIME_NOTIFICATIONS_ENTITLEMENT,
-            canonical_event_id=series.event_id if series is not None else None,
-            canonical_series_id=canonical_map.series_id,
-            canonical_map_id=canonical_map.id,
-        )
-        ai_allowed = is_group_stage(series.stage_key) if series is not None else False
-        if ai_allowed:
-            ai_scope = "FREE"
         return {
-            "canonical_map_id": str(canonical_map.id),
+            "canonical_map_id": str(access.canonical_map.id),
             "canonical_series_id": (
-                str(canonical_map.series_id) if canonical_map.series_id is not None else None
+                str(access.canonical_map.series_id)
+                if access.canonical_map.series_id is not None
+                else None
             ),
-            "stage_key": series.stage_key if series is not None else "UNKNOWN",
-            "ai_decisions": {"allowed": ai_allowed or ai_scope is not None, "scope": ai_scope},
+            "stage_key": access.series.stage_key if access.series is not None else "UNKNOWN",
+            "ai_decisions": {
+                "allowed": access.ai_allowed,
+                "scope": access.ai_scope,
+                "public_projection": access.ai_public_projection,
+            },
             "realtime_notifications": {
-                "allowed": notification_scope is not None,
-                "scope": notification_scope,
+                "allowed": access.notification_allowed,
+                "scope": access.notification_scope,
             },
         }
 
     return router
 
 
-def _request_user(request: Request) -> AuthenticatedUser:
+def _optional_request_user(request: Request) -> AuthenticatedUser | None:
     user = getattr(request.state, "auth_user", None)
-    if not isinstance(user, AuthenticatedUser):
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="authentication required",
-        )
-    return user
+    return user if isinstance(user, AuthenticatedUser) else None
