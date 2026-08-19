@@ -1,6 +1,6 @@
 import httpx
 
-from tools.verify_production_origin import verify_origin
+from app.production_origin import verify_origin
 
 
 def test_production_origin_verifier_accepts_safe_dotascope_edge() -> None:
