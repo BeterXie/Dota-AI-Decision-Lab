@@ -196,10 +196,7 @@ class LiquipediaCanonicalProjector:
             )
         )
         if mapping is not None:
-            if (
-                canonical_event_id is not None
-                and mapping.canonical_event_id != canonical_event_id
-            ):
+            if canonical_event_id is not None and mapping.canonical_event_id != canonical_event_id:
                 raise IdentityAmbiguousError("LIQUIPEDIA_EVENT_IDENTITY_CONFLICT")
             event = await session.get(CanonicalEvent, mapping.canonical_event_id)
             if event is None:
@@ -215,9 +212,7 @@ class LiquipediaCanonicalProjector:
         else:
             same_name = list(
                 (
-                    await session.scalars(
-                        select(CanonicalEvent).where(CanonicalEvent.name == name)
-                    )
+                    await session.scalars(select(CanonicalEvent).where(CanonicalEvent.name == name))
                 ).all()
             )
             if len(same_name) > 1:

@@ -105,10 +105,14 @@ class ReconciliationService:
         canonical_map_text = func.replace(
             cast(DltvLiveObservationRecord.canonical_map_id, String), "-", ""
         )
-        missing_started_event = ~select(DomainEventRecord.id).where(
-            DomainEventRecord.event_type == DomainEventType.MAP_STARTED.value,
-            func.replace(DomainEventRecord.aggregate_id, "-", "") == canonical_map_text,
-        ).exists()
+        missing_started_event = (
+            ~select(DomainEventRecord.id)
+            .where(
+                DomainEventRecord.event_type == DomainEventType.MAP_STARTED.value,
+                func.replace(DomainEventRecord.aggregate_id, "-", "") == canonical_map_text,
+            )
+            .exists()
+        )
         rows = list(
             (
                 await session.execute(
@@ -270,33 +274,47 @@ class ReconciliationService:
             .group_by(DltvLiveObservationRecord.canonical_map_id)
             .subquery()
         )
-        generated_placeholder_ids = select(ProviderTeamMapping.canonical_team_id).join(
-            CanonicalTeam,
-            CanonicalTeam.id == ProviderTeamMapping.canonical_team_id,
-        ).where(
-            CanonicalTeam.name
-            == func.upper(ProviderTeamMapping.provider)
-            + " team "
-            + ProviderTeamMapping.provider_team_id
+        generated_placeholder_ids = (
+            select(ProviderTeamMapping.canonical_team_id)
+            .join(
+                CanonicalTeam,
+                CanonicalTeam.id == ProviderTeamMapping.canonical_team_id,
+            )
+            .where(
+                CanonicalTeam.name
+                == func.upper(ProviderTeamMapping.provider)
+                + " team "
+                + ProviderTeamMapping.provider_team_id
+            )
         )
-        missing_result = ~select(MapResultRecord.id).where(
-            MapResultRecord.canonical_map_id == CanonicalMap.id
-        ).exists()
-        conflicted_result = select(MapResultRecord.id).where(
-            MapResultRecord.canonical_map_id == CanonicalMap.id,
-            or_(
-                MapResultRecord.winner_team_id.is_(None),
-                MapResultRecord.provider_conflict.is_(True),
-            ),
-        ).exists()
-        repairable_placeholder = select(HistoricalMapRecord.id).where(
-            HistoricalMapRecord.canonical_map_id == CanonicalMap.id,
-            or_(
-                HistoricalMapRecord.radiant_team_id.in_(generated_placeholder_ids),
-                HistoricalMapRecord.dire_team_id.in_(generated_placeholder_ids),
-                HistoricalMapRecord.winner_team_id.in_(generated_placeholder_ids),
-            ),
-        ).exists()
+        missing_result = (
+            ~select(MapResultRecord.id)
+            .where(MapResultRecord.canonical_map_id == CanonicalMap.id)
+            .exists()
+        )
+        conflicted_result = (
+            select(MapResultRecord.id)
+            .where(
+                MapResultRecord.canonical_map_id == CanonicalMap.id,
+                or_(
+                    MapResultRecord.winner_team_id.is_(None),
+                    MapResultRecord.provider_conflict.is_(True),
+                ),
+            )
+            .exists()
+        )
+        repairable_placeholder = (
+            select(HistoricalMapRecord.id)
+            .where(
+                HistoricalMapRecord.canonical_map_id == CanonicalMap.id,
+                or_(
+                    HistoricalMapRecord.radiant_team_id.in_(generated_placeholder_ids),
+                    HistoricalMapRecord.dire_team_id.in_(generated_placeholder_ids),
+                    HistoricalMapRecord.winner_team_id.in_(generated_placeholder_ids),
+                ),
+            )
+            .exists()
+        )
         candidates = list(
             (
                 await session.execute(

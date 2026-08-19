@@ -145,11 +145,7 @@ def parse_series(html: str) -> list[LiquipediaSeriesObservation]:
         header = _first_descendant_with_class(card, "match-info-header")
         if header is None:
             continue
-        opponents = [
-            node
-            for node in _walk(header)
-            if "match-info-header-opponent" in node.classes
-        ]
+        opponents = [node for node in _walk(header) if "match-info-header-opponent" in node.classes]
         if len(opponents) != 2:
             continue
         team_a_name, team_a_page = _team_identity(
@@ -312,8 +308,7 @@ def _parse_timestamp(raw: str) -> datetime | None:
 
 def _match_state(score_text: str, header: _Node) -> str:
     if any(
-        "match-info-header-winner" in node.classes
-        or "match-info-header-loser" in node.classes
+        "match-info-header-winner" in node.classes or "match-info-header-loser" in node.classes
         for node in _walk(header)
     ):
         return "COMPLETED"
@@ -339,10 +334,9 @@ def _event_identity(
         page_parts = event_page.split("/")
         if page_parts and _identity_token(page_parts[-1]) == _identity_token(stage):
             event_page = "/".join(page_parts[:-1])
-    if (
-        re.fullmatch(r"ti\s*2026", event_name, re.IGNORECASE)
-        or (event_page or "").casefold().startswith("the international/2026")
-    ):
+    if re.fullmatch(r"ti\s*2026", event_name, re.IGNORECASE) or (
+        event_page or ""
+    ).casefold().startswith("the international/2026"):
         event_name = "The International 2026"
         event_page = "The International/2026"
     return event_name or None, event_page, stage
@@ -373,8 +367,8 @@ def _direct_text(node: _Node) -> str:
 
 def _key_value_fields(fields: list[str]) -> dict[str, str]:
     values: dict[str, str] = {}
-    for field in fields:
-        key, separator, value = field.partition("=")
+    for raw_field in fields:
+        key, separator, value = raw_field.partition("=")
         if separator:
             values[key.strip().casefold()] = value.strip()
     return values

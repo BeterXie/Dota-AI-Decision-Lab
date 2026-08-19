@@ -181,9 +181,7 @@ async def test_bootstrap_positive_game_time_emits_one_map_started_event() -> Non
     received_at = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
     valve_match_id = 8940730389
     payload = json.loads(
-        (Path(__file__).parent / "fixtures" / "dltv_bootstrap.json").read_text(
-            encoding="utf-8"
-        )
+        (Path(__file__).parent / "fixtures" / "dltv_bootstrap.json").read_text(encoding="utf-8")
     )
     raw_events = RawEventRepository()
     coordinator = DltvBootstrapCoordinator(
@@ -211,18 +209,14 @@ async def test_bootstrap_positive_game_time_emits_one_map_started_event() -> Non
         started_events = list(
             (
                 await session.scalars(
-                    select(DomainEventRecord).where(
-                        DomainEventRecord.event_type == "MAP_STARTED"
-                    )
+                    select(DomainEventRecord).where(DomainEventRecord.event_type == "MAP_STARTED")
                 )
             ).all()
         )
         ended_events = list(
             (
                 await session.scalars(
-                    select(DomainEventRecord).where(
-                        DomainEventRecord.event_type == "MAP_ENDED"
-                    )
+                    select(DomainEventRecord).where(DomainEventRecord.event_type == "MAP_ENDED")
                 )
             ).all()
         )

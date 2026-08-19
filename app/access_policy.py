@@ -79,9 +79,7 @@ async def resolve_map_access(
 
     free_group_stage = series is not None and is_group_stage(series.stage_key)
     confirmed_result = (
-        result is not None
-        and result.winner_team_id is not None
-        and not result.provider_conflict
+        result is not None and result.winner_team_id is not None and not result.provider_conflict
     )
     public_scope = "FREE" if free_group_stage else "POSTMATCH" if confirmed_result else None
     public_projection = public_scope is not None and ai_scope is None

@@ -10,14 +10,17 @@ TOURNAMENTS_HTML = """
   <ul><li>The_International/2026 | TI 2026 | startdate=Aug 13 | enddate=Aug 23</li></ul>
 </li></ul>
 <ul><li>Completed
-  <ul><li>DreamLeague/Season_28 | DreamLeague Season 28 | startdate=Jul 26 | enddate=Aug 12</li></ul>
+  <ul><li>DreamLeague/Season_28 | DreamLeague Season 28 |
+    startdate=Jul 26 | enddate=Aug 12</li></ul>
 </li></ul>
 """
 
 
 MATCHES_HTML = """
 <div class="match-info">
-  <span class="match-info-countdown"><span class="timer-object" data-timestamp="1787054400">12:00</span></span>
+  <span class="match-info-countdown">
+    <span class="timer-object" data-timestamp="1787054400">12:00</span>
+  </span>
   <div class="match-info-header">
     <div class="match-info-header-opponent match-info-header-opponent-left">
       <span class="name"><a href="/dota2/Team_Liquid" title="Team Liquid">Liquid</a></span>
@@ -30,17 +33,24 @@ MATCHES_HTML = """
   <div class="match-info-tournament"><span class="match-info-tournament-name">
     <a href="/dota2/The_International/2026/Main_Event#Main_Event">TI 2026 - Main Event</a>
   </span></div>
-  <div class="match-page-button"><a href="/dota2/index.php?title=Match:ID_TI2026Main_R01-M001&amp;action=edit">Details</a></div>
+  <div class="match-page-button">
+    <a href="/dota2/index.php?title=Match:ID_TI2026Main_R01-M001&amp;action=edit">Details</a>
+  </div>
 </div>
 <div class="match-info">
   <span class="match-info-countdown"><time datetime="2026-08-17T18:00:00Z">18:00</time></span>
   <div class="match-info-header">
-    <div class="match-info-header-opponent match-info-header-opponent-left match-info-header-winner">
+    <div
+      class="match-info-header-opponent match-info-header-opponent-left match-info-header-winner"
+    >
       <span class="name"><a href="/dota2/Tundra_Esports" title="Tundra Esports">Tundra</a></span>
     </div>
     <div class="match-info-header-scoreholder"><span>2 - 0</span><span>(Bo3)</span></div>
     <div class="match-info-header-opponent match-info-header-loser">
-      <span class="name"><a href="/dota2/index.php?title=BetBoom_Team&amp;action=edit&amp;redlink=1" title="BetBoom Team (page does not exist)">BB</a></span>
+      <span class="name"><a
+        href="/dota2/index.php?title=BetBoom_Team&amp;action=edit&amp;redlink=1"
+        title="BetBoom Team (page does not exist)"
+      >BB</a></span>
     </div>
   </div>
   <div class="match-info-tournament"><span class="match-info-tournament-name">

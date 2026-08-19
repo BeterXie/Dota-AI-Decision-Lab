@@ -290,9 +290,7 @@ async def test_reconciliation_backfills_missing_map_started_from_live_evidence()
         events = list(
             (
                 await session.scalars(
-                    select(DomainEventRecord).where(
-                        DomainEventRecord.event_type == "MAP_STARTED"
-                    )
+                    select(DomainEventRecord).where(DomainEventRecord.event_type == "MAP_STARTED")
                 )
             ).all()
         )

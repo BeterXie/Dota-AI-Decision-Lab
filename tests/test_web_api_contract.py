@@ -658,8 +658,8 @@ async def test_match_feed_orders_newest_scheduled_match_first() -> None:
     async with factory.begin() as session:
         for index, (team_a_name, team_b_name, scheduled_at) in enumerate(
             (
-                    ("Spirit", "Xtreme Gaming", datetime(2026, 8, 21, 5, 0, tzinfo=UTC)),
-                    ("Level Up", "Rune Eaters", datetime(2026, 8, 20, 9, 0, tzinfo=UTC)),
+                ("Spirit", "Xtreme Gaming", datetime(2026, 8, 21, 5, 0, tzinfo=UTC)),
+                ("Level Up", "Rune Eaters", datetime(2026, 8, 20, 9, 0, tzinfo=UTC)),
             ),
             start=1,
         ):

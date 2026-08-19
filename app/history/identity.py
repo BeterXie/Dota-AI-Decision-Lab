@@ -437,9 +437,7 @@ async def _restore_converged_match_results(
             continue
         map_ids = {fact.canonical_map_id for fact in facts}
         winners = {fact.winner_team_id for fact in facts}
-        team_pairs = {
-            frozenset((fact.radiant_team_id, fact.dire_team_id)) for fact in facts
-        }
+        team_pairs = {frozenset((fact.radiant_team_id, fact.dire_team_id)) for fact in facts}
         if len(map_ids) != 1 or len(winners) != 1 or len(team_pairs) != 1:
             continue
         canonical_map_id = next(iter(map_ids))
@@ -478,9 +476,7 @@ async def _restore_converged_match_results(
         for evidence in evidence_rows:
             evidence.conflict_status = "CONFIRMED"
         result = await session.scalar(
-            select(MapResultRecord).where(
-                MapResultRecord.canonical_map_id == canonical_map_id
-            )
+            select(MapResultRecord).where(MapResultRecord.canonical_map_id == canonical_map_id)
         )
         if result is not None:
             result.winner_team_id = winner_team_id
