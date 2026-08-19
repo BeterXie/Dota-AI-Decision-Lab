@@ -173,8 +173,16 @@ async def test_runtime_feature_middleware_hard_gates_surfaces_but_keeps_billing_
     app = FastAPI()
     app.add_middleware(RuntimeFeatureFlagMiddleware, policy=policy)
 
+    @app.get("/api/ai-performance")
+    async def performance():
+        return {"ok": True}
+
     @app.get("/api/review/ai-quality/benchmark")
     async def benchmark():
+        return {"ok": True}
+
+    @app.get("/api/review/matches")
+    async def review_matches():
         return {"ok": True}
 
     @app.post("/api/billing/checkout/pro_monthly")
@@ -183,6 +191,10 @@ async def test_runtime_feature_middleware_hard_gates_surfaces_but_keeps_billing_
 
     @app.post("/api/billing/series/series-1/checkout")
     async def series_checkout():
+        return {"ok": True}
+
+    @app.post("/api/billing/events/event-1/checkout")
+    async def event_checkout():
         return {"ok": True}
 
     @app.get("/api/billing/account")
@@ -194,14 +206,20 @@ async def test_runtime_feature_middleware_hard_gates_surfaces_but_keeps_billing_
         return {"ok": True}
 
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
-        review = await client.get("/api/review/ai-quality/benchmark")
+        performance_response = await client.get("/api/ai-performance")
+        quality_response = await client.get("/api/review/ai-quality/benchmark")
+        review_response = await client.get("/api/review/matches")
         checkout_response = await client.post("/api/billing/checkout/pro_monthly")
         series_response = await client.post("/api/billing/series/series-1/checkout")
+        event_response = await client.post("/api/billing/events/event-1/checkout")
         account_response = await client.get("/api/billing/account")
         webhook_response = await client.post("/api/billing/webhooks/paddle")
 
-    assert review.status_code == 503
+    assert performance_response.status_code == 503
+    assert quality_response.status_code == 503
+    assert review_response.status_code == 200
     assert checkout_response.status_code == 503
     assert series_response.status_code == 503
+    assert event_response.status_code == 503
     assert account_response.status_code == 200
     assert webhook_response.status_code == 200
