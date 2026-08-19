@@ -139,10 +139,15 @@ async def test_secret_status_reports_configuration_without_plaintext() -> None:
         by_key = {item["key"]: item for item in payload["items"]}
 
         assert by_key["auth.google.client_secret"]["configured"] is True
+        assert by_key["auth.google.client_secret"]["decryptable"] is True
+        assert by_key["auth.google.client_secret"]["operational"] is True
+        assert by_key["auth.google.client_secret"]["fallback_available"] is True
         assert by_key["auth.google.client_secret"]["storage"] == "BOOTSTRAP_FALLBACK"
         assert by_key["ai.openai.api_key"]["configured"] is True
+        assert by_key["ai.openai.api_key"]["operational"] is True
         assert by_key["ai.openai.api_key"]["storage"] == "BOOTSTRAP_FALLBACK"
         assert by_key["ai.gemini.api_key"]["configured"] is False
+        assert by_key["ai.gemini.api_key"]["operational"] is False
         assert "bootstrap-openai-key" not in serialized
         assert "bootstrap-google-secret" not in serialized
     finally:

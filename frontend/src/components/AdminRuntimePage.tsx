@@ -167,6 +167,9 @@ export const AdminRuntimePage: React.FC<AdminRuntimePageProps> = ({
 
   if (authLoading) return <AdminRuntimeLoading />;
   if (!signedIn) {
+    if (session?.enabled === false) {
+      return <AdminRuntimeAccessState title={zh(locale, "认证服务未启用", "Authentication is disabled")} detail={zh(locale, "运行时控制台需要启动时启用全局认证；请设置 AUTH_ENABLED=true 并重启服务。", "The runtime control plane requires global authentication at startup. Set AUTH_ENABLED=true and restart the service.")} />;
+    }
     return <AdminRuntimeAccessState title={zh(locale, "需要管理员登录", "Administrator sign-in required")} detail={zh(locale, "运行时控制台只允许已认证管理员访问。", "The runtime control plane is restricted to authenticated administrators.")} actionLabel={zh(locale, "登录", "Sign in")} onAction={onLogin} />;
   }
 
@@ -202,9 +205,9 @@ export const AdminRuntimePage: React.FC<AdminRuntimePageProps> = ({
         </header>
         {toast && <div className={`admin-toast is-${toast.tone}`} role="status">{toast.text}</div>}
         <main className="admin-runtime-content">
-          {section === "overview" && <OverviewPage config={configQuery.data} policy={policyQuery.data} secrets={secretsQuery.data.items} audit={auditQuery.data?.items ?? []} locale={locale} />}
-          {section === "auth" && <AuthenticationPage config={configQuery.data} secrets={secretsQuery.data.items} locale={locale} busy={commonBusy} onSetting={applySetting} onSecret={applySecret} />}
-          {section === "ai-providers" && <AiProvidersPage config={configQuery.data} locale={locale} busy={commonBusy} onProvider={applyProvider} onSecret={applySecret} />}
+          {section === "overview" && <OverviewPage config={configQuery.data} policy={policyQuery.data} secrets={secretsQuery.data.items} audit={auditQuery.data?.items ?? []} locale={locale} globalAuthEnabled={Boolean(session?.enabled)} />}
+          {section === "auth" && <AuthenticationPage config={configQuery.data} secrets={secretsQuery.data.items} globalAuthEnabled={Boolean(session?.enabled)} locale={locale} busy={commonBusy} onSetting={applySetting} onSecret={applySecret} />}
+          {section === "ai-providers" && <AiProvidersPage config={configQuery.data} secrets={secretsQuery.data.items} locale={locale} busy={commonBusy} onProvider={applyProvider} onSecret={applySecret} />}
           {section === "ai-decisions" && <AiDecisionSettingsPage config={configQuery.data} policy={policyQuery.data} locale={locale} busy={commonBusy} onPolicy={applyPolicy} />}
           {section === "features" && <FeatureFlagsPage policy={policyQuery.data} locale={locale} busy={commonBusy} onPolicy={applyPolicy} />}
           {section === "secrets" && <SecretsPage secrets={secretsQuery.data.items} encryptedStorage={configQuery.data.bootstrap.encrypted_secret_storage_available} locale={locale} busy={commonBusy} onSecret={applySecret} />}
@@ -253,11 +256,11 @@ function AdminSidebar({ section, locale }: { section: AdminRuntimeSection; local
   );
 }
 
-function OverviewPage({ config, policy, secrets, audit, locale }: { config: RuntimeConfigPayload; policy: RuntimePolicyPayload; secrets: RuntimeSecretStatus[]; audit: RuntimeAuditItem[]; locale: string }) {
+function OverviewPage({ config, policy, secrets, audit, locale, globalAuthEnabled }: { config: RuntimeConfigPayload; policy: RuntimePolicyPayload; secrets: RuntimeSecretStatus[]; audit: RuntimeAuditItem[]; locale: string; globalAuthEnabled: boolean }) {
   const enabledAuth = [settingBool(config, "auth.email.enabled"), settingBool(config, "auth.google.enabled"), settingBool(config, "auth.steam.enabled")].filter(Boolean).length;
   const enabledProviders = config.ai_providers.filter((item) => item.enabled).length;
   const decisionProviders = config.ai_providers.filter((item) => item.enabled && item.decisions_enabled).length;
-  const configuredSecrets = secrets.filter((item) => item.configured).length;
+  const operationalSecrets = secrets.filter((item) => item.operational).length;
   const aiEnabled = policyBool(policy, "ai.decisions.enabled");
   return <div className="admin-page-stack">
     <AdminPageHeading title={zh(locale, "控制台概览", "Control plane overview")} detail={zh(locale, "查看认证、AI 调度、运行时策略与加密凭据的实时状态。", "Inspect live authentication, AI scheduling, runtime policy and encrypted credential state.")} />
@@ -265,11 +268,12 @@ function OverviewPage({ config, policy, secrets, audit, locale }: { config: Runt
       <MetricCard icon="▣" label={zh(locale, "认证方式", "Auth methods")} value={`${enabledAuth} / 3`} detail={zh(locale, "当前已启用", "enabled now")} tone="blue" />
       <MetricCard icon="⌘" label={zh(locale, "AI 提供商", "AI providers")} value={`${enabledProviders} / ${config.ai_providers.length}`} detail={aiEnabled ? zh(locale, "AI 调度已开启", "AI scheduling enabled") : zh(locale, "AI 调度已暂停", "AI scheduling paused")} tone="green" />
       <MetricCard icon="◉" label={zh(locale, "参与决策", "Decision fan-out")} value={String(decisionProviders)} detail={policy.ai_contract.fan_out_strategy} tone="purple" />
-      <MetricCard icon="◇" label={zh(locale, "加密凭据", "Managed secrets")} value={`${configuredSecrets} / ${secrets.length}`} detail={config.bootstrap.encrypted_secret_storage_available ? "pgcrypto ready" : zh(locale, "缺少 Master Key", "Master key missing")} tone="orange" />
+      <MetricCard icon="◇" label={zh(locale, "可用凭据", "Operational secrets")} value={`${operationalSecrets} / ${secrets.length}`} detail={config.bootstrap.encrypted_secret_storage_available ? "pgcrypto ready" : zh(locale, "缺少 Master Key", "Master key missing")} tone="orange" />
     </section>
     <section className="admin-overview-grid">
       <div className="admin-panel admin-panel-span-5"><div className="admin-panel-heading"><h2>{zh(locale, "认证方式状态", "Authentication status")}</h2><a href="/admin/runtime/auth">{zh(locale, "管理认证", "Manage")}</a></div><div className="admin-compact-list">
-        <CompactStatus label={zh(locale, "邮箱登录", "Email")} enabled={settingBool(config, "auth.email.enabled")} />
+        <CompactStatus label={zh(locale, "全局认证", "Global auth")} enabled={globalAuthEnabled} />
+        <CompactStatus label={zh(locale, "邮箱登录", "Email login")} enabled={settingBool(config, "auth.email.enabled")} />
         <CompactStatus label="Google OAuth" enabled={settingBool(config, "auth.google.enabled")} />
         <CompactStatus label="Steam OpenID" enabled={settingBool(config, "auth.steam.enabled")} />
       </div></div>
@@ -286,11 +290,16 @@ function OverviewPage({ config, policy, secrets, audit, locale }: { config: Runt
   </div>;
 }
 
-function AuthenticationPage({ config, secrets, locale, busy, onSetting, onSecret }: { config: RuntimeConfigPayload; secrets: RuntimeSecretStatus[]; locale: string; busy: boolean; onSetting: (key: string, value: unknown) => Promise<void>; onSecret: (key: string, value: string) => Promise<void> }) {
+function AuthenticationPage({ config, secrets, globalAuthEnabled, locale, busy, onSetting, onSecret }: { config: RuntimeConfigPayload; secrets: RuntimeSecretStatus[]; globalAuthEnabled: boolean; locale: string; busy: boolean; onSetting: (key: string, value: unknown) => Promise<void>; onSecret: (key: string, value: string) => Promise<void> }) {
   const baseUrl = settingString(config, "auth.external_base_url") || "http://127.0.0.1:5173";
   const googleSecret = secrets.find((item) => item.key === "auth.google.client_secret");
   return <div className="admin-page-stack">
-    <AdminPageHeading title={zh(locale, "认证配置", "Authentication")} detail={zh(locale, "登录方式的开关与 OAuth 回调配置均从数据库实时读取，保存后不重启服务。", "Login switches and OAuth callback settings are read live from the database and do not require restart.")} />
+    <AdminPageHeading title={zh(locale, "认证配置", "Authentication")} detail={zh(locale, "全局认证由启动参数控制；以下登录方式和 OAuth 配置支持运行时更新。", "Global authentication is controlled at startup; the login methods and OAuth settings below are hot-updatable.")} />
+    <div className={`admin-security-banner ${globalAuthEnabled ? "" : "is-warning"}`}>
+      {globalAuthEnabled
+        ? zh(locale, "全局认证已启用。修改邮箱、Google 或 Steam 登录方式会立即影响后续请求。", "Global authentication is enabled. Changes to Email, Google or Steam providers affect subsequent requests immediately.")
+        : zh(locale, "全局认证未启用。请设置 AUTH_ENABLED=true 并重启服务；下方登录方式开关不会单独启用全局认证。", "Global authentication is disabled. Set AUTH_ENABLED=true and restart the service; provider switches below cannot enable it by themselves.")}
+    </div>
     <section className="admin-auth-stack">
       <AuthCard icon="✉" title={zh(locale, "邮箱登录", "Email login")} enabled={settingBool(config, "auth.email.enabled")} busy={busy} onToggle={(value) => onSetting("auth.email.enabled", value)}>
         <div className="admin-auth-detail-grid"><InfoCell label="OTP" value={zh(locale, "一次性验证码", "One-time code")} /><InfoCell label={zh(locale, "运行时行为", "Runtime behavior")} value={zh(locale, "关闭后立即拒绝 request/verify", "Immediately rejects request/verify when off")} /></div>
@@ -300,7 +309,7 @@ function AuthenticationPage({ config, secrets, locale, busy, onSetting, onSecret
           <InlineSettingEditor label="Client ID" value={settingString(config, "auth.google.client_id")} busy={busy} onSave={(value) => onSetting("auth.google.client_id", value)} />
           <InlineSettingEditor label="External Base URL" value={baseUrl} busy={busy} onSave={(value) => onSetting("auth.external_base_url", value)} />
           <InfoCell label="Callback URL" value={`${baseUrl.replace(/\/$/, "")}/api/auth/google/callback`} mono />
-          <SecretInlineStatus label="Client Secret" secret={googleSecret} busy={busy} onReplace={(value) => onSecret("auth.google.client_secret", value)} />
+          <SecretInlineStatus label="Client Secret" secret={googleSecret} locale={locale} busy={busy} onReplace={(value) => onSecret("auth.google.client_secret", value)} />
         </div>
       </AuthCard>
       <AuthCard icon="S" title={zh(locale, "Steam 登录", "Steam login")} enabled={settingBool(config, "auth.steam.enabled")} busy={busy} onToggle={(value) => onSetting("auth.steam.enabled", value)}>
@@ -310,7 +319,7 @@ function AuthenticationPage({ config, secrets, locale, busy, onSetting, onSecret
   </div>;
 }
 
-function AiProvidersPage({ config, locale, busy, onProvider, onSecret }: { config: RuntimeConfigPayload; locale: string; busy: boolean; onProvider: (provider: RuntimeAiProviderRecord, changes: Parameters<typeof updateRuntimeAiProvider>[2]) => Promise<void>; onSecret: (key: string, value: string) => Promise<void> }) {
+function AiProvidersPage({ config, secrets, locale, busy, onProvider, onSecret }: { config: RuntimeConfigPayload; secrets: RuntimeSecretStatus[]; locale: string; busy: boolean; onProvider: (provider: RuntimeAiProviderRecord, changes: Parameters<typeof updateRuntimeAiProvider>[2]) => Promise<void>; onSecret: (key: string, value: string) => Promise<void> }) {
   const [editing, setEditing] = React.useState<string | null>(null);
   return <div className="admin-page-stack">
     <AdminPageHeading title={zh(locale, "AI 提供商", "AI Providers")} detail={zh(locale, "控制 provider 总开关、是否参与决策、模型、Base URL、超时、思考强度与写入式 API Key。", "Control provider availability, decision participation, model, Base URL, timeout, reasoning effort and write-only API keys.")} />
@@ -321,9 +330,9 @@ function AiProvidersPage({ config, locale, busy, onProvider, onSecret }: { confi
           <td><ToggleSwitch checked={provider.enabled} disabled={busy} ariaLabel={`${provider.provider} enabled`} onChange={(value) => void onProvider(provider, { enabled: value })} /></td>
           <td><ToggleSwitch checked={provider.decisions_enabled} disabled={busy || !provider.enabled} ariaLabel={`${provider.provider} decisions`} onChange={(value) => void onProvider(provider, { decisions_enabled: value })} /></td>
           <td className="admin-mono">{provider.model}</td><td className="admin-url-cell">{provider.base_url}</td><td>{provider.timeout_seconds}s</td><td>{provider.reasoning_supported ? (provider.reasoning_effort || "—") : "N/A"}</td>
-          <td><StatusPill enabled={provider.secret_configured} enabledText={zh(locale, "已配置", "Configured")} disabledText={zh(locale, "未配置", "Missing")} /></td>
+          <td><SecretStatusPill secret={providerSecretStatus(provider, secrets)} locale={locale} /></td>
           <td><button type="button" className="admin-link-button" onClick={() => setEditing(editing === providerKey(provider) ? null : providerKey(provider))}>{zh(locale, "编辑", "Edit")}</button></td>
-        </tr>{editing === providerKey(provider) && <tr className="admin-provider-editor-row"><td colSpan={9}><ProviderEditor provider={provider} busy={busy} locale={locale} onCancel={() => setEditing(null)} onSave={async (changes) => { await onProvider(provider, changes); setEditing(null); }} onSecret={onSecret} /></td></tr>}</React.Fragment>)}
+        </tr>{editing === providerKey(provider) && <tr className="admin-provider-editor-row"><td colSpan={9}><ProviderEditor provider={provider} secretStatus={providerSecretStatus(provider, secrets)} busy={busy} locale={locale} onCancel={() => setEditing(null)} onSave={async (changes) => { await onProvider(provider, changes); setEditing(null); }} onSecret={onSecret} /></td></tr>}</React.Fragment>)}
       </tbody></table></div>
     </section>
   </div>;
@@ -364,14 +373,14 @@ function SecretsPage({ secrets, encryptedStorage, locale, busy, onSecret }: { se
     <AdminPageHeading title={zh(locale, "外部服务与密钥", "External services & secrets")} detail={zh(locale, "密钥只支持写入与替换，读取 API 永不返回明文。Google OAuth 与 AI provider 会在后续请求中直接使用最新密钥。", "Secrets are write/replace only; read APIs never return plaintext. Google OAuth and AI providers use the latest secret on subsequent requests.")} />
     {!encryptedStorage && <div className="admin-security-banner is-warning">⚠ {zh(locale, "当前缺少 DOTA_RUNTIME_CONFIG_MASTER_KEY，无法安全写入数据库密钥。", "DOTA_RUNTIME_CONFIG_MASTER_KEY is missing; encrypted database secret writes are unavailable.")}</div>}
     <div className="admin-security-banner">ⓘ {zh(locale, "数据库密钥使用 PostgreSQL pgcrypto 加密；审计日志只记录 REPLACED，不记录密钥值。", "Database secrets use PostgreSQL pgcrypto; audit rows record REPLACED without secret values.")}</div>
-    <section className="admin-panel"><div className="admin-panel-heading"><h2>{zh(locale, "受管凭据", "Managed credentials")}</h2><span className="admin-runtime-note">{secrets.filter((item) => item.configured).length} / {secrets.length} {zh(locale, "已配置", "configured")}</span></div>
-      <div className="admin-table-wrap"><table className="admin-table admin-secret-table"><thead><tr><th>{zh(locale, "凭据", "Credential")}</th><th>{zh(locale, "类别", "Category")}</th><th>{zh(locale, "状态", "Status")}</th><th>{zh(locale, "存储来源", "Storage")}</th><th>{zh(locale, "运行时生效", "Runtime")}</th><th /></tr></thead><tbody>{secrets.map((secret) => <tr key={secret.key}><td><strong>{secret.label}</strong><small className="admin-secret-key">{secret.key}</small></td><td>{secret.category}</td><td><StatusPill enabled={secret.configured} enabledText={zh(locale, "已配置", "Configured")} disabledText={zh(locale, "未配置", "Missing")} /></td><td><StorageBadge storage={secret.storage} locale={locale} /></td><td>{secret.runtime_hot ? zh(locale, "后续请求", "Next request") : "—"}</td><td><button type="button" className="admin-link-button" onClick={() => setSelected(secret.key)}>{secret.configured ? zh(locale, "替换", "Replace") : zh(locale, "配置", "Configure")}</button></td></tr>)}</tbody></table></div>
+    <section className="admin-panel"><div className="admin-panel-heading"><h2>{zh(locale, "受管凭据", "Managed credentials")}</h2><span className="admin-runtime-note">{secrets.filter((item) => item.operational).length} / {secrets.length} {zh(locale, "运行可用", "operational")}</span></div>
+      <div className="admin-table-wrap"><table className="admin-table admin-secret-table"><thead><tr><th>{zh(locale, "凭据", "Credential")}</th><th>{zh(locale, "类别", "Category")}</th><th>{zh(locale, "状态", "Status")}</th><th>{zh(locale, "存储来源", "Storage")}</th><th>{zh(locale, "运行时生效", "Runtime")}</th><th /></tr></thead><tbody>{secrets.map((secret) => <tr key={secret.key}><td><strong>{secret.label}</strong><small className="admin-secret-key">{secret.key}</small></td><td>{secret.category}</td><td><SecretStatusPill secret={secret} locale={locale} /></td><td><StorageBadge storage={secret.storage} locale={locale} /></td><td>{secret.runtime_hot ? zh(locale, "后续请求", "Next request") : "—"}</td><td><button type="button" className="admin-link-button" onClick={() => setSelected(secret.key)}>{secret.configured ? zh(locale, "替换", "Replace") : zh(locale, "配置", "Configure")}</button></td></tr>)}</tbody></table></div>
     </section>
     {selectedSecret && <SecretReplacePanel secret={selectedSecret} locale={locale} busy={busy || !encryptedStorage} onCancel={() => setSelected(null)} onSave={async (value) => { await onSecret(selectedSecret.key, value); setSelected(null); }} />}
   </div>;
 }
 
-function ProviderEditor({ provider, busy, locale, onCancel, onSave, onSecret }: { provider: RuntimeAiProviderRecord; busy: boolean; locale: string; onCancel: () => void; onSave: (changes: Parameters<typeof updateRuntimeAiProvider>[2]) => Promise<void>; onSecret: (key: string, value: string) => Promise<void> }) {
+function ProviderEditor({ provider, secretStatus, busy, locale, onCancel, onSave, onSecret }: { provider: RuntimeAiProviderRecord; secretStatus: RuntimeSecretStatus | undefined; busy: boolean; locale: string; onCancel: () => void; onSave: (changes: Parameters<typeof updateRuntimeAiProvider>[2]) => Promise<void>; onSecret: (key: string, value: string) => Promise<void> }) {
   const [model, setModel] = React.useState(provider.model);
   const [baseUrl, setBaseUrl] = React.useState(provider.base_url);
   const [timeout, setTimeout] = React.useState(String(provider.timeout_seconds));
@@ -383,7 +392,7 @@ function ProviderEditor({ provider, busy, locale, onCancel, onSave, onSecret }: 
     await onSave(changes);
   };
   return <div className="admin-provider-editor"><div className="admin-editor-fields"><label>Model<input aria-label="Model" value={model} onChange={(event) => setModel(event.target.value)} /></label><label>Base URL<input aria-label="Base URL" value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} /></label><label>{zh(locale, "超时（秒）", "Timeout seconds")}<input aria-label="Timeout seconds" type="number" min="1" max="300" value={timeout} onChange={(event) => setTimeout(event.target.value)} /></label>{provider.reasoning_supported && <label>{zh(locale, "思考强度", "Reasoning effort")}<select aria-label="Reasoning effort" value={reasoning} onChange={(event) => setReasoning(event.target.value)}><option value="low">low</option><option value="medium">medium</option><option value="high">high</option></select></label>}</div>
-    <div className="admin-secret-edit-row"><div><strong>API Key</strong><small>{provider.secret_configured ? zh(locale, "已配置；不会回显原值", "Configured; original value is never shown") : zh(locale, "尚未配置", "Not configured")}</small></div><input type="password" aria-label={`${provider.provider} API key`} placeholder={zh(locale, "输入新 Key，仅用于替换", "Enter a new key to replace")} value={secret} onChange={(event) => setSecret(event.target.value)} /><button type="button" className="admin-secondary-button" disabled={busy || !secret || !provider.api_key_secret_key} onClick={() => provider.api_key_secret_key && void onSecret(provider.api_key_secret_key, secret)}>{zh(locale, "替换 Key", "Replace key")}</button></div>
+    <div className="admin-secret-edit-row"><div><strong>API Key</strong><small><SecretStatusPill secret={secretStatus} locale={locale} /> </small></div><input type="password" aria-label={`${provider.provider} API key`} placeholder={zh(locale, "输入新 Key，仅用于替换", "Enter a new key to replace")} value={secret} onChange={(event) => setSecret(event.target.value)} /><button type="button" className="admin-secondary-button" disabled={busy || !secret || !provider.api_key_secret_key} onClick={() => provider.api_key_secret_key && void onSecret(provider.api_key_secret_key, secret)}>{zh(locale, "替换 Key", "Replace key")}</button></div>
     <div className="admin-editor-actions"><button type="button" className="admin-secondary-button" onClick={onCancel}>{zh(locale, "取消", "Cancel")}</button><button type="button" className="admin-primary-button" disabled={busy || !model.trim() || !baseUrl.trim() || !Number(timeout)} onClick={() => void save()}>{zh(locale, "保存提供商配置", "Save provider configuration")}</button></div></div>;
 }
 
@@ -397,9 +406,9 @@ function InlineSettingEditor({ label, value, busy, onSave }: { label: string; va
   return <label className="admin-inline-setting"><span>{label}</span><div><input value={draft} onChange={(event) => setDraft(event.target.value)} /><button type="button" className="admin-link-button" disabled={busy || !draft.trim() || draft === value} onClick={() => void onSave(draft.trim())}>保存</button></div></label>;
 }
 
-function SecretInlineStatus({ label, secret, busy, onReplace }: { label: string; secret: RuntimeSecretStatus | undefined; busy: boolean; onReplace: (value: string) => Promise<void> }) {
+function SecretInlineStatus({ label, secret, locale, busy, onReplace }: { label: string; secret: RuntimeSecretStatus | undefined; locale: string; busy: boolean; onReplace: (value: string) => Promise<void> }) {
   const [draft, setDraft] = React.useState("");
-  return <div className="admin-inline-secret"><span>{label}</span><div><StatusPill enabled={Boolean(secret?.configured)} enabledText="已配置" disabledText="未配置" /><input type="password" aria-label={label} placeholder="••••••••" value={draft} onChange={(event) => setDraft(event.target.value)} /><button type="button" className="admin-secondary-button" disabled={busy || !draft} onClick={async () => { await onReplace(draft); setDraft(""); }}>替换</button></div></div>;
+  return <div className="admin-inline-secret"><span>{label}</span><div><SecretStatusPill secret={secret} locale={locale} /><input type="password" aria-label={label} placeholder="••••••••" value={draft} onChange={(event) => setDraft(event.target.value)} /><button type="button" className="admin-secondary-button" disabled={busy || !draft} onClick={async () => { await onReplace(draft); setDraft(""); }}>替换</button></div></div>;
 }
 
 function PolicyToggleCard({ title, detail, checked, disabled, onChange }: { title: string; detail: string; checked: boolean; disabled: boolean; onChange: (value: boolean) => void }) {
@@ -473,6 +482,16 @@ function StatusPill({ enabled, enabledText, disabledText }: { enabled: boolean; 
   return <span className={`admin-status-pill ${enabled ? "is-enabled" : "is-disabled"}`}>{enabled ? enabledText : disabledText}</span>;
 }
 
+function SecretStatusPill({ secret, locale }: { secret: RuntimeSecretStatus | undefined; locale: string }) {
+  const operational = Boolean(secret?.operational);
+  const configured = Boolean(secret?.configured);
+  return <StatusPill
+    enabled={operational}
+    enabledText={zh(locale, "运行可用", "Operational")}
+    disabledText={configured ? zh(locale, "不可用", "Unavailable") : zh(locale, "未配置", "Missing")}
+  />;
+}
+
 function StorageBadge({ storage, locale }: { storage: string; locale: string }) {
   if (storage === "DATABASE_ENCRYPTED") return <span className="admin-storage-badge is-db">{zh(locale, "数据库加密", "Encrypted DB")}</span>;
   if (storage === "BOOTSTRAP_FALLBACK") return <span className="admin-storage-badge is-bootstrap">{zh(locale, "Bootstrap fallback", "Bootstrap fallback")}</span>;
@@ -483,8 +502,8 @@ function AdminRuntimeLoading() {
   return <div className="admin-loading-state"><span className="admin-loading-mark">D</span><strong>Loading Runtime Control Plane…</strong></div>;
 }
 
-function AdminRuntimeAccessState({ title, detail, actionLabel, onAction }: { title: string; detail: string; actionLabel: string; onAction: () => void }) {
-  return <div className="admin-access-state"><span className="admin-loading-mark">D</span><h1>{title}</h1><p>{detail}</p><button type="button" className="admin-primary-button" onClick={onAction}>{actionLabel}</button></div>;
+function AdminRuntimeAccessState({ title, detail, actionLabel, onAction }: { title: string; detail: string; actionLabel?: string; onAction?: () => void }) {
+  return <div className="admin-access-state"><span className="admin-loading-mark">D</span><h1>{title}</h1><p>{detail}</p>{actionLabel && onAction && <button type="button" className="admin-primary-button" onClick={onAction}>{actionLabel}</button>}</div>;
 }
 
 function sectionFromPath(pathname: string): AdminRuntimeSection {
@@ -503,6 +522,7 @@ function policySetting(policy: RuntimePolicyPayload, key: string): RuntimeSettin
 function policyBool(policy: RuntimePolicyPayload, key: string): boolean { return Boolean(policySetting(policy, key)?.value); }
 function policyNumber(policy: RuntimePolicyPayload, key: string): number { const value = policySetting(policy, key)?.value; return typeof value === "number" ? value : Number(value ?? 0); }
 function providerKey(provider: RuntimeAiProviderRecord): string { return `${provider.provider}:${provider.slot}`; }
+function providerSecretStatus(provider: RuntimeAiProviderRecord, secrets: RuntimeSecretStatus[]): RuntimeSecretStatus | undefined { return secrets.find((item) => item.key === provider.api_key_secret_key); }
 function providerName(provider: RuntimeAiProviderRecord): string { if (provider.provider === "local_openai") return "Local OpenAI"; if (provider.provider === "deepseek") return provider.slot === "pro" ? "DeepSeek Pro" : "DeepSeek Flash"; return provider.provider.charAt(0).toUpperCase() + provider.provider.slice(1); }
 function latestUpdate(config: RuntimeConfigPayload, policy: RuntimePolicyPayload): string | null { const values = [...config.settings.map((item) => item.updated_at), ...config.ai_providers.map((item) => item.updated_at), ...policy.settings.map((item) => item.updated_at)].filter(Boolean).sort(); return values.at(-1) ?? null; }
 function formatDateTime(value: string | null | undefined): string { if (!value) return "—"; const date = new Date(value); return Number.isNaN(date.getTime()) ? String(value) : new Intl.DateTimeFormat(undefined, { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit", hour12: false }).format(date); }

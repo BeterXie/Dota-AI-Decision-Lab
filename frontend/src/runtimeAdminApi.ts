@@ -79,6 +79,9 @@ export interface RuntimeSecretStatus {
   label: string;
   category: string;
   configured: boolean;
+  decryptable: boolean;
+  operational: boolean;
+  fallback_available: boolean;
   storage: "DATABASE_ENCRYPTED" | "BOOTSTRAP_FALLBACK" | "NOT_CONFIGURED" | string;
   runtime_hot: boolean;
 }
