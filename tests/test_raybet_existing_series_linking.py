@@ -10,7 +10,6 @@ from app.identity.raybet_linking import RayBetExistingSeriesLinker
 from app.identity.resolver import IdentityAmbiguousError, IdentityResolver
 from app.models import (
     CanonicalEvent,
-    CanonicalMap,
     CanonicalSeries,
     ProviderEventMapping,
     ProviderMatchMapping,
@@ -102,11 +101,10 @@ async def test_raybet_links_to_event_compatible_liquipedia_series() -> None:
     match = _raybet_match(scheduled_at=scheduled_at + timedelta(minutes=12))
     async with factory.begin() as session:
         result = await RayBetExistingSeriesLinker().link(session, match)
-        fallback_id = await IdentityResolver().observe_raybet_match(session, match)
+        resolved_id = await IdentityResolver().observe_raybet_match(session, match)
 
     assert result.canonical_series_id == series_id
-    assert result.fallback_allowed is False
-    assert fallback_id == series_id
+    assert resolved_id == series_id
     async with factory() as session:
         assert await session.scalar(select(func.count()).select_from(CanonicalSeries)) == 1
         raybet_mapping = await session.scalar(
@@ -148,7 +146,6 @@ async def test_raybet_blocks_cross_tournament_fallback_with_one_time_candidate()
         result = await RayBetExistingSeriesLinker().link(session, match)
 
     assert result.canonical_series_id is None
-    assert result.fallback_allowed is False
     assert result.reason == "event_name_conflict"
     async with factory() as session:
         raybet_mapping_count = await session.scalar(
@@ -180,7 +177,6 @@ async def test_raybet_blocks_known_best_of_conflict() -> None:
         result = await RayBetExistingSeriesLinker().link(session, match)
 
     assert result.canonical_series_id is None
-    assert result.fallback_allowed is False
     assert result.reason == "best_of_conflict"
     await engine.dispose()
 
@@ -229,7 +225,7 @@ async def test_raybet_linker_fails_closed_when_two_liquipedia_series_are_plausib
 
 
 @pytest.mark.asyncio
-async def test_raybet_first_fallback_reconciles_to_later_liquipedia_schedule() -> None:
+async def test_raybet_without_liquipedia_candidate_stays_unmapped() -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
@@ -238,67 +234,11 @@ async def test_raybet_first_fallback_reconciles_to_later_liquipedia_schedule() -
     match = _raybet_match(scheduled_at=scheduled_at)
 
     async with factory.begin() as session:
-        fallback_id = await IdentityResolver().observe_raybet_match(session, match)
-        original_event_mapping = await session.scalar(
-            select(ProviderEventMapping).where(ProviderEventMapping.provider == "raybet")
-        )
-        assert original_event_mapping is not None
-        original_event_id = original_event_mapping.canonical_event_id
-
-    async with factory.begin() as session:
-        liquipedia = await _project_liquipedia_series(
-            session,
-            scheduled_at=scheduled_at + timedelta(minutes=10),
-        )
-        liquipedia_id = liquipedia.id
-        liquipedia_event_id = liquipedia.event_id
-        assert liquipedia_id != fallback_id
-
-    async with factory.begin() as session:
         result = await RayBetExistingSeriesLinker().link(session, match)
 
-    assert result.canonical_series_id == liquipedia_id
-    assert result.reason == "reconciled_liquipedia_series"
+    assert result.canonical_series_id is None
+    assert result.reason == "team_identity_missing"
     async with factory() as session:
-        mapping = await session.scalar(
-            select(ProviderMatchMapping).where(ProviderMatchMapping.provider == "raybet")
-        )
-        assert mapping is not None
-        assert mapping.canonical_series_id == liquipedia_id
-        assert mapping.resolved_by == "LIQUIPEDIA_RECONCILED_TEAMS_TIME_BO"
-        event_mapping = await session.scalar(
-            select(ProviderEventMapping).where(ProviderEventMapping.provider == "raybet")
-        )
-        assert event_mapping is not None
-        assert event_mapping.canonical_event_id == liquipedia_event_id
-        assert event_mapping.canonical_event_id != original_event_id
-        assert await session.get(CanonicalSeries, fallback_id) is not None
-    await engine.dispose()
-
-
-@pytest.mark.asyncio
-async def test_raybet_first_fallback_with_maps_is_not_rebound() -> None:
-    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-    async with engine.begin() as connection:
-        await connection.run_sync(Base.metadata.create_all)
-    factory = async_sessionmaker(engine, expire_on_commit=False)
-    scheduled_at = datetime(2026, 8, 18, 12, 0, tzinfo=UTC)
-    match = _raybet_match(scheduled_at=scheduled_at)
-
-    async with factory.begin() as session:
-        fallback_id = await IdentityResolver().observe_raybet_match(session, match)
-        session.add(CanonicalMap(series_id=fallback_id, map_number=1))
-
-    async with factory.begin() as session:
-        await _project_liquipedia_series(
-            session,
-            scheduled_at=scheduled_at + timedelta(minutes=10),
-        )
-
-    async with factory.begin() as session:
-        result = await RayBetExistingSeriesLinker().link(session, match)
-
-    assert result.canonical_series_id == fallback_id
-    assert result.fallback_allowed is False
-    assert result.reason == "fallback_has_downstream_maps"
+        assert await session.scalar(select(func.count()).select_from(CanonicalSeries)) == 0
+        assert await session.scalar(select(func.count()).select_from(ProviderMatchMapping)) == 0
     await engine.dispose()

@@ -1,4 +1,8 @@
-from app.web.public_boundary import _sanitize_match_payload, _sanitize_runtime_payload
+from app.web.public_boundary import (
+    _neutralize_provider_names,
+    _sanitize_match_payload,
+    _sanitize_runtime_payload,
+)
 
 
 def test_public_match_payload_strips_paid_ai_outputs_and_nested_internal_fields() -> None:
@@ -139,7 +143,6 @@ def test_public_match_payload_strips_paid_ai_outputs_and_nested_internal_fields(
         "status": "RESOLVED",
         "radiant_team_id": "team-a",
         "dire_team_id": "team-b",
-        "source": "DLTV_DB_IS_RADIANT",
         "confidence": 1.0,
         "observed_at": "2026-08-17T00:00:00Z",
     }
@@ -167,6 +170,11 @@ def test_public_match_payload_strips_paid_ai_outputs_and_nested_internal_fields(
     assert "private_score" not in public["latest_snapshot"]["market_quality"]
     assert "private_quality" not in public["latest_snapshot"]["quality"]
     assert "private_anchor" not in public["latest_snapshot"]["quality"]["live_anchors"]
+    assert (
+        public["latest_snapshot"]["quality"]["live_anchors"]["market_live_anchor"]
+        == "2026-08-17T00:00:00Z"
+    )
+    assert "raybet_live_anchor" not in public["latest_snapshot"]["quality"]["live_anchors"]
     assert public["ai_access"] == {
         "required_entitlement": "ai_decisions",
         "analysis_available": True,
@@ -181,6 +189,8 @@ def test_public_match_payload_strips_paid_ai_outputs_and_nested_internal_fields(
     assert "fair_probability_a" not in serialized
     assert "rosh-secret-v1" not in serialized
     assert "private-data-v1" not in serialized
+    assert "dltv" not in serialized.lower()
+    assert "raybet" not in serialized.lower()
 
 
 def test_anonymous_runtime_projection_hides_operational_diagnostics() -> None:
@@ -205,4 +215,20 @@ def test_anonymous_runtime_projection_hides_operational_diagnostics() -> None:
         "live_market_max_age_seconds": 90,
         "workers": {},
         "dependencies": {},
+    }
+
+
+def test_product_response_branding_is_provider_neutral_at_every_depth() -> None:
+    public = _neutralize_provider_names(
+        {
+            "raybet_live_anchor": "2026-08-17T00:00:00Z",
+            "warnings": ["DLTV_GAME_TIME_REGRESSION"],
+            "detail": {"message": "RayBet and dltv timing differ"},
+        }
+    )
+
+    assert public == {
+        "market_live_anchor": "2026-08-17T00:00:00Z",
+        "warnings": ["LIVE_GAME_TIME_REGRESSION"],
+        "detail": {"message": "Market and live timing differ"},
     }

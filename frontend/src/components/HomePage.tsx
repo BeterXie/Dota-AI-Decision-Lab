@@ -98,7 +98,7 @@ export const HomePage: React.FC<HomePageProps> = ({
 
       <section className="product-container home-access-banner product-section">
         <div className="home-access-icon" aria-hidden="true"><UiIcon name="spark" size={24} /></div>
-        <div><h2>{locale === "zh-CN" ? "先体验，再解锁你关心的比赛" : "Start free, then unlock the matches you follow"}</h2><p>{locale === "zh-CN" ? "小组赛 AI 决策、AI 表现和复盘免费开放；付费阶段的 AI 决策与实时通知按赛事或系列赛 Pass 解锁。" : "Group-stage AI decisions, AI Performance and Review are free; paid-stage AI and realtime alerts unlock with an Event or Series Pass."}</p></div>
+        <div><h2>{locale === "zh-CN" ? "先体验，再解锁你关心的比赛" : "Start free, then unlock the matches you follow"}</h2><p>{locale === "zh-CN" ? "小组赛 AI、AI 表现和复盘免费开放；付费阶段进行中的完整 AI 与实时通知需要 Pass，确认赛果后基础 AI 决策公开。" : "Group-stage AI, AI Performance and Review are free. Live paid-stage AI and alerts require a Pass; core AI decisions become public after the result is confirmed."}</p></div>
         {signedIn ? <a className="product-btn access-btn" href="/billing">{locale === "zh-CN" ? "查看赛事 Pass" : "View competition passes"}<span>→</span></a> : <button className="product-btn access-btn" type="button" onClick={onLogin}>{locale === "zh-CN" ? "登录后查看 Pass" : "Sign in to view passes"}<span>→</span></button>}
       </section>
     </div>

@@ -68,7 +68,7 @@ class FirstMatchAmbiguousLinker:
     async def link(self, _session, match) -> RayBetLinkResult:
         if match.provider_match_id == 1001:
             raise IdentityAmbiguousError("RAYBET_EXISTING_SERIES_AMBIGUOUS")
-        return RayBetLinkResult(None, True, "no_liquipedia_candidate")
+        return RayBetLinkResult(None, "no_liquipedia_candidate")
 
 
 @pytest.mark.asyncio
@@ -98,7 +98,7 @@ async def test_one_ambiguous_match_does_not_rollback_or_stop_discovery_pass() ->
         discovered = await discovery.discover_once(session)
 
     assert discovered == 2
-    assert observed == [1002]
+    assert observed == []
     async with factory() as session:
         match_count = await session.scalar(select(func.count()).select_from(RayBetMatch))
         event_count = await session.scalar(select(func.count()).select_from(DomainEventRecord))

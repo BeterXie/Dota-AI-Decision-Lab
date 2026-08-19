@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from uuid import UUID
 
+from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth import AuthenticatedUser
@@ -12,7 +13,7 @@ from app.entitlements import (
     REALTIME_NOTIFICATIONS_ENTITLEMENT,
     EntitlementService,
 )
-from app.models import CanonicalMap, CanonicalSeries
+from app.models import CanonicalMap, CanonicalSeries, MapResultRecord
 
 
 @dataclass(frozen=True, slots=True)
@@ -36,8 +37,9 @@ async def resolve_map_access(
     """Resolve the product access contract for one canonical map.
 
     Group-stage AI Decisions are Free Access for everyone. Paid/unknown stages
-    remain scoped to an explicit entitlement even after the map settles.
-    Realtime notifications always require an explicit scoped entitlement.
+    require an explicit entitlement while the map is active, then become public
+    after a non-conflicting winner is confirmed. Realtime notifications always
+    require an explicit scoped entitlement.
 
     Free Access intentionally receives the public AI projection only; it never
     exposes the frozen canonical snapshot payload or future-odds internals.
@@ -52,6 +54,9 @@ async def resolve_map_access(
         await session.get(CanonicalSeries, canonical_map.series_id)
         if canonical_map.series_id is not None
         else None
+    )
+    result = await session.scalar(
+        select(MapResultRecord).where(MapResultRecord.canonical_map_id == canonical_map.id)
     )
 
     ai_scope: str | None = None
@@ -73,14 +78,18 @@ async def resolve_map_access(
         )
 
     free_group_stage = series is not None and is_group_stage(series.stage_key)
-    public_projection = free_group_stage and ai_scope is None
+    confirmed_result = (
+        result is not None and result.winner_team_id is not None and not result.provider_conflict
+    )
+    public_scope = "FREE" if free_group_stage else "POSTMATCH" if confirmed_result else None
+    public_projection = public_scope is not None and ai_scope is None
     if public_projection:
-        ai_scope = "FREE"
+        ai_scope = public_scope
 
     return MapAccessDecision(
         canonical_map=canonical_map,
         series=series,
-        ai_allowed=free_group_stage or ai_scope is not None,
+        ai_allowed=ai_scope is not None,
         ai_scope=ai_scope,
         ai_public_projection=public_projection,
         notification_allowed=notification_scope is not None,

@@ -732,6 +732,18 @@ Valve Match ID 8940756672
 
 不允许只靠 fuzzy team name 强制映射。
 
+## 6.3 Event Discovery Authority
+
+```text
+Liquipedia schedule → CanonicalEvent / CanonicalSeries
+RayBet             → attach market identity and odds
+DLTV / Valve       → attach CanonicalMap, Draft, Live and result evidence
+```
+
+只有带 Liquipedia schedule mapping 的系列赛进入公开赛事列表。RayBet 或 DLTV 找不到唯一
+Liquipedia 系列赛时必须保持未解析并等待重试，不得创建 provider-owned event/series，也不得用
+`raybet:*`、`dltv:*` 或其他 provider 数字 ID 作为公开赛事名称。
+
 ---
 
 # 7. RayBet Provider
@@ -741,7 +753,7 @@ Valve Match ID 8940756672
 用途：
 
 ```text
-比赛发现
+赔率候选比赛发现（不得创建 CanonicalEvent / CanonicalSeries）
 赔率完整 Bootstrap
 赔率 ID 元数据
 赛事/队伍信息

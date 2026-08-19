@@ -86,6 +86,7 @@ class LiquipediaCanonicalProjector:
             or observation.tournament_name is None
             or observation.team_a_page is None
             or observation.team_b_page is None
+            or observation.scheduled_at is None
         ):
             return "skipped"
 
@@ -99,14 +100,17 @@ class LiquipediaCanonicalProjector:
             series = await session.get(CanonicalSeries, existing_mapping.canonical_series_id)
             if series is None:
                 raise ValueError("Liquipedia match mapping references a missing canonical series")
+            event_id = await self._resolve_event(
+                session,
+                provider_event_id=observation.tournament_page,
+                name=observation.tournament_name,
+                canonical_event_id=series.event_id,
+            )
+            if series.event_id is None:
+                series.event_id = event_id
             _apply_schedule(series, observation)
             return "reused"
 
-        event_id = await self._resolve_event(
-            session,
-            provider_event_id=observation.tournament_page,
-            name=observation.tournament_name,
-        )
         team_a_id = await self._resolve_team(
             session,
             provider_team_id=observation.team_a_page,
@@ -120,20 +124,40 @@ class LiquipediaCanonicalProjector:
         if team_a_id == team_b_id:
             raise IdentityAmbiguousError("LIQUIPEDIA_SERIES_SAME_TEAM")
 
+        event_mapping = await session.scalar(
+            select(ProviderEventMapping).where(
+                ProviderEventMapping.provider == "liquipedia",
+                ProviderEventMapping.provider_event_id == observation.tournament_page,
+            )
+        )
         candidates = await self._series_candidates(
             session,
-            event_id=event_id,
+            event_id=(event_mapping.canonical_event_id if event_mapping is not None else None),
             team_a_id=team_a_id,
             team_b_id=team_b_id,
             scheduled_at=observation.scheduled_at,
+            best_of=observation.best_of,
         )
         if len(candidates) > 1:
             raise IdentityAmbiguousError("LIQUIPEDIA_SERIES_AMBIGUOUS")
         if candidates:
             series = candidates[0]
+            event_id = await self._resolve_event(
+                session,
+                provider_event_id=observation.tournament_page,
+                name=observation.tournament_name,
+                canonical_event_id=series.event_id,
+            )
+            if series.event_id is None:
+                series.event_id = event_id
             _apply_schedule(series, observation)
             outcome = "reused"
         else:
+            event_id = await self._resolve_event(
+                session,
+                provider_event_id=observation.tournament_page,
+                name=observation.tournament_name,
+            )
             series = CanonicalSeries(
                 event_id=event_id,
                 team_a_id=team_a_id,
@@ -163,6 +187,7 @@ class LiquipediaCanonicalProjector:
         *,
         provider_event_id: str,
         name: str,
+        canonical_event_id: UUID | None = None,
     ) -> UUID:
         mapping = await session.scalar(
             select(ProviderEventMapping).where(
@@ -171,22 +196,33 @@ class LiquipediaCanonicalProjector:
             )
         )
         if mapping is not None:
+            if canonical_event_id is not None and mapping.canonical_event_id != canonical_event_id:
+                raise IdentityAmbiguousError("LIQUIPEDIA_EVENT_IDENTITY_CONFLICT")
             event = await session.get(CanonicalEvent, mapping.canonical_event_id)
-            if event is not None and event.name.startswith("liquipedia:"):
-                event.name = name
+            if event is None:
+                raise ValueError("Liquipedia event mapping references a missing canonical event")
+            event.name = name
             return mapping.canonical_event_id
 
-        same_name = list(
-            (await session.scalars(select(CanonicalEvent).where(CanonicalEvent.name == name))).all()
-        )
-        if len(same_name) > 1:
-            raise IdentityAmbiguousError("LIQUIPEDIA_EVENT_NAME_AMBIGUOUS")
-        if same_name:
-            event = same_name[0]
+        if canonical_event_id is not None:
+            event = await session.get(CanonicalEvent, canonical_event_id)
+            if event is None:
+                raise ValueError("canonical series references a missing event")
+            event.name = name
         else:
-            event = CanonicalEvent(name=name)
-            session.add(event)
-            await session.flush()
+            same_name = list(
+                (
+                    await session.scalars(select(CanonicalEvent).where(CanonicalEvent.name == name))
+                ).all()
+            )
+            if len(same_name) > 1:
+                raise IdentityAmbiguousError("LIQUIPEDIA_EVENT_NAME_AMBIGUOUS")
+            if same_name:
+                event = same_name[0]
+            else:
+                event = CanonicalEvent(name=name)
+                session.add(event)
+                await session.flush()
         session.add(
             ProviderEventMapping(
                 provider="liquipedia",
@@ -252,13 +288,13 @@ class LiquipediaCanonicalProjector:
         self,
         session: AsyncSession,
         *,
-        event_id: UUID,
+        event_id: UUID | None,
         team_a_id: UUID,
         team_b_id: UUID,
         scheduled_at,
+        best_of: int | None,
     ) -> list[CanonicalSeries]:
         statement = select(CanonicalSeries).where(
-            CanonicalSeries.event_id == event_id,
             or_(
                 and_(
                     CanonicalSeries.team_a_id == team_a_id,
@@ -270,11 +306,17 @@ class LiquipediaCanonicalProjector:
                 ),
             ),
         )
+        if event_id is not None:
+            statement = statement.where(CanonicalSeries.event_id == event_id)
         if scheduled_at is not None:
             statement = statement.where(
                 CanonicalSeries.scheduled_at.is_not(None),
                 CanonicalSeries.scheduled_at >= scheduled_at - self._start_time_window,
                 CanonicalSeries.scheduled_at <= scheduled_at + self._start_time_window,
+            )
+        if best_of is not None:
+            statement = statement.where(
+                or_(CanonicalSeries.best_of.is_(None), CanonicalSeries.best_of == best_of)
             )
         return list((await session.scalars(statement)).all())
 

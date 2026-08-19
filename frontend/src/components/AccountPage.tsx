@@ -118,7 +118,7 @@ export function AccountPage({
           </div>
           <div className="account-v2-membership-row"><span>{zh ? "当前方案" : "Current plan"}</span><strong>{zh ? "免费" : "Free"}</strong></div>
           <div className="account-v2-membership-row"><span>{zh ? "赛事 / 系列赛 Pass" : "Event / series passes"}</span><strong>{scopedGrants.length}</strong></div>
-          <p className="account-v2-note">{zh ? "小组赛 AI、AI 表现和复盘保持免费；付费阶段按赛事或系列赛解锁。" : "Group-stage AI, AI Performance and Review stay free; paid stages unlock by event or series."}</p>
+          <p className="account-v2-note">{zh ? "小组赛与确认赛果后的基础 AI 决策公开；付费阶段进行中的完整 AI 按赛事或系列赛解锁。" : "Group-stage and confirmed post-match core AI decisions are public; full live paid-stage AI unlocks by event or series."}</p>
           <a className="product-btn product-btn-primary" href="/billing">{zh ? "查看赛事 Pass" : "View competition passes"}<span>→</span></a>
         </section>
 

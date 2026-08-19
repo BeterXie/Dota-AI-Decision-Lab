@@ -1,6 +1,6 @@
 # Liquipedia Discovery Provider
 
-Liquipedia is the planned primary source for tournament discovery and scheduled series metadata. RayBet remains an odds provider attached to canonical match identity rather than the source that defines the tournament calendar.
+Liquipedia is the authoritative source for tournament discovery and scheduled series metadata. RayBet remains an odds provider and DLTV remains a map/live provider; both attach to Liquipedia-backed canonical identity and never define the tournament calendar.
 
 ## Selected crawler stack
 
@@ -84,8 +84,12 @@ The canonical projector is deliberately fail-closed:
 - a nearby same-event/same-team canonical series is reused when unambiguous;
 - ambiguous team/event/series identity raises an identity blocker instead of guessing;
 - Liquipedia schedule observations never write RayBet odds metadata or rewrite RayBet provider ids.
+- RayBet and DLTV observations without a unique Liquipedia series stay unresolved and retry later;
+- the public match feed includes only series carrying a Liquipedia schedule mapping;
+- unknown or unsettled matches without a current schedule window are archived from the public feed;
+- provider raw events and historical evidence remain archived even when they are not publicly listed.
 
-The next RayBet change belongs in a separate PR: RayBet discovery should search for an existing canonical series created from schedule data before creating a new series.
+RayBet discovery searches existing Liquipedia-backed series before attaching market identity. It does not create a canonical event or series. DLTV may create a canonical map only after resolving a unique Liquipedia-backed series, except when an authoritative Valve Match ID already identifies an existing map.
 
 ## Provenance requirements
 

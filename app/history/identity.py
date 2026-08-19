@@ -1,10 +1,11 @@
 from uuid import UUID
 
-from sqlalchemy import select, update
+from sqlalchemy import or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.identity.aliases import equivalent_team_aliases, normalize_alias
 from app.models import (
+    CanonicalMap,
     CanonicalSeries,
     CanonicalTeam,
     HistoricalMapRecord,
@@ -234,14 +235,6 @@ class HistoricalTeamResolver:
             team_id: await session.get(CanonicalTeam, team_id) for team_id in expected_team_ids
         }
         for provider_team_id, observed_name in observed_teams:
-            existing = await session.scalar(
-                select(ProviderTeamMapping).where(
-                    ProviderTeamMapping.provider == provider,
-                    ProviderTeamMapping.provider_team_id == provider_team_id,
-                )
-            )
-            if existing is not None:
-                continue
             if observed_name is None:
                 continue
             candidates = [
@@ -251,11 +244,39 @@ class HistoricalTeamResolver:
             ]
             if len(candidates) != 1:
                 continue
+            canonical_team_id = candidates[0]
+            existing = await session.scalar(
+                select(ProviderTeamMapping).where(
+                    ProviderTeamMapping.provider == provider,
+                    ProviderTeamMapping.provider_team_id == provider_team_id,
+                )
+            )
+            if existing is not None:
+                if existing.canonical_team_id == canonical_team_id:
+                    existing.observed_name = existing.observed_name or observed_name
+                    continue
+                placeholder = await session.get(CanonicalTeam, existing.canonical_team_id)
+                if placeholder is None or not _is_generated_provider_team(
+                    placeholder.name,
+                    provider=provider,
+                    provider_team_id=provider_team_id,
+                ):
+                    continue
+                await _merge_placeholder_team(
+                    session,
+                    source_team_id=placeholder.id,
+                    target_team_id=canonical_team_id,
+                )
+                existing.canonical_team_id = canonical_team_id
+                existing.observed_name = observed_name
+                await session.delete(placeholder)
+                resolved += 1
+                continue
             session.add(
                 ProviderTeamMapping(
                     provider=provider,
                     provider_team_id=provider_team_id,
-                    canonical_team_id=candidates[0],
+                    canonical_team_id=canonical_team_id,
                     observed_name=observed_name,
                 )
             )
@@ -264,9 +285,87 @@ class HistoricalTeamResolver:
             await session.flush()
         return resolved
 
+    async def repair_match_placeholders(
+        self,
+        session: AsyncSession,
+        *,
+        provider_match_id: str,
+        expected_team_ids: set[UUID],
+    ) -> int:
+        """Merge generated team placeholders when match context makes identity unique."""
+
+        if len(expected_team_ids) != 2:
+            return 0
+        facts = list(
+            (
+                await session.scalars(
+                    select(HistoricalMapRecord).where(
+                        HistoricalMapRecord.provider_match_id == provider_match_id
+                    )
+                )
+            ).all()
+        )
+        merged: dict[UUID, UUID] = {}
+        resolved = 0
+        for fact in facts:
+            side_ids = {
+                merged.get(team_id, team_id)
+                for team_id in (fact.radiant_team_id, fact.dire_team_id)
+                if team_id is not None
+            }
+            known = side_ids & expected_team_ids
+            unresolved = side_ids - expected_team_ids
+            remaining = expected_team_ids - known
+            if len(known) != 1 or len(unresolved) != 1 or len(remaining) != 1:
+                continue
+            source_team_id = next(iter(unresolved))
+            target_team_id = next(iter(remaining))
+            if source_team_id in merged:
+                continue
+            mappings = list(
+                (
+                    await session.scalars(
+                        select(ProviderTeamMapping).where(
+                            ProviderTeamMapping.provider == fact.provider,
+                            ProviderTeamMapping.canonical_team_id == source_team_id,
+                        )
+                    )
+                ).all()
+            )
+            if len(mappings) != 1:
+                continue
+            mapping = mappings[0]
+            placeholder = await session.get(CanonicalTeam, source_team_id)
+            if placeholder is None or not _is_generated_provider_team(
+                placeholder.name,
+                provider=fact.provider,
+                provider_team_id=mapping.provider_team_id,
+            ):
+                continue
+            await _merge_placeholder_team(
+                session,
+                source_team_id=source_team_id,
+                target_team_id=target_team_id,
+            )
+            mapping.canonical_team_id = target_team_id
+            await session.delete(placeholder)
+            await session.flush()
+            merged[source_team_id] = target_team_id
+            resolved += 1
+        return resolved
+
 
 def _names_match(canonical_name: str, provider_name: str) -> bool:
     return bool(equivalent_team_aliases(canonical_name) & equivalent_team_aliases(provider_name))
+
+
+def _is_generated_provider_team(
+    name: str,
+    *,
+    provider: str,
+    provider_team_id: str,
+) -> bool:
+    return name == f"{provider.upper()} team {provider_team_id}"
 
 
 async def _merge_placeholder_team(
@@ -275,6 +374,19 @@ async def _merge_placeholder_team(
     source_team_id: UUID,
     target_team_id: UUID,
 ) -> None:
+    affected_provider_match_ids = set(
+        (
+            await session.scalars(
+                select(HistoricalMapRecord.provider_match_id).where(
+                    or_(
+                        HistoricalMapRecord.radiant_team_id == source_team_id,
+                        HistoricalMapRecord.dire_team_id == source_team_id,
+                        HistoricalMapRecord.winner_team_id == source_team_id,
+                    )
+                )
+            )
+        ).all()
+    )
     references = (
         (TeamAlias, "canonical_team_id"),
         (CanonicalSeries, "team_a_id"),
@@ -295,3 +407,77 @@ async def _merge_placeholder_team(
         await session.execute(
             update(model).where(field == source_team_id).values({field_name: target_team_id})
         )
+    await session.flush()
+    await _restore_converged_match_results(session, affected_provider_match_ids)
+
+
+async def _restore_converged_match_results(
+    session: AsyncSession,
+    provider_match_ids: set[str],
+) -> None:
+    for provider_match_id in provider_match_ids:
+        facts = list(
+            (
+                await session.scalars(
+                    select(HistoricalMapRecord).where(
+                        HistoricalMapRecord.provider_match_id == provider_match_id
+                    )
+                )
+            ).all()
+        )
+        if len({fact.provider for fact in facts}) < 2:
+            continue
+        if any(
+            fact.canonical_map_id is None
+            or fact.radiant_team_id is None
+            or fact.dire_team_id is None
+            or fact.winner_team_id is None
+            for fact in facts
+        ):
+            continue
+        map_ids = {fact.canonical_map_id for fact in facts}
+        winners = {fact.winner_team_id for fact in facts}
+        team_pairs = {frozenset((fact.radiant_team_id, fact.dire_team_id)) for fact in facts}
+        if len(map_ids) != 1 or len(winners) != 1 or len(team_pairs) != 1:
+            continue
+        canonical_map_id = next(iter(map_ids))
+        winner_team_id = next(iter(winners))
+        canonical_map = await session.get(CanonicalMap, canonical_map_id)
+        series = (
+            await session.get(CanonicalSeries, canonical_map.series_id)
+            if canonical_map is not None and canonical_map.series_id is not None
+            else None
+        )
+        if series is None:
+            continue
+        expected_team_ids = {series.team_a_id, series.team_b_id}
+        if next(iter(team_pairs)) != expected_team_ids or winner_team_id not in expected_team_ids:
+            continue
+
+        for fact in facts:
+            if fact.sync_status == "DATA_CONFLICT":
+                fact.sync_status = (
+                    "ADVANCED_READY" if fact.advanced_ready_at is not None else "BASIC_READY"
+                )
+
+        evidence_rows = list(
+            (
+                await session.scalars(
+                    select(MapResultEvidenceRecord).where(
+                        MapResultEvidenceRecord.canonical_map_id == canonical_map_id
+                    )
+                )
+            ).all()
+        )
+        if not evidence_rows or any(
+            evidence.winner_team_id != winner_team_id for evidence in evidence_rows
+        ):
+            continue
+        for evidence in evidence_rows:
+            evidence.conflict_status = "CONFIRMED"
+        result = await session.scalar(
+            select(MapResultRecord).where(MapResultRecord.canonical_map_id == canonical_map_id)
+        )
+        if result is not None:
+            result.winner_team_id = winner_team_id
+            result.provider_conflict = False

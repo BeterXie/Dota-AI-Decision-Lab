@@ -66,8 +66,8 @@ const EventIndex: React.FC<{ events: EventSummary[]; loading: boolean; error: bo
           <h1>{locale === "zh-CN" ? "全球 Dota 赛事，一处追踪" : "One place for the Dota events that matter"}</h1>
           <p>
             {locale === "zh-CN"
-              ? "先看赛事进度，再进入具体对局。赛程、对阵和赛果保持公开；付费阶段的 AI 决策和实时通知按赛事或系列赛 Pass 解锁。"
-              : "Start with the event, then drill into the match. Schedules, matchups and results stay public; paid-stage AI decisions and realtime alerts unlock with an Event or Series Pass."}
+              ? "先看赛事进度，再进入具体对局。赛程、对阵、赛果和确认赛果后的基础 AI 决策公开；付费阶段进行中的完整 AI 与实时通知需要 Pass。"
+              : "Start with the event, then drill into the match. Schedules, matchups, results and confirmed post-match core AI decisions are public; full live paid-stage AI and alerts require a Pass."}
           </p>
         </div>
         <div className="events-hero-stats" aria-label={locale === "zh-CN" ? "赛事概览" : "Event overview"}>
@@ -284,7 +284,7 @@ const EventDetail: React.FC<{
             <span className="home-eyebrow">ACCESS</span>
             <h2>{locale === "zh-CN" ? "比赛公开，AI 按权限解锁" : "Matches public. AI unlocked by access."}</h2>
             <div className="event-access-row"><i>✓</i><div><strong>{locale === "zh-CN" ? "公开赛事层" : "Public event layer"}</strong><p>{locale === "zh-CN" ? "赛程、对阵、比分、赛果与基础比赛情报无需登录。" : "Schedules, matchups, scores, results and core match intelligence require no sign-in."}</p></div></div>
-            <div className="event-access-row is-pro"><i>✦</i><div><strong>{locale === "zh-CN" ? "付费阶段 AI 与实时通知" : "Paid-stage AI & realtime alerts"}</strong><p>{locale === "zh-CN" ? "小组赛 AI、AI 表现和复盘免费开放；付费阶段 AI 决策和通知按赛事或系列赛 Pass 解锁。" : "Group-stage AI, AI Performance and Review are free; paid-stage AI decisions and alerts unlock by Event or Series Pass."}</p></div></div>
+            <div className="event-access-row is-pro"><i>✦</i><div><strong>{locale === "zh-CN" ? "进行中的完整 AI 与实时通知" : "Full live AI & realtime alerts"}</strong><p>{locale === "zh-CN" ? "小组赛和确认赛果后的基础 AI 决策公开；付费阶段进行中的完整 AI 与通知按赛事或系列赛 Pass 解锁。" : "Group-stage and confirmed post-match core AI decisions are public; full live paid-stage AI and alerts unlock by Event or Series Pass."}</p></div></div>
             <a href={event.canonicalEventId ? `/billing?event=${encodeURIComponent(event.canonicalEventId)}` : "/billing"}>{locale === "zh-CN" ? "查看赛事 Pass" : "View Event Pass"}<span>→</span></a>
           </article>
           <article className="event-trust-card">

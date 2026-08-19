@@ -1,7 +1,7 @@
 import asyncio
 from collections import defaultdict
 from collections.abc import Sequence
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from uuid import UUID
 
@@ -48,6 +48,9 @@ from app.runtime.health import HealthRegistry
 from app.time import elapsed_seconds, ensure_utc
 from app.web.review import create_review_router
 from app.web.spa import spa_file_response
+
+MATCH_FEED_LIMIT = 500
+MATCH_FEED_SETTLING_MAX_AGE = timedelta(hours=24)
 
 
 def create_app(
@@ -102,32 +105,16 @@ def create_app(
     @app.get("/api/matches")
     async def matches() -> list[dict]:
         async with session_factory() as session:
-            live_providers = ("raybet", "dltv")
-            provider_map_ids = select(ProviderMatchMapping.canonical_map_id).where(
-                ProviderMatchMapping.provider.in_(live_providers),
-                ProviderMatchMapping.canonical_map_id.is_not(None),
-            )
-            provider_series_ids = select(ProviderMatchMapping.canonical_series_id).where(
-                ProviderMatchMapping.provider.in_(live_providers),
+            liquipedia_series_ids = select(ProviderMatchMapping.canonical_series_id).where(
+                ProviderMatchMapping.provider == "liquipedia",
                 ProviderMatchMapping.canonical_series_id.is_not(None),
-            )
-            dltv_map_ids = select(DltvLiveObservationRecord.canonical_map_id)
-            snapshot_map_ids = select(DecisionSnapshotRecord.canonical_map_id).where(
-                DecisionSnapshotRecord.canonical_map_id.is_not(None),
             )
             map_records = list(
                 (
                     await session.scalars(
                         select(CanonicalMap)
                         .outerjoin(CanonicalSeries, CanonicalSeries.id == CanonicalMap.series_id)
-                        .where(
-                            or_(
-                                CanonicalMap.id.in_(provider_map_ids),
-                                CanonicalMap.series_id.in_(provider_series_ids),
-                                CanonicalMap.id.in_(dltv_map_ids),
-                                CanonicalMap.id.in_(snapshot_map_ids),
-                            )
-                        )
+                        .where(CanonicalMap.series_id.in_(liquipedia_series_ids))
                         # Maps resolved from DLTV identity usually carry no
                         # scheduled_at of their own; fall back to the series
                         # schedule so the newest matches sort first.
@@ -136,7 +123,7 @@ def create_app(
                             .desc()
                             .nulls_last()
                         )
-                        .limit(100)
+                        .limit(MATCH_FEED_LIMIT)
                     )
                 ).all()
             )
@@ -150,10 +137,10 @@ def create_app(
                                     CanonicalMap.series_id.is_not(None),
                                 )
                             ),
-                            CanonicalSeries.id.in_(provider_series_ids),
+                            CanonicalSeries.id.in_(liquipedia_series_ids),
                         )
                         .order_by(CanonicalSeries.scheduled_at.desc().nulls_last())
-                        .limit(100)
+                        .limit(MATCH_FEED_LIMIT)
                     )
                 ).all()
             )
@@ -172,6 +159,16 @@ def create_app(
                     market_max_pair_skew_seconds=market_max_pair_skew_seconds,
                 )
             )
+            settling_cutoff = datetime.now(UTC) - MATCH_FEED_SETTLING_MAX_AGE
+            payloads = [
+                item
+                for item in payloads
+                if item["phase"] not in ("AWAITING_RESULT", "UNKNOWN")
+                or (
+                    item["scheduled_at"] is not None
+                    and ensure_utc(item["scheduled_at"]) >= settling_cutoff
+                )
+            ]
             payloads.sort(
                 key=lambda item: (
                     ensure_utc(item["scheduled_at"])
@@ -180,7 +177,7 @@ def create_app(
                 ),
                 reverse=True,
             )
-            return payloads[:60]
+            return payloads[:MATCH_FEED_LIMIT]
 
     @app.get("/api/maps/{canonical_map_id}")
     async def map_detail(canonical_map_id: UUID) -> dict:
@@ -635,9 +632,9 @@ async def _map_summary_payloads(
                     live_state_max_age_seconds=live_state_max_age_seconds,
                 ),
                 "provider_match_id": provider_match_id,
-                "tournament_name": raybet_match.tournament_name
-                if raybet_match
-                else (event.name if event else None),
+                "tournament_name": event.name
+                if event
+                else (raybet_match.tournament_name if raybet_match else None),
                 "round": raybet_match.round
                 if raybet_match
                 else (f"BO{series.best_of}" if series and series.best_of else None),
@@ -1188,9 +1185,9 @@ async def _map_payload(
         "scheduled_at": scheduled_at,
         "phase": phase,
         "provider_match_id": raybet_match.provider_match_id if raybet_match else None,
-        "tournament_name": raybet_match.tournament_name
-        if raybet_match
-        else (event.name if event else None),
+        "tournament_name": event.name
+        if event
+        else (raybet_match.tournament_name if raybet_match else None),
         "round": raybet_match.round
         if raybet_match
         else (f"BO{series.best_of}" if series and series.best_of else None),
@@ -1659,9 +1656,9 @@ async def _pending_series_payloads(
                     else "UNKNOWN"
                 ),
                 "provider_match_id": raybet_match.provider_match_id if raybet_match else None,
-                "tournament_name": raybet_match.tournament_name
-                if raybet_match
-                else (event.name if event else None),
+                "tournament_name": event.name
+                if event
+                else (raybet_match.tournament_name if raybet_match else None),
                 "round": raybet_match.round
                 if raybet_match
                 else (f"BO{series.best_of}" if series.best_of else None),

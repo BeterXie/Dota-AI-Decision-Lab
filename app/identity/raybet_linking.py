@@ -26,16 +26,14 @@ from app.models import (
 @dataclass(frozen=True, slots=True)
 class RayBetLinkResult:
     canonical_series_id: UUID | None
-    fallback_allowed: bool
     reason: str
 
 
 class RayBetExistingSeriesLinker:
     """Safely attach RayBet identity to a Liquipedia-backed canonical series.
 
-    The linker runs before the legacy RayBet identity fallback. It can explicitly
-    block that fallback when Liquipedia evidence exists but conflicts, preventing
-    a later resolver from guessing across tournaments or BO formats.
+    RayBet supplies market metadata only. Missing or conflicting Liquipedia
+    identity remains unresolved instead of creating a provider-owned series.
     """
 
     def __init__(self, *, start_time_window: timedelta = timedelta(hours=3)) -> None:
@@ -46,16 +44,15 @@ class RayBetExistingSeriesLinker:
         existing_series_id = existing.canonical_series_id if existing is not None else None
         if existing is not None and existing_series_id is not None:
             if existing.resolved_by != "PROVIDER_DISCOVERY":
-                return RayBetLinkResult(existing_series_id, False, "existing_canonical_mapping")
+                return RayBetLinkResult(existing_series_id, "existing_canonical_mapping")
             if existing.canonical_map_id is not None or await self._series_has_maps(
                 session, existing_series_id
             ):
-                return RayBetLinkResult(existing_series_id, False, "fallback_has_downstream_maps")
+                return RayBetLinkResult(existing_series_id, "fallback_has_downstream_maps")
 
         if match.scheduled_at is None:
             return RayBetLinkResult(
                 existing_series_id,
-                existing_series_id is None,
                 "missing_schedule",
             )
 
@@ -72,7 +69,6 @@ class RayBetExistingSeriesLinker:
         if team_a_id is None or team_b_id is None:
             return RayBetLinkResult(
                 existing_series_id,
-                existing_series_id is None,
                 "team_identity_missing",
             )
         if team_a_id == team_b_id:
@@ -87,7 +83,6 @@ class RayBetExistingSeriesLinker:
         if not candidates:
             return RayBetLinkResult(
                 existing_series_id,
-                existing_series_id is None,
                 "no_liquipedia_candidate",
             )
 
@@ -99,7 +94,7 @@ class RayBetExistingSeriesLinker:
                 if candidate.best_of is None or candidate.best_of == best_of
             ]
             if not compatible:
-                return RayBetLinkResult(existing_series_id, False, "best_of_conflict")
+                return RayBetLinkResult(existing_series_id, "best_of_conflict")
             candidates = compatible
 
         event_mapping = await self._raybet_event_mapping(session, match)
@@ -112,7 +107,7 @@ class RayBetExistingSeriesLinker:
                 if candidate.event_id == event_mapping.canonical_event_id
             ]
             if not candidates:
-                return RayBetLinkResult(existing_series_id, False, "event_mapping_conflict")
+                return RayBetLinkResult(existing_series_id, "event_mapping_conflict")
         elif match.tournament_name:
             candidates = await self._filter_by_event_name(
                 session,
@@ -120,7 +115,7 @@ class RayBetExistingSeriesLinker:
                 match.tournament_name,
             )
             if not candidates:
-                return RayBetLinkResult(existing_series_id, False, "event_name_conflict")
+                return RayBetLinkResult(existing_series_id, "event_name_conflict")
 
         if len(candidates) > 1:
             raise IdentityAmbiguousError("RAYBET_EXISTING_SERIES_AMBIGUOUS")
@@ -166,7 +161,6 @@ class RayBetExistingSeriesLinker:
 
         return RayBetLinkResult(
             series.id,
-            False,
             "reconciled_liquipedia_series" if reconciled else "matched_liquipedia_series",
         )
 

@@ -90,7 +90,7 @@ export function marketStageDisplayLabel(
   const zh = locale === "zh-CN";
   if (stage?.toLowerCase() === "final" && mapNumber != null && bestOf != null && mapNumber === bestOf) {
     return zh
-      ? `第${mapNumber}局（决胜局）· RayBet 将本局并入 BO3 胜者盘`
+      ? `第${mapNumber}局（决胜局）· 本局并入 BO3 胜者盘`
       : `Map ${mapNumber} (decider) · merged into BO3 winner market`;
   }
   const map = stage?.match(/^r?(\d+)$/i);

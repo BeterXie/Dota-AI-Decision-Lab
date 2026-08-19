@@ -1,18 +1,17 @@
 from __future__ import annotations
 
-import hashlib
 import re
 from dataclasses import dataclass, field
 from datetime import UTC, datetime
 from html.parser import HTMLParser
-from urllib.parse import unquote, urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from app.providers.liquipedia.models import (
     LiquipediaSeriesObservation,
     LiquipediaTournamentObservation,
 )
 
-_PARSER_VERSION = "liquipedia-mediawiki-v1"
+_PARSER_VERSION = "liquipedia-mediawiki-v2"
 _BEST_OF_PATTERN = re.compile(r"\bBo\s*(\d+)\b", re.IGNORECASE)
 _SCORE_PATTERN = re.compile(r"\b\d+\s*[-:]\s*\d+\b")
 
@@ -25,7 +24,6 @@ def parser_version() -> str:
 class _Node:
     tag: str
     attrs: dict[str, str]
-    parent: _Node | None = None
     children: list[_Node | str] = field(default_factory=list)
 
     @property
@@ -71,7 +69,6 @@ class _TreeParser(HTMLParser):
         node = _Node(
             tag=tag,
             attrs={name: value or "" for name, value in attrs},
-            parent=self._stack[-1],
         )
         self._stack[-1].children.append(node)
         if tag not in self._VOID_TAGS:
@@ -95,43 +92,47 @@ class _TreeParser(HTMLParser):
 
 def parse_tournaments(html: str) -> list[LiquipediaTournamentObservation]:
     root = _parse_tree(html)
-    current_phase: str | None = None
     observations: list[LiquipediaTournamentObservation] = []
     seen: set[tuple[str, str]] = set()
 
     for node in _walk(root):
-        if "tournaments-list-heading" in node.classes:
-            current_phase = _phase_from_heading(node.text())
+        if node.tag != "li":
             continue
-        if "tournaments-list-name" not in node.classes or current_phase is None:
+        phase = _phase_from_heading(_direct_text(node))
+        if phase is None:
             continue
-        anchor = _first_anchor(node)
-        if anchor is None:
-            continue
-        href = anchor.attrs.get("href", "")
-        page_name = _dota_page_name(href)
-        name = anchor.text() or node.text()
-        if page_name is None or not name:
-            continue
-        key = (current_phase, page_name)
-        if key in seen:
-            continue
-        seen.add(key)
-        item = _nearest_ancestor(node, "li") or node.parent or node
-        tier_node = _first_descendant_with_class(item, "tournament-badge__text")
-        if tier_node is None:
-            tier_node = _first_descendant_with_class(item, "tournament-badge")
-        dates_node = _first_descendant_with_class(item, "tournaments-list-dates")
-        observations.append(
-            LiquipediaTournamentObservation(
-                page_name=page_name,
-                name=name,
-                phase=current_phase,
-                tier=_clean_optional(tier_node.text() if tier_node is not None else None),
-                date_label=_clean_optional(dates_node.text() if dates_node is not None else None),
-                source_href=href,
-            )
-        )
+        for child in node.children:
+            if not isinstance(child, _Node) or child.tag != "ul":
+                continue
+            for item in child.children:
+                if not isinstance(item, _Node) or item.tag != "li":
+                    continue
+                fields = [field.strip() for field in item.text().split("|")]
+                if len(fields) < 2 or not fields[0] or not fields[1]:
+                    continue
+                page_name = fields[0].replace("_", " ")
+                name, page_name, _stage = _event_identity(fields[1], page_name)
+                if name is None or page_name is None:
+                    continue
+                key = (phase, page_name)
+                if key in seen:
+                    continue
+                seen.add(key)
+                metadata = _key_value_fields(fields[2:])
+                date_label = _date_range(
+                    metadata.get("startdate"),
+                    metadata.get("enddate"),
+                )
+                observations.append(
+                    LiquipediaTournamentObservation(
+                        page_name=page_name,
+                        name=name,
+                        phase=phase,
+                        tier=None,
+                        date_label=date_label,
+                        source_href=f"/dota2/{fields[0]}",
+                    )
+                )
     return observations
 
 
@@ -140,37 +141,39 @@ def parse_series(html: str) -> list[LiquipediaSeriesObservation]:
     observations: list[LiquipediaSeriesObservation] = []
     seen: set[str] = set()
 
-    for table in _nodes_with_class(root, "infobox_matches_content"):
-        team_a_node = _first_descendant_with_class(table, "team-left")
-        team_b_node = _first_descendant_with_class(table, "team-right")
-        versus_node = _first_descendant_with_class(table, "versus")
-        if team_a_node is None or team_b_node is None or versus_node is None:
+    for card in _nodes_with_class(root, "match-info"):
+        header = _first_descendant_with_class(card, "match-info-header")
+        if header is None:
             continue
-        team_a_name, team_a_page = _team_identity(team_a_node)
-        team_b_name, team_b_page = _team_identity(team_b_node)
+        opponents = [node for node in _walk(header) if "match-info-header-opponent" in node.classes]
+        if len(opponents) != 2:
+            continue
+        team_a_name, team_a_page = _team_identity(
+            _first_descendant_with_class(opponents[0], "name") or opponents[0]
+        )
+        team_b_name, team_b_page = _team_identity(
+            _first_descendant_with_class(opponents[1], "name") or opponents[1]
+        )
         if not team_a_name or not team_b_name:
             continue
 
-        filler = _first_descendant_with_class(table, "match-filler")
+        tournament = _first_descendant_with_class(card, "match-info-tournament-name")
         tournament_name, tournament_page = _tournament_identity(
-            filler,
+            tournament,
             excluded_pages={page for page in (team_a_page, team_b_page) if page},
         )
-        versus_text = versus_node.text()
-        best_of_match = _BEST_OF_PATTERN.search(versus_text)
-        best_of = int(best_of_match.group(1)) if best_of_match else None
-        scheduled_at = _machine_timestamp(table)
-        state = _match_state(versus_text)
-        stage = _stage_text(filler, tournament_name)
-        provider_key = _series_key(
-            team_a_page or team_a_name,
-            team_b_page or team_b_name,
-            tournament_page or tournament_name or "unknown-event",
-            scheduled_at,
-            best_of,
-            stage,
+        tournament_name, tournament_page, stage = _event_identity(
+            tournament_name,
+            tournament_page,
         )
-        if provider_key in seen:
+        scoreholder = _first_descendant_with_class(card, "match-info-header-scoreholder")
+        score_text = scoreholder.text() if scoreholder is not None else ""
+        best_of_match = _BEST_OF_PATTERN.search(score_text)
+        best_of = int(best_of_match.group(1)) if best_of_match else None
+        scheduled_at = _machine_timestamp(card)
+        state = _match_state(score_text, header)
+        provider_key = _match_page_id(card)
+        if provider_key is None or provider_key in seen:
             continue
         seen.add(provider_key)
         observations.append(
@@ -217,15 +220,6 @@ def _first_anchor(node: _Node) -> _Node | None:
     return next((item for item in _walk(node) if item.tag == "a"), None)
 
 
-def _nearest_ancestor(node: _Node, tag: str) -> _Node | None:
-    current = node.parent
-    while current is not None:
-        if current.tag == tag:
-            return current
-        current = current.parent
-    return None
-
-
 def _phase_from_heading(value: str) -> str | None:
     normalized = value.casefold()
     if "upcoming" in normalized:
@@ -238,11 +232,15 @@ def _phase_from_heading(value: str) -> str | None:
 
 
 def _dota_page_name(href: str) -> str | None:
-    path = urlparse(href).path
+    parsed = urlparse(href)
+    path = parsed.path
     marker = "/dota2/"
     if marker not in path:
         return None
     page = unquote(path.split(marker, 1)[1]).strip("/")
+    if page == "index.php":
+        titles = parse_qs(parsed.query).get("title", [])
+        page = titles[0] if titles else ""
     if not page or page.startswith("Liquipedia:"):
         return None
     return page.replace("_", " ")
@@ -252,7 +250,9 @@ def _team_identity(node: _Node) -> tuple[str, str | None]:
     anchor = _first_anchor(node)
     if anchor is None:
         return node.text().strip(), None
-    return (anchor.text() or node.text()).strip(), _dota_page_name(anchor.attrs.get("href", ""))
+    name = anchor.attrs.get("title") or anchor.text() or node.text()
+    name = re.sub(r"\s*\(page does not exist\)\s*$", "", name, flags=re.IGNORECASE)
+    return name.strip(), _dota_page_name(anchor.attrs.get("href", ""))
 
 
 def _tournament_identity(
@@ -306,41 +306,74 @@ def _parse_timestamp(raw: str) -> datetime | None:
     return parsed.astimezone(UTC)
 
 
-def _match_state(versus_text: str) -> str:
-    normalized = versus_text.casefold()
+def _match_state(score_text: str, header: _Node) -> str:
+    if any(
+        "match-info-header-winner" in node.classes or "match-info-header-loser" in node.classes
+        for node in _walk(header)
+    ):
+        return "COMPLETED"
+    normalized = score_text.casefold()
     if "vs" in normalized:
         return "UPCOMING"
-    if _SCORE_PATTERN.search(versus_text):
+    if _SCORE_PATTERN.search(score_text):
         return "COMPLETED"
     return "UNKNOWN"
 
 
-def _stage_text(node: _Node | None, tournament_name: str | None) -> str | None:
-    if node is None:
-        return None
-    text = node.text()
-    if tournament_name:
-        text = text.replace(tournament_name, "", 1)
-    text = re.sub(r"\s+", " ", text).strip(" -|·")
-    return text or None
+def _event_identity(
+    tournament_name: str | None,
+    tournament_page: str | None,
+) -> tuple[str | None, str | None, str | None]:
+    if tournament_name is None:
+        return None, tournament_page, None
+    parts = re.split(r"\s+[-–—]\s+", tournament_name, maxsplit=1)
+    event_name = parts[0].strip()
+    stage = parts[1].strip() if len(parts) == 2 and parts[1].strip() else None
+    event_page = tournament_page
+    if event_page is not None and stage is not None:
+        page_parts = event_page.split("/")
+        if page_parts and _identity_token(page_parts[-1]) == _identity_token(stage):
+            event_page = "/".join(page_parts[:-1])
+    if re.fullmatch(r"ti\s*2026", event_name, re.IGNORECASE) or (
+        event_page or ""
+    ).casefold().startswith("the international/2026"):
+        event_name = "The International 2026"
+        event_page = "The International/2026"
+    return event_name or None, event_page, stage
 
 
-def _series_key(
-    team_a: str,
-    team_b: str,
-    tournament: str,
-    scheduled_at: datetime | None,
-    best_of: int | None,
-    stage: str | None,
-) -> str:
-    teams = sorted((team_a.casefold().strip(), team_b.casefold().strip()))
-    timestamp = scheduled_at.isoformat() if scheduled_at is not None else "unknown-time"
-    raw = "|".join((tournament.casefold().strip(), *teams, timestamp, str(best_of), stage or ""))
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()[:24]
+def _identity_token(value: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", value.casefold())
 
 
-def _clean_optional(value: str | None) -> str | None:
-    if value is None:
-        return None
-    cleaned = " ".join(value.split()).strip()
-    return cleaned or None
+def _match_page_id(node: _Node) -> str | None:
+    for item in _walk(node):
+        if item.tag != "a":
+            continue
+        href = item.attrs.get("href", "")
+        parsed = urlparse(href)
+        for title in parse_qs(parsed.query).get("title", []):
+            if title.startswith("Match:") and len(title) <= 128:
+                return title
+        page_name = _dota_page_name(href)
+        if page_name is not None and page_name.startswith("Match:") and len(page_name) <= 128:
+            return page_name
+    return None
+
+
+def _direct_text(node: _Node) -> str:
+    return " ".join(" ".join(child.split()) for child in node.children if isinstance(child, str))
+
+
+def _key_value_fields(fields: list[str]) -> dict[str, str]:
+    values: dict[str, str] = {}
+    for raw_field in fields:
+        key, separator, value = raw_field.partition("=")
+        if separator:
+            values[key.strip().casefold()] = value.strip()
+    return values
+
+
+def _date_range(start: str | None, end: str | None) -> str | None:
+    parts = [value for value in (start, end) if value]
+    return " - ".join(parts) if parts else None

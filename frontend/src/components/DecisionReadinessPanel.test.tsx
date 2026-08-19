@@ -20,7 +20,7 @@ const payload: AiReadinessPayload = {
   },
   stages: [
     { key: "scheduled", label: "SCHEDULED", count: 3, rate: 1, drop_count: 0 },
-    { key: "raybet_linked", label: "RAYBET_LINKED", count: 2, rate: 2 / 3, drop_count: 1 },
+    { key: "market_linked", label: "MARKET_LINKED", count: 2, rate: 2 / 3, drop_count: 1 },
     { key: "market_ready", label: "MARKET_READY", count: 2, rate: 2 / 3, drop_count: 0 },
     { key: "map_identity", label: "MAP_IDENTITY", count: 2, rate: 2 / 3, drop_count: 0 },
     { key: "live_ready", label: "LIVE_READY", count: 2, rate: 2 / 3, drop_count: 0 },
@@ -30,7 +30,7 @@ const payload: AiReadinessPayload = {
     { key: "evaluated", label: "EVALUATED", count: 1, rate: 1 / 3, drop_count: 0 }
   ],
   failure_reasons: [
-    { stage: "raybet_linked", reason: "RAYBET_IDENTITY_MISSING", count: 1, rate: 1 / 3 },
+    { stage: "market_linked", reason: "MARKET_IDENTITY_MISSING", count: 1, rate: 1 / 3 },
     { stage: "snapshot_ready", reason: "DRAFT_INCOMPLETE", count: 1, rate: 1 / 3 }
   ],
   series: [
@@ -57,7 +57,7 @@ const payload: AiReadinessPayload = {
       team_b: { id: "xg", name: "Xtreme Gaming" },
       best_of: 3,
       current_stage: "SCHEDULED",
-      blocker: { stage: "raybet_linked", reason: "RAYBET_IDENTITY_MISSING" },
+      blocker: { stage: "market_linked", reason: "MARKET_IDENTITY_MISSING" },
       facts: {},
       counts: { maps: 0, live_maps: 0, snapshots: 0, successful_decision_snapshots: 0, result_maps: 0, evaluated_snapshots: 0 },
       ai_status_counts: {}
@@ -103,7 +103,7 @@ describe("DecisionReadinessPanel", () => {
     expect(screen.getByText(hasTeamPair("Aurora", "Xtreme Gaming"))).toBeTruthy();
     expect(screen.getByText(hasTeamPair("Team Falcons", "Tundra Esports"))).toBeTruthy();
 
-    fireEvent.click(screen.getByRole("button", { name: /RayBet 身份未匹配/ }));
+    fireEvent.click(screen.getByRole("button", { name: /市场身份未匹配/ }));
 
     expect(screen.getByText(hasTeamPair("Aurora", "Xtreme Gaming"))).toBeTruthy();
     expect(screen.queryByText(hasTeamPair("Team Falcons", "Tundra Esports"))).toBeNull();

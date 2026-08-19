@@ -13,6 +13,7 @@ from app.db import Base
 from app.market.fair_probability import remove_vig
 from app.models import (
     AiDecisionRecord,
+    CanonicalEvent,
     CanonicalHero,
     CanonicalMap,
     CanonicalPlayer,
@@ -31,6 +32,16 @@ from app.models import (
 )
 from app.runtime.health import HealthRegistry
 from app.web.api import _confirmed_result, _decision_payload, _match_phase, create_app
+
+
+def _liquipedia_series_mapping(series_id, provider_match_id: str) -> ProviderMatchMapping:
+    return ProviderMatchMapping(
+        provider="liquipedia",
+        provider_match_id=provider_match_id,
+        canonical_series_id=series_id,
+        resolved_by="LIQUIPEDIA_SCHEDULE",
+        confidence=0.95,
+    )
 
 
 def test_match_phase_uses_result_and_fresh_live_facts() -> None:
@@ -400,6 +411,7 @@ async def test_match_feed_separates_current_and_snapshot_market_quality() -> Non
         await session.flush()
         session.add_all(
             (
+                _liquipedia_series_mapping(series.id, "Match:summary-separation"),
                 ProviderMatchMapping(
                     provider="raybet",
                     provider_match_id="38423260",
@@ -483,13 +495,15 @@ async def test_match_feed_includes_raybet_series_pending_map_identity() -> None:
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, expire_on_commit=False)
-    observed_at = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
+    observed_at = datetime(2026, 8, 20, 12, 0, tzinfo=UTC)
     async with factory.begin() as session:
+        event_record = CanonicalEvent(name="The International 2026")
         team_a = CanonicalTeam(name="Spirit")
         team_b = CanonicalTeam(name="Xtreme Gaming")
-        session.add_all((team_a, team_b))
+        session.add_all((event_record, team_a, team_b))
         await session.flush()
         series = CanonicalSeries(
+            event_id=event_record.id,
             team_a_id=team_a.id,
             team_b_id=team_b.id,
             best_of=3,
@@ -500,6 +514,7 @@ async def test_match_feed_includes_raybet_series_pending_map_identity() -> None:
         historical_cutoff = datetime.now(UTC) - timedelta(hours=1)
         session.add_all(
             (
+                _liquipedia_series_mapping(series.id, "Match:pending-map-identity"),
                 ProviderMatchMapping(
                     provider="raybet",
                     provider_match_id="38423260",
@@ -567,7 +582,7 @@ async def test_match_feed_includes_raybet_series_pending_map_identity() -> None:
     assert payload[0]["canonical_map_id"] is None
     assert payload[0]["valve_match_id"] is None
     assert payload[0]["provider_match_id"] == 38423260
-    assert payload[0]["tournament_name"] == "TI15 International"
+    assert payload[0]["tournament_name"] == "The International 2026"
     assert payload[0]["team_a"] == {"id": str(team_a.id), "name": "Spirit"}
     assert payload[0]["team_b"] == {"id": str(team_b.id), "name": "Xtreme Gaming"}
     assert payload[0]["historical_prewarm"]["team_strength_ready_count"] == 2
@@ -589,16 +604,17 @@ async def test_pending_series_query_count_does_not_grow_with_card_count() -> Non
                 team_b = CanonicalTeam(name=f"Batch B {index}")
                 session.add_all((team_a, team_b))
                 await session.flush()
-                series = CanonicalSeries(team_a_id=team_a.id, team_b_id=team_b.id)
+                series = CanonicalSeries(
+                    team_a_id=team_a.id,
+                    team_b_id=team_b.id,
+                    scheduled_at=datetime.now(UTC) + timedelta(days=1, minutes=index),
+                )
                 session.add(series)
                 await session.flush()
                 session.add(
-                    ProviderMatchMapping(
-                        provider="raybet",
-                        provider_match_id=str(40_000 + index),
-                        canonical_series_id=series.id,
-                        resolved_by="PROVIDER_DISCOVERY",
-                        confidence=1.0,
+                    _liquipedia_series_mapping(
+                        series.id,
+                        f"Match:pending-batch-{40_000 + index}",
                     )
                 )
 
@@ -617,18 +633,18 @@ async def test_pending_series_query_count_does_not_grow_with_card_count() -> Non
             first = await client.get("/api/matches")
             one_card_queries = len(selected)
             selected.clear()
-            await add_pending_series(1, 5)
+            await add_pending_series(1, 60)
             many = await client.get("/api/matches")
-            six_card_queries = len(selected)
+            many_card_queries = len(selected)
     finally:
         event.remove(engine.sync_engine, "before_cursor_execute", count_selects)
 
     assert first.status_code == 200
     assert many.status_code == 200
     assert len(first.json()) == 1
-    assert len(many.json()) == 6
-    assert six_card_queries == one_card_queries
-    assert six_card_queries < 15
+    assert len(many.json()) == 61
+    assert many_card_queries == one_card_queries
+    assert many_card_queries < 15
     await engine.dispose()
 
 
@@ -642,8 +658,8 @@ async def test_match_feed_orders_newest_scheduled_match_first() -> None:
     async with factory.begin() as session:
         for index, (team_a_name, team_b_name, scheduled_at) in enumerate(
             (
-                ("Spirit", "Xtreme Gaming", datetime(2026, 8, 13, 5, 0, tzinfo=UTC)),
-                ("Level Up", "Rune Eaters", datetime(2026, 8, 12, 9, 0, tzinfo=UTC)),
+                ("Spirit", "Xtreme Gaming", datetime(2026, 8, 21, 5, 0, tzinfo=UTC)),
+                ("Level Up", "Rune Eaters", datetime(2026, 8, 20, 9, 0, tzinfo=UTC)),
             ),
             start=1,
         ):
@@ -661,6 +677,10 @@ async def test_match_feed_orders_newest_scheduled_match_first() -> None:
             provider_match_id = 38400000 + index
             session.add_all(
                 (
+                    _liquipedia_series_mapping(
+                        series.id,
+                        f"Match:ordered-{provider_match_id}",
+                    ),
                     ProviderMatchMapping(
                         provider="raybet",
                         provider_match_id=str(provider_match_id),
@@ -941,6 +961,108 @@ async def test_match_feed_excludes_maps_created_only_from_historical_providers()
 
 
 @pytest.mark.asyncio
+async def test_match_feed_excludes_dltv_only_series() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    observed_at = datetime(2026, 8, 12, 16, 0, tzinfo=UTC)
+    async with factory.begin() as session:
+        team_a = CanonicalTeam(name="Natus Vincere")
+        team_b = CanonicalTeam(name="Level Up")
+        session.add_all((team_a, team_b))
+        await session.flush()
+        series = CanonicalSeries(
+            team_a_id=team_a.id,
+            team_b_id=team_b.id,
+            scheduled_at=observed_at,
+        )
+        session.add(series)
+        await session.flush()
+        canonical_map = CanonicalMap(
+            series_id=series.id,
+            map_number=1,
+            valve_match_id=8942003788,
+        )
+        session.add(canonical_map)
+        await session.flush()
+        session.add_all(
+            (
+                ProviderMatchMapping(
+                    provider="dltv",
+                    provider_match_id="427612",
+                    canonical_series_id=series.id,
+                    canonical_map_id=canonical_map.id,
+                    valve_match_id=8942003788,
+                    resolved_by="DLTV_CANONICAL_CREATE",
+                    confidence=1.0,
+                ),
+                DltvLiveObservationRecord(
+                    canonical_map_id=canonical_map.id,
+                    valve_match_id=8942003788,
+                    game_time_seconds=2232,
+                    received_at=observed_at,
+                    payload_hash="dltv-only",
+                    last_message_received_at=observed_at,
+                    last_state_change_received_at=observed_at,
+                    raw_event_id=uuid4(),
+                ),
+            )
+        )
+
+    app = create_app(factory, HealthRegistry())
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/api/matches")
+
+    assert response.status_code == 200
+    assert response.json() == []
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_match_feed_excludes_stale_awaiting_result_map() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    old = datetime.now(UTC) - timedelta(days=2)
+    async with factory.begin() as session:
+        team_a = CanonicalTeam(name="Natus Vincere")
+        team_b = CanonicalTeam(name="Level Up")
+        session.add_all((team_a, team_b))
+        await session.flush()
+        series = CanonicalSeries(team_a_id=team_a.id, team_b_id=team_b.id, scheduled_at=old)
+        session.add(series)
+        await session.flush()
+        canonical_map = CanonicalMap(series_id=series.id, map_number=1)
+        session.add(canonical_map)
+        await session.flush()
+        session.add_all(
+            (
+                _liquipedia_series_mapping(series.id, "Match:stale-awaiting-result"),
+                DltvLiveObservationRecord(
+                    canonical_map_id=canonical_map.id,
+                    valve_match_id=8942003788,
+                    game_time_seconds=2232,
+                    received_at=old,
+                    payload_hash="stale-awaiting-result",
+                    last_message_received_at=old,
+                    last_state_change_received_at=old,
+                    raw_event_id=uuid4(),
+                ),
+            )
+        )
+
+    app = create_app(factory, HealthRegistry())
+    async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
+        response = await client.get("/api/matches")
+
+    assert response.status_code == 200
+    assert response.json() == []
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_status_websocket_serializes_runtime_timestamps(tmp_path: Path) -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:
@@ -1208,12 +1330,9 @@ async def test_match_feed_orders_by_coalesced_schedule_newest_first() -> None:
             session.add(canonical_map)
             await session.flush()
             session.add(
-                ProviderMatchMapping(
-                    provider="raybet",
-                    provider_match_id=str(900000000 + counter),
-                    canonical_series_id=series.id,
-                    resolved_by="PROVIDER_DISCOVERY",
-                    confidence=1.0,
+                _liquipedia_series_mapping(
+                    series.id,
+                    f"Match:coalesced-{900000000 + counter}",
                 )
             )
             return series.id

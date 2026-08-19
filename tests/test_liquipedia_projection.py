@@ -83,7 +83,7 @@ async def test_liquipedia_reuses_existing_raybet_team_aliases_and_nearby_series(
     scheduled_at = datetime(2026, 8, 18, 12, 0, tzinfo=UTC)
 
     async with factory.begin() as session:
-        event = CanonicalEvent(name="The International 2026")
+        event = CanonicalEvent(name="TI15 International")
         liquid = CanonicalTeam(name="Liquid")
         spirit = CanonicalTeam(name="Team Spirit")
         session.add_all((event, liquid, spirit))
@@ -125,6 +125,7 @@ async def test_liquipedia_reuses_existing_raybet_team_aliases_and_nearby_series(
         session.add(existing_series)
         await session.flush()
         existing_series_id = existing_series.id
+        existing_event_id = event.id
 
     observation = LiquipediaSeriesObservation(
         team_a_name="Team Liquid",
@@ -133,7 +134,7 @@ async def test_liquipedia_reuses_existing_raybet_team_aliases_and_nearby_series(
         team_b_page="Team Spirit",
         tournament_name="The International 2026",
         tournament_page="The International/2026",
-        stage="Group Stage",
+        stage="Main Event",
         best_of=3,
         scheduled_at=scheduled_at,
         state="UPCOMING",
@@ -150,10 +151,18 @@ async def test_liquipedia_reuses_existing_raybet_team_aliases_and_nearby_series(
         )
         assert mapping is not None
         assert mapping.canonical_series_id == existing_series_id
+        event_mapping = await session.scalar(
+            select(ProviderEventMapping).where(ProviderEventMapping.provider == "liquipedia")
+        )
+        assert event_mapping is not None
+        assert event_mapping.canonical_event_id == existing_event_id
+        canonical_event = await session.get(CanonicalEvent, existing_event_id)
+        assert canonical_event is not None
+        assert canonical_event.name == "The International 2026"
         canonical = await session.get(CanonicalSeries, existing_series_id)
         assert canonical is not None
         assert canonical.best_of == 3
-        assert canonical.stage_key == "GROUP_STAGE"
+        assert canonical.stage_key == "PAID_STAGE"
         assert canonical.scheduled_at.replace(tzinfo=UTC) == scheduled_at
         raybet_mappings = list(
             (

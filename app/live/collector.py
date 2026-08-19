@@ -112,6 +112,22 @@ class DltvSocketCollector:
                             )
                         )
                         if canonical_map is None:
+                            await self._events.record(
+                                session,
+                                DomainEvent(
+                                    event_type=DomainEventType.DLTV_MATCH_DISCOVERED,
+                                    aggregate_type="dltv_match",
+                                    aggregate_id=str(valve_match_id),
+                                    dedupe_key=f"dltv-ended:{valve_match_id}",
+                                    payload={
+                                        "valve_match_id": valve_match_id,
+                                        "dltv_series_id": previous_frame.live_maps[valve_match_id],
+                                        "ended_at": received_at.isoformat(),
+                                        "reason": "MAP_ENDED_IDENTITY_PENDING",
+                                    },
+                                    occurred_at=received_at,
+                                ),
+                            )
                             continue
                         await self._events.record(
                             session,

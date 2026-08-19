@@ -11,9 +11,11 @@ from app.draft.coordinator import DltvBootstrapCoordinator
 from app.draft.role_assignment import DraftRoleAssignmentService, _resolve_side_from_history
 from app.events.outbox import EventRepository
 from app.identity.resolver import IdentityResolver
-from app.models import DraftSlotRecord, DraftSnapshotRecord, ProviderRawEvent
+from app.models import DomainEventRecord, DraftSlotRecord, DraftSnapshotRecord, ProviderRawEvent
 from app.providers.common import TimedPayload
 from app.providers.dltv.draft_picks import DltvProviderPick
+from app.providers.liquipedia.models import LiquipediaSeriesObservation
+from app.providers.liquipedia.projection import LiquipediaCanonicalProjector
 from app.repositories.raw import RawEventRepository
 
 
@@ -159,6 +161,103 @@ class _UnusedBootstrapClient:
         raise AssertionError("rebuild must not call the live DLTV endpoint")
 
 
+class _FixtureBootstrapClient:
+    def __init__(self, payload: dict, received_at: datetime) -> None:
+        self.payload = payload
+        self.received_at = received_at
+
+    async def get_live(self, valve_match_id: int) -> TimedPayload:
+        return TimedPayload(
+            payload=self.payload,
+            request_started_at=self.received_at - timedelta(milliseconds=100),
+            received_at=self.received_at,
+        )
+
+
+async def _seed_liquipedia_series(session, payload: dict) -> None:
+    db = payload["db"]
+    scheduled_at = datetime.fromisoformat(db["series"]["started_at"].replace("Z", "+00:00"))
+    result = await LiquipediaCanonicalProjector().project_series(
+        session,
+        [
+            LiquipediaSeriesObservation(
+                team_a_name=db["first_team"]["title"],
+                team_a_page="Fixture/Dire_Sample",
+                team_b_name=db["second_team"]["title"],
+                team_b_page="Fixture/Radiant_Sample",
+                tournament_name="Fixture Event",
+                tournament_page="Fixture/Event",
+                stage="Group Stage",
+                best_of=3,
+                scheduled_at=scheduled_at,
+                state="UPCOMING",
+                provider_key=f"Match:fixture-{db['series']['id']}",
+            )
+        ],
+    )
+    assert result.series_created == 1
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_positive_game_time_emits_one_map_started_event() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    received_at = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
+    valve_match_id = 8940730389
+    payload = json.loads(
+        (Path(__file__).parent / "fixtures" / "dltv_bootstrap.json").read_text(encoding="utf-8")
+    )
+    raw_events = RawEventRepository()
+    coordinator = DltvBootstrapCoordinator(
+        client=_FixtureBootstrapClient(payload, received_at),
+        raw_events=raw_events,
+        events=EventRepository(),
+        identities=IdentityResolver(),
+        role_assignment=DraftRoleAssignmentService(
+            stratz=_FixtureStratzClient(received_at + timedelta(seconds=1)),
+            raw_events=raw_events,
+        ),
+    )
+
+    async with factory() as session, session.begin():
+        await _seed_liquipedia_series(session, payload)
+        first = await coordinator.bootstrap(session, valve_match_id=valve_match_id)
+    ended_at = received_at + timedelta(minutes=45)
+    async with factory() as session, session.begin():
+        second = await coordinator.bootstrap(
+            session,
+            valve_match_id=valve_match_id,
+            ended_at=ended_at,
+        )
+
+    async with factory() as session:
+        started_events = list(
+            (
+                await session.scalars(
+                    select(DomainEventRecord).where(DomainEventRecord.event_type == "MAP_STARTED")
+                )
+            ).all()
+        )
+        ended_events = list(
+            (
+                await session.scalars(
+                    select(DomainEventRecord).where(DomainEventRecord.event_type == "MAP_ENDED")
+                )
+            ).all()
+        )
+
+    assert second.resolved.canonical_map_id == first.resolved.canonical_map_id
+    assert len(started_events) == 1
+    assert started_events[0].aggregate_id == str(first.resolved.canonical_map_id)
+    assert started_events[0].occurred_at == received_at.replace(tzinfo=None)
+    assert len(ended_events) == 1
+    assert ended_events[0].aggregate_id == str(first.resolved.canonical_map_id)
+    assert ended_events[0].occurred_at == ended_at.replace(tzinfo=None)
+    await engine.dispose()
+
+
 async def _rebuild_fixture():
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:
@@ -171,6 +270,7 @@ async def _rebuild_fixture():
     )
     raw_events = RawEventRepository()
     async with factory() as session, session.begin():
+        await _seed_liquipedia_series(session, payload)
         session.add(
             ProviderRawEvent(
                 provider="dltv",

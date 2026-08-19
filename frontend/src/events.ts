@@ -156,7 +156,10 @@ function buildSeriesSummary(seriesId: string, matches: MapSummary[]): EventSerie
 
 function eventStatus(matches: MapSummary[]): EventStatus {
   if (matches.some((match) => match.phase === "LIVE")) return "LIVE";
-  if (matches.some((match) => match.phase === "PREMATCH" || match.phase === "UNKNOWN")) return "UPCOMING";
+  const hasUpcoming = matches.some((match) => match.phase === "PREMATCH" || match.phase === "UNKNOWN");
+  const hasStarted = matches.some((match) => match.phase === "POSTMATCH" || match.phase === "AWAITING_RESULT");
+  if (hasUpcoming && hasStarted) return "LIVE";
+  if (hasUpcoming) return "UPCOMING";
   if (matches.some((match) => match.phase === "AWAITING_RESULT")) return "SETTLING";
   return "COMPLETED";
 }

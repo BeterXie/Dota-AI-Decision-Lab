@@ -50,6 +50,8 @@ from app.models import (
     RayBetOddsRegistry,
 )
 from app.providers.common import TimedPayload
+from app.providers.liquipedia.models import LiquipediaSeriesObservation
+from app.providers.liquipedia.projection import LiquipediaCanonicalProjector
 from app.providers.opendota.normalizer import normalize_match as normalize_opendota_match
 from app.repositories.raw import RawEventRepository
 from app.snapshots.builder import SnapshotBuilder
@@ -65,6 +67,30 @@ HISTORICAL_MATCH_ID = VALVE_MATCH_ID - 1
 
 def _fixture(name: str) -> dict:
     return json.loads((FIXTURES / name).read_text(encoding="utf-8"))
+
+
+async def _seed_liquipedia_series(session, payload: dict) -> None:
+    db = payload["db"]
+    scheduled_at = datetime.fromisoformat(db["series"]["started_at"].replace("Z", "+00:00"))
+    result = await LiquipediaCanonicalProjector().project_series(
+        session,
+        [
+            LiquipediaSeriesObservation(
+                team_a_name=db["first_team"]["title"],
+                team_a_page="Fixture/Dire_Sample",
+                team_b_name=db["second_team"]["title"],
+                team_b_page="Fixture/Radiant_Sample",
+                tournament_name="Fixture Event",
+                tournament_page="Fixture/Event",
+                stage="Group Stage",
+                best_of=3,
+                scheduled_at=scheduled_at,
+                state="UPCOMING",
+                provider_key=f"Match:fixture-{db['series']['id']}",
+            )
+        ],
+    )
+    assert result.series_created == 1
 
 
 def _analysis() -> dict:
@@ -285,11 +311,12 @@ async def test_production_lifecycle_replay_uses_postgres_and_converges() -> None
             assert revision == "0038_runtime_configuration"
 
         start = datetime.now(UTC).replace(microsecond=0)
+        dltv_payload = _fixture("dltv_bootstrap.json")
         raw_events = RawEventRepository()
         events = EventRepository()
         identities = IdentityResolver()
         dltv = DltvBootstrapCoordinator(
-            client=_DltvFixtureClient(_fixture("dltv_bootstrap.json"), start),
+            client=_DltvFixtureClient(dltv_payload, start),
             raw_events=raw_events,
             events=events,
             identities=identities,
@@ -305,6 +332,7 @@ async def test_production_lifecycle_replay_uses_postgres_and_converges() -> None
             significant_move=settings.significant_odds_move,
         )
         async with factory() as session, session.begin():
+            await _seed_liquipedia_series(session, dltv_payload)
             bootstrap = await dltv.bootstrap(session, valve_match_id=VALVE_MATCH_ID)
             resolved = bootstrap.resolved
         async with factory() as session, session.begin():

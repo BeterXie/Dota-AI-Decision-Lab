@@ -4,11 +4,8 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 
 import { ProductRoot } from "./ProductRoot";
 import "./styles.scss";
-import "./auth.scss";
-import "./auth-account.scss";
 import "./design/player-first-v2.css";
 import "./design/rosh-direction.css";
-import "./design/player-layout-v3.css";
 import "./design/product-shell.css";
 import "./design/events-v2.css";
 import "./design/match-v2.css";

@@ -69,6 +69,7 @@ class DltvBootstrapCoordinator:
         *,
         valve_match_id: int,
         dltv_series_id: int | None = None,
+        ended_at: datetime | None = None,
     ) -> DltvBootstrapResult:
         response = await self._client.get_live(valve_match_id)
         raw_event_id = await self._raw_events.append(
@@ -81,7 +82,7 @@ class DltvBootstrapCoordinator:
             received_at=response.received_at,
             parser_version=PARSER_VERSION,
         )
-        return await self._process_payload(
+        result = await self._process_payload(
             session,
             valve_match_id=valve_match_id,
             payload=response.payload,
@@ -89,6 +90,22 @@ class DltvBootstrapCoordinator:
             raw_event_id=raw_event_id,
             dltv_series_id=dltv_series_id,
         )
+        if ended_at is not None:
+            await self._events.record(
+                session,
+                DomainEvent(
+                    event_type=DomainEventType.MAP_ENDED,
+                    aggregate_type="canonical_map",
+                    aggregate_id=str(result.resolved.canonical_map_id),
+                    dedupe_key=f"map-ended:{result.resolved.canonical_map_id}",
+                    payload={
+                        "canonical_map_id": str(result.resolved.canonical_map_id),
+                        "valve_match_id": valve_match_id,
+                    },
+                    occurred_at=ended_at,
+                ),
+            )
+        return result
 
     async def rebuild_draft_from_stored_payload(
         self,
@@ -375,6 +392,27 @@ class DltvBootstrapCoordinator:
         if reduction.state is None:
             return
         state = reduction.state
+        if state.game_time_seconds is not None and state.game_time_seconds > 0:
+            first_positive_at = await session.scalar(
+                select(DltvLiveObservationRecord.received_at)
+                .where(
+                    DltvLiveObservationRecord.canonical_map_id == canonical_map_id,
+                    DltvLiveObservationRecord.game_time_seconds > 0,
+                )
+                .order_by(DltvLiveObservationRecord.received_at.asc())
+                .limit(1)
+            )
+            await self._events.record(
+                session,
+                DomainEvent(
+                    event_type=DomainEventType.MAP_STARTED,
+                    aggregate_type="canonical_map",
+                    aggregate_id=str(canonical_map_id),
+                    dedupe_key=f"map-started:{canonical_map_id}",
+                    payload={"canonical_map_id": str(canonical_map_id)},
+                    occurred_at=first_positive_at or received_at,
+                ),
+            )
         latest_hash = await session.scalar(
             select(DltvLiveObservationRecord.payload_hash)
             .where(DltvLiveObservationRecord.valve_match_id == valve_match_id)

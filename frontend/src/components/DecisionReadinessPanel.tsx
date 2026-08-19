@@ -260,7 +260,7 @@ function ReadinessState({ text, error, onRetry }: { text: string; error?: boolea
 function stageLabel(key: string, locale: string): string {
   const zh: Record<string, string> = {
     scheduled: "赛程进入",
-    raybet_linked: "RayBet 绑定",
+    market_linked: "市场身份",
     market_ready: "赔率可用",
     map_identity: "Map 身份",
     live_ready: "实时数据",
@@ -271,7 +271,7 @@ function stageLabel(key: string, locale: string): string {
   };
   const en: Record<string, string> = {
     scheduled: "Scheduled",
-    raybet_linked: "RayBet linked",
+    market_linked: "Market identity",
     market_ready: "Market ready",
     map_identity: "Map identity",
     live_ready: "Live data",
@@ -287,7 +287,7 @@ function stageLabelFromBackend(stage: string, locale: string): string {
   const key = stage.toLocaleLowerCase().replaceAll("_", " ");
   const match = Object.entries({
     scheduled: "SCHEDULED",
-    raybet_linked: "RAYBET_LINKED",
+    market_linked: "MARKET_LINKED",
     market_ready: "MARKET_READY",
     map_identity: "MAP_IDENTITY",
     live_ready: "LIVE_READY",
@@ -301,10 +301,10 @@ function stageLabelFromBackend(stage: string, locale: string): string {
 
 function reasonLabel(reason: string, locale: string): string {
   const zh: Record<string, string> = {
-    RAYBET_IDENTITY_MISSING: "RayBet 身份未匹配",
+    MARKET_IDENTITY_MISSING: "市场身份未匹配",
     MARKET_OBSERVATION_MISSING: "缺少市场赔率",
     CANONICAL_MAP_MISSING: "Map 身份未建立",
-    DLTV_LIVE_MISSING: "缺少 DLTV 实时数据",
+    LIVE_DATA_MISSING: "缺少实时比赛数据",
     DRAFT_MISSING: "缺少选人快照",
     DRAFT_INCOMPLETE: "选人数据不完整",
     DRAFT_CURVE_MISSING: "选人强度曲线缺失",
@@ -314,10 +314,10 @@ function reasonLabel(reason: string, locale: string): string {
     EVALUATION_MISSING: "AI 评价未完成"
   };
   const en: Record<string, string> = {
-    RAYBET_IDENTITY_MISSING: "RayBet identity missing",
+    MARKET_IDENTITY_MISSING: "Market identity missing",
     MARKET_OBSERVATION_MISSING: "Market odds missing",
     CANONICAL_MAP_MISSING: "Map identity missing",
-    DLTV_LIVE_MISSING: "DLTV live data missing",
+    LIVE_DATA_MISSING: "Live match data missing",
     DRAFT_MISSING: "Draft snapshot missing",
     DRAFT_INCOMPLETE: "Draft incomplete",
     DRAFT_CURVE_MISSING: "Draft curve missing",

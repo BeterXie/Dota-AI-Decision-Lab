@@ -2,6 +2,7 @@ import React from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   fetchMap,
+  fetchRuntime,
   queryKeys,
   type AiDecision,
   type MapDetail,
@@ -13,6 +14,7 @@ import { aiAccessScope, findMatchByRoute, type AiAccessScope } from "../matches"
 import { useI18n } from "../i18n";
 import { CanonicalMarketCard } from "./CanonicalMarketCard";
 import { LineupCard } from "./LineupCard";
+import { MatchLivePulse } from "./MatchLivePulse";
 import { PlayerDraftAdvantageCard } from "./PlayerDraftAdvantageCard";
 import { PlayerAiDecisionStrip } from "./PlayerAiDecisionStrip";
 import { TeamCrest, UiIcon } from "./VisualIdentity";
@@ -57,6 +59,13 @@ export const MatchPage: React.FC<MatchPageProps> = ({
     refetchInterval: summary?.phase === "LIVE" ? 4000 : 15_000
   });
   const match = detail.data ?? summary;
+  const runtime = useQuery({
+    queryKey: queryKeys.runtime,
+    queryFn: fetchRuntime,
+    enabled: Boolean(canonicalMapId),
+    staleTime: 30_000,
+    retry: 1
+  });
   const scope = aiAccessScope(session, match);
   const ai = useQuery({
     queryKey: canonicalMapId ? ["map-ai", canonicalMapId] : ["map-ai", "none"],
@@ -111,6 +120,16 @@ export const MatchPage: React.FC<MatchPageProps> = ({
       </section>
 
       {canonicalMapId ? <SeriesNavigator match={match} activeMapId={canonicalMapId} locale={locale} /> : null}
+
+      {canonicalMapId ? (
+        <section className="product-container match-live-section">
+          <MatchLivePulse
+            match={displayDetail ?? match}
+            locale={locale}
+            liveMaxAgeSeconds={runtime.data?.live_state_max_age_seconds}
+          />
+        </section>
+      ) : null}
 
       {canonicalMapId ? (
         <section className="product-container match-ai-section product-section">

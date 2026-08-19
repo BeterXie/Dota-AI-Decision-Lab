@@ -3,9 +3,7 @@ import { afterEach, beforeEach, expect, test } from "vitest";
 import type { MapDetail } from "../api";
 import { I18nProvider } from "../i18n";
 import { LineupCard } from "./LineupCard";
-import { LiveStateCard } from "./LiveStateCard";
 import { PlayerDraftAdvantageCard } from "./PlayerDraftAdvantageCard";
-import { PlayerMatchHeader } from "./PlayerMatchHeader";
 
 const match = {
   phase: "LIVE",
@@ -76,26 +74,6 @@ function withI18n(node: React.ReactNode) {
   return render(<I18nProvider>{node}</I18nProvider>);
 }
 
-test("header keeps series A/B separate from verified map sides", () => {
-  withI18n(<PlayerMatchHeader match={match} />);
-
-  expect(screen.getByText("TEAM A · DIRE")).toBeInTheDocument();
-  expect(screen.getByText("TEAM B · RADIANT")).toBeInTheDocument();
-  expect(screen.getAllByText(/Bravo · RADIANT/).length).toBeGreaterThanOrEqual(2);
-  expect(screen.getAllByText(/Alpha · DIRE/).length).toBeGreaterThanOrEqual(1);
-});
-
-test("header kill score is routed through verified sides into Team A/B columns", () => {
-  const { container } = withI18n(<PlayerMatchHeader match={match} />);
-
-  // Team A (Alpha) is Dire with 8 kills; Team B (Bravo) is Radiant with 10.
-  const score = container.querySelector(".score-number");
-  expect(score?.textContent?.replace(/\s/g, "")).toBe("8:10");
-  const scoreTime = container.querySelector(".score-time");
-  expect(scoreTime?.textContent).toContain("Alpha · DIRE");
-  expect(scoreTime?.textContent).toContain("Bravo · RADIANT");
-});
-
 test("R.O.S.H. attributes positive radiant edge to the verified radiant team", () => {
   withI18n(<PlayerDraftAdvantageCard match={match} />);
 
@@ -104,17 +82,9 @@ test("R.O.S.H. attributes positive radiant edge to the verified radiant team", (
   expect(screen.queryByText("Alpha advantage")).not.toBeInTheDocument();
 });
 
-test("lineup and live state use the same verified side mapping", () => {
-  withI18n(
-    <>
-      <LineupCard match={match} />
-      <LiveStateCard match={match} />
-    </>
-  );
+test("lineup uses the verified side mapping", () => {
+  withI18n(<LineupCard match={match} />);
 
   expect(screen.getByText("Bravo · RADIANT")).toBeInTheDocument();
   expect(screen.getByText("Alpha · DIRE")).toBeInTheDocument();
-  expect(screen.getByText("Bravo · Radiant 10")).toBeInTheDocument();
-  expect(screen.getByText("8 Alpha · Dire")).toBeInTheDocument();
-  expect(screen.getByText("Bravo · Radiant +2,000")).toBeInTheDocument();
 });

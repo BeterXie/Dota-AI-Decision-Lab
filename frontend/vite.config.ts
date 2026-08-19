@@ -34,8 +34,6 @@ export default defineConfig({
             {
               name: "echarts-runtime",
               test: /node_modules[\\/](echarts|zrender)[\\/]/,
-              minSize: 100_000,
-              maxSize: 300_000,
               priority: 20
             }
           ]
