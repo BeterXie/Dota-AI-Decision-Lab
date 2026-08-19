@@ -94,7 +94,10 @@ test("shows one fixed AI card per model and opens all rounds in one modal", () =
   fireEvent.click(screen.getByRole("button", { name: /GPT/ }));
 
   // Both rounds live inside the same modal.
-  expect(screen.getAllByText(/Checkpoint ·/)).toHaveLength(2);
+  const checkpoints = screen.getAllByText(/Checkpoint ·/);
+  expect(checkpoints).toHaveLength(2);
+  expect(checkpoints[0]).toHaveTextContent(/05/);
+  expect(checkpoints[1]).toHaveTextContent(/00/);
   expect(screen.getByText("BUY A")).toBeInTheDocument();
   expect(screen.getAllByText("BUY B").length).toBeGreaterThan(0);
   expect(screen.getAllByText("500").length).toBeGreaterThan(0);
