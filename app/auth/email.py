@@ -11,7 +11,7 @@ class ResendLoginCodeSender:
         sender_from: str,
         base_url: str,
         timeout_seconds: float,
-        subject_prefix: str = "[Dota AI Decision Lab]",
+        subject_prefix: str = "[DotaScope]",
     ) -> None:
         self._sender = ResendEmailSender(
             api_key=api_key,
@@ -32,7 +32,7 @@ class ResendLoginCodeSender:
         minutes = max(1, (ttl_seconds + 59) // 60)
         subject = f"{self._subject_prefix} 登录验证码"
         text_body = (
-            "Dota AI Decision Lab 登录验证码\n\n"
+            "DotaScope 登录验证码\n\n"
             f"验证码：{code}\n"
             f"有效期：{minutes} 分钟\n\n"
             "如果不是你本人发起登录，请忽略这封邮件。"
@@ -42,7 +42,7 @@ class ResendLoginCodeSender:
 <body style="margin:0;background:#f4f4f4;color:#161616;font-family:Arial,sans-serif">
 <div style="max-width:560px;margin:32px auto;background:#fff;border-radius:16px;overflow:hidden">
 <div style="padding:24px;background:#161616;color:#fff">
-<div style="font-size:13px;color:#aaa">Dota AI Decision Lab</div>
+<div style="font-size:13px;color:#aaa">DotaScope</div>
 <h1 style="margin:8px 0 0;font-size:22px">登录验证码</h1>
 </div>
 <div style="padding:28px">
