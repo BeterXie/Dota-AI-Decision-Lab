@@ -1,8 +1,8 @@
-# Dota AI Decision Lab
+# DotaScope
 
-Dota AI Decision Lab is a standalone Dota 2 decision-intelligence runtime. It aligns RayBet market observations, DLTV draft/live state, STRATZ and OpenDota historical facts, local Draft Intelligence, deterministic quality gates, immutable DecisionSnapshots, and independent GPT, Claude, Gemini, DeepSeek, and Kimi decisions. The operational dashboard supports Chinese and English and keeps data quality, provenance, closing odds, result evidence, and worker readiness next to each decision.
+**DotaScope** is the public product brand for this repository, with **dotascope.com** as its canonical domain. It is an AI-powered Dota match-intelligence platform that aligns RayBet market observations, DLTV draft/live state, STRATZ and OpenDota historical facts, local Draft Intelligence, deterministic quality gates, immutable DecisionSnapshots, and independent GPT, Claude, Gemini, DeepSeek, and Kimi decisions. The repository keeps the technical name `Dota-AI-Decision-Lab` so historical integrations, experiment identities, and operational contracts remain stable.
 
-V1 is shadow decision only. It does not place bets or manage a bankroll.
+V1 is shadow decision only. It does not place bets or manage real money.
 
 ## Requirements
 
