@@ -1,7 +1,9 @@
 import type { MapSummary } from "./api";
 import type { AuthSessionState } from "./authApi";
 
-export type AiAccessScope = "GLOBAL" | "EVENT" | "SERIES" | "MAP" | "FREE" | null;
+// POSTMATCH remains in the display union for older UI copy paths, but the access
+// resolver never returns it: settlement does not unlock paid-stage AI content.
+export type AiAccessScope = "GLOBAL" | "EVENT" | "SERIES" | "MAP" | "FREE" | "POSTMATCH" | null;
 
 const AI_DECISIONS_ENTITLEMENT = "ai_decisions";
 
