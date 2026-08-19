@@ -1,5 +1,6 @@
 import React from "react";
 import type { AuthSessionState } from "../authApi";
+import { PRODUCT_NAME } from "../brand";
 import { useI18n } from "../i18n";
 import { UiIcon } from "./VisualIdentity";
 
@@ -63,9 +64,9 @@ export const ProductShell: React.FC<ProductShellProps> = ({
   return (
     <div className="product-root">
       <header className="product-topbar">
-        <a className="product-brand" href="/" aria-label="Dota AI Decision Lab">
+        <a className="product-brand" href="/" aria-label={PRODUCT_NAME}>
           <span className="product-brand-mark" aria-hidden="true"><i /><b /></span>
-          <span>Dota AI Decision Lab</span>
+          <span>{PRODUCT_NAME}</span>
         </a>
         <button
           type="button"

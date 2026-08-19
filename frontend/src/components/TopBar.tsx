@@ -1,4 +1,5 @@
 import React from "react";
+import { PRODUCT_NAME } from "../brand";
 import { translateStatus, useI18n } from "../i18n";
 import type { RuntimeSnapshot } from "../api";
 import { logout } from "../authApi";
@@ -56,7 +57,7 @@ export const TopBar: React.FC<TopBarProps> = ({
       <div className="top-bar-left">
         <div className="app-logo">
           <span className="logo-icon">❖</span>
-          <span className="logo-text">Dota AI Decision Lab</span>
+          <span className="logo-text">{PRODUCT_NAME}</span>
         </div>
       </div>
 

@@ -5,6 +5,7 @@ import {
   verifyLoginCode,
   type AuthSessionState
 } from "../authApi";
+import { PRODUCT_NAME } from "../brand";
 import { useI18n } from "../i18n";
 
 interface LoginDialogProps {
@@ -77,7 +78,7 @@ export const LoginDialog: React.FC<LoginDialogProps> = ({ session, onClose, onAu
       <section className="login-dialog" role="dialog" aria-modal="true" aria-labelledby="login-dialog-title">
         <button className="login-dialog-close" type="button" onClick={onClose} aria-label={locale === "zh-CN" ? "关闭" : "Close"}>×</button>
         <div className="login-dialog-brand"><span className="product-brand-mark" aria-hidden="true"><i /><b /></span></div>
-        <h2 id="login-dialog-title">{locale === "zh-CN" ? "登录 Dota AI Decision Lab" : "Sign in to Dota AI Decision Lab"}</h2>
+        <h2 id="login-dialog-title">{locale === "zh-CN" ? `登录 ${PRODUCT_NAME}` : `Sign in to ${PRODUCT_NAME}`}</h2>
         <p>{locale === "zh-CN" ? "继续关注赛事，查看你的会员权限和 AI 功能。" : "Follow matches and access your membership and AI features."}</p>
 
         <div className="social-login-stack">
