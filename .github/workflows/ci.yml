@@ -9,7 +9,7 @@ permissions:
 
 jobs:
   autofix:
-    if: github.event_name == 'pull_request' && github.head_ref == 'agent/fix-access-runtime-boundaries'
+    if: github.event_name == 'pull_request' && github.head_ref == 'agent/fix-access-runtime-boundaries' && github.actor != 'github-actions[bot]'
     runs-on: ubuntu-24.04
     permissions:
       contents: write
@@ -31,18 +31,11 @@ jobs:
 
           api = Path("app/web/api.py")
           text = api.read_text(encoding="utf-8")
-          old = '''    if result is not None:
-              return "POSTMATCH" if _confirmed_result(result) else "AWAITING_RESULT"
-          if live is not None:
-              message_age = elapsed_seconds(observed_at, live.last_message_received_at)
-              if 0 <= message_age <= live_state_max_age_seconds:
-                  return "LIVE"
-              return "AWAITING_RESULT"
-          if scheduled_at is not None and ensure_utc(scheduled_at) >= ensure_utc(observed_at):
-              return "PREMATCH"
-          return "UNKNOWN"
-          '''
-          new = '''    if _confirmed_result(result):
+          start = text.index("def _match_phase(")
+          end = text.index("\n\ndef _confirmed_result(", start)
+          function = text[start:end]
+          signature_end = function.index(") -> str:\n") + len(") -> str:\n")
+          body = '''    if _confirmed_result(result):
               return "POSTMATCH"
           if live is not None:
               message_age = elapsed_seconds(observed_at, live.last_message_received_at)
@@ -55,24 +48,27 @@ jobs:
               return "PREMATCH"
           return "UNKNOWN"
           '''
-          if old not in text:
-              raise SystemExit("expected _match_phase block was not found")
-          api.write_text(text.replace(old, new, 1), encoding="utf-8")
+          api.write_text(
+              text[:start] + function[:signature_end] + body + text[end:],
+              encoding="utf-8",
+          )
 
           admin = Path("frontend/src/components/AdminRuntimePage.tsx")
           text = admin.read_text(encoding="utf-8")
           old = 'onClick={() => provider.api_key_secret_key && void onSecret(provider.api_key_secret_key, secret)}'
           new = 'onClick={() => { if (!provider.api_key_secret_key || !secret) return; const value = secret; setSecret(""); void onSecret(provider.api_key_secret_key, value); }}'
-          if old not in text:
-              raise SystemExit("expected ProviderEditor secret handler was not found")
+          if text.count(old) != 1:
+              raise SystemExit("expected exactly one ProviderEditor secret handler")
           admin.write_text(text.replace(old, new, 1), encoding="utf-8")
       - name: Format Python
         run: uv run ruff format app/web/api.py app/web/feature_flags.py tests/test_security_boundary_regressions.py tests/test_match_phase.py
-      - name: Push fixups
+      - name: Commit fixups and remove temporary workflow
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add app/web/api.py app/web/feature_flags.py tests/test_security_boundary_regressions.py tests/test_match_phase.py frontend/src/components/AdminRuntimePage.tsx
+          git show origin/main:.github/workflows/ci.yml > .github/workflows/ci.yml
+          git rm -f .github/workflows/branch-fixup.yml
+          git add .github/workflows/ci.yml app/web/api.py app/web/feature_flags.py tests/test_security_boundary_regressions.py tests/test_match_phase.py frontend/src/components/AdminRuntimePage.tsx
           git diff --cached --check
           git commit -m "Apply reviewed runtime boundary fixups"
           git push origin HEAD:${{ github.head_ref }}
