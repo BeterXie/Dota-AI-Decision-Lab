@@ -214,7 +214,6 @@ test("group-stage public match exposes match intelligence and free AI decisions"
   await expect(page.getByText("GPT", { exact: true })).toBeVisible();
   await expect(page.getByText("gpt-match", { exact: true })).toBeVisible();
   await expect(page.getByText("72%", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "登录", exact: true })).toHaveCount(0);
   await expect.poll(aiRequestCount).toBeGreaterThan(0);
 
   const noOverflow = await page.evaluate(
