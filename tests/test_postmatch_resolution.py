@@ -75,6 +75,9 @@ class _Provider:
 
 
 class _TeamResolver:
+    async def repair_match_placeholders(self, *_args, **_kwargs) -> int:
+        return 0
+
     async def resolve_observed_match_teams(self, *_args, **_kwargs) -> int:
         return 0
 
@@ -243,12 +246,23 @@ async def test_observed_postmatch_team_ids_resolve_only_by_expected_aliases() ->
     team_a_id = uuid4()
     team_b_id = uuid4()
     async with factory() as session, session.begin():
+        placeholder = CanonicalTeam(name="OPENDOTA team 9247354")
         session.add_all(
             (
                 CanonicalTeam(id=team_a_id, name="Team Falcons"),
                 CanonicalTeam(id=team_b_id, name="LGD Gaming"),
+                placeholder,
             )
         )
+        await session.flush()
+        session.add(
+            ProviderTeamMapping(
+                provider="opendota",
+                provider_team_id="9247354",
+                canonical_team_id=placeholder.id,
+            )
+        )
+        placeholder_id = placeholder.id
     async with factory() as session, session.begin():
         resolved = await HistoricalTeamResolver(RawEventRepository()).resolve_observed_match_teams(
             session,
@@ -267,7 +281,131 @@ async def test_observed_postmatch_team_ids_resolve_only_by_expected_aliases() ->
         )
         assert {item.provider_team_id for item in mappings} == {"9247354", "10150538"}
         assert {item.canonical_team_id for item in mappings} == {team_a_id, team_b_id}
+        assert await session.get(CanonicalTeam, placeholder_id) is None
 
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_match_context_merges_placeholder_and_restores_converged_result() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    now = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
+    async with factory() as session, session.begin():
+        team_a = CanonicalTeam(name="Team Falcons")
+        team_b = CanonicalTeam(name="Vici Gaming")
+        placeholder = CanonicalTeam(name="STRATZ team 9247354")
+        session.add_all((team_a, team_b, placeholder))
+        await session.flush()
+        series = CanonicalSeries(team_a_id=team_a.id, team_b_id=team_b.id)
+        session.add(series)
+        await session.flush()
+        canonical_map = CanonicalMap(
+            series_id=series.id,
+            map_number=2,
+            valve_match_id=8948040486,
+        )
+        session.add(canonical_map)
+        await session.flush()
+        session.add_all(
+            (
+                ProviderTeamMapping(
+                    provider="stratz",
+                    provider_team_id="9247354",
+                    canonical_team_id=placeholder.id,
+                ),
+                HistoricalMapRecord(
+                    canonical_map_id=canonical_map.id,
+                    provider="stratz",
+                    provider_match_id="8948040486",
+                    started_at=now,
+                    radiant_team_id=placeholder.id,
+                    dire_team_id=team_b.id,
+                    winner_team_id=placeholder.id,
+                    first_usable_at=now,
+                    sync_status="DATA_CONFLICT",
+                    raw_event_id=uuid4(),
+                ),
+                HistoricalMapRecord(
+                    canonical_map_id=canonical_map.id,
+                    provider="opendota",
+                    provider_match_id="8948040486",
+                    started_at=now,
+                    radiant_team_id=team_a.id,
+                    dire_team_id=team_b.id,
+                    winner_team_id=team_a.id,
+                    first_usable_at=now,
+                    sync_status="DATA_CONFLICT",
+                    raw_event_id=uuid4(),
+                ),
+                MapResultEvidenceRecord(
+                    canonical_map_id=canonical_map.id,
+                    provider="opendota",
+                    provider_match_id="8948040486",
+                    winner_team_id=team_a.id,
+                    result_observed_at=now,
+                    first_usable_at=now,
+                    raw_event_id=uuid4(),
+                    normalizer_version="fixture-v1",
+                    identity_confidence=1.0,
+                    conflict_status="DATA_CONFLICT",
+                ),
+                MapResultRecord(
+                    canonical_map_id=canonical_map.id,
+                    winner_team_id=None,
+                    basic_first_usable_at=now,
+                    provider_conflict=True,
+                ),
+            )
+        )
+        placeholder_id = placeholder.id
+        team_a_id = team_a.id
+        team_b_id = team_b.id
+        canonical_map_id = canonical_map.id
+
+    async with factory() as session, session.begin():
+        resolved = await HistoricalTeamResolver(RawEventRepository()).repair_match_placeholders(
+            session,
+            provider_match_id="8948040486",
+            expected_team_ids={team_a_id, team_b_id},
+        )
+        assert resolved == 1
+
+    async with factory() as session:
+        mapping = await session.scalar(
+            select(ProviderTeamMapping).where(
+                ProviderTeamMapping.provider == "stratz",
+                ProviderTeamMapping.provider_team_id == "9247354",
+            )
+        )
+        facts = list(
+            (
+                await session.scalars(
+                    select(HistoricalMapRecord).where(
+                        HistoricalMapRecord.canonical_map_id == canonical_map_id
+                    )
+                )
+            ).all()
+        )
+        evidence = await session.scalar(
+            select(MapResultEvidenceRecord).where(
+                MapResultEvidenceRecord.canonical_map_id == canonical_map_id
+            )
+        )
+        result = await session.scalar(
+            select(MapResultRecord).where(MapResultRecord.canonical_map_id == canonical_map_id)
+        )
+        placeholder_record = await session.get(CanonicalTeam, placeholder_id)
+
+    assert mapping is not None and mapping.canonical_team_id == team_a_id
+    assert placeholder_record is None
+    assert {fact.winner_team_id for fact in facts} == {team_a_id}
+    assert {fact.sync_status for fact in facts} == {"BASIC_READY"}
+    assert evidence is not None and evidence.conflict_status == "CONFIRMED"
+    assert result is not None and result.winner_team_id == team_a_id
+    assert result.provider_conflict is False
     await engine.dispose()
 
 

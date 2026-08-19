@@ -1,4 +1,5 @@
 import json
+import re
 
 from fastapi.encoders import jsonable_encoder
 from fastapi.responses import JSONResponse, Response
@@ -19,7 +20,6 @@ _PUBLIC_MATCH_SCALAR_FIELDS = frozenset(
         "valve_match_id",
         "best_of",
         "scheduled_at",
-        "provider_match_id",
         "tournament_name",
         "round",
         "raw_status",
@@ -100,7 +100,6 @@ _MAP_SIDE_IDENTITY_FIELDS = frozenset(
         "status",
         "radiant_team_id",
         "dire_team_id",
-        "source",
         "confidence",
         "observed_at",
         "blocker",
@@ -118,8 +117,6 @@ _LIVE_FIELDS = frozenset(
         "last_state_change_received_at",
         "message_age_seconds",
         "effective_state_age_seconds",
-        "connection_id",
-        "reconnect_generation",
     }
 )
 _SYNC_FIELDS = frozenset(
@@ -156,20 +153,20 @@ _RESULT_FIELDS = frozenset(
 _RESULT_EVIDENCE_FIELDS = frozenset(
     {
         "id",
-        "provider",
-        "provider_match_id",
         "winner_team_id",
         "result_observed_at",
         "first_usable_at",
-        "raw_event_id",
-        "normalizer_version",
         "identity_confidence",
         "conflict_status",
     }
 )
 _SNAPSHOT_FIELDS = frozenset({"id", "decision_at", "created_at", "mode"})
 _SNAPSHOT_QUALITY_FIELDS = frozenset({"eligible", "blockers", "warnings"})
-_LIVE_ANCHOR_FIELDS = frozenset({"raybet_live_anchor", "data_lag_seconds"})
+_LIVE_ANCHOR_FIELDS = frozenset({"data_lag_seconds"})
+_PROVIDER_TERMS = (
+    (re.compile("raybet", re.IGNORECASE), "market"),
+    (re.compile("dltv", re.IGNORECASE), "live"),
+)
 
 
 class PublicMatchDataBoundaryMiddleware(BaseHTTPMiddleware):
@@ -197,7 +194,13 @@ class PublicMatchDataBoundaryMiddleware(BaseHTTPMiddleware):
         sanitize_runtime = (
             request.url.path == "/api/runtime" and getattr(request.state, "auth_user", None) is None
         )
-        if not sanitize_match and not sanitize_runtime and not sanitize_readiness:
+        neutralize_product = _is_provider_neutral_product_endpoint(request.url.path)
+        if (
+            not sanitize_match
+            and not sanitize_runtime
+            and not sanitize_readiness
+            and not neutralize_product
+        ):
             return response
 
         body = b"".join([chunk async for chunk in response.body_iterator])
@@ -217,15 +220,17 @@ class PublicMatchDataBoundaryMiddleware(BaseHTTPMiddleware):
             )
         elif sanitize_runtime:
             sanitized = _sanitize_runtime_payload(payload) if isinstance(payload, dict) else payload
-        elif isinstance(payload, list):
+        elif sanitize_match and isinstance(payload, list):
             sanitized = [
                 _sanitize_match_payload(item) if isinstance(item, dict) else item
                 for item in payload
             ]
-        elif isinstance(payload, dict):
+        elif sanitize_match and isinstance(payload, dict):
             sanitized = _sanitize_match_payload(payload)
         else:
             sanitized = payload
+        if neutralize_product:
+            sanitized = _neutralize_provider_names(sanitized)
 
         headers = dict(response.headers)
         headers.pop("content-length", None)
@@ -241,6 +246,17 @@ def _is_public_match_endpoint(path: str) -> bool:
         return True
     segments = [segment for segment in path.split("/") if segment]
     return len(segments) == 3 and segments[:2] == ["api", "maps"]
+
+
+def _is_provider_neutral_product_endpoint(path: str) -> bool:
+    return (
+        path in {"/api/matches", "/api/runtime", "/api/ai-performance"}
+        or path.startswith("/api/maps/")
+        or path.startswith("/api/review/")
+        or path.startswith("/api/snapshots/")
+        or path == "/api/teams"
+        or path.startswith("/api/teams/")
+    )
 
 
 def _sanitize_match_payload(payload: dict) -> dict:
@@ -314,7 +330,10 @@ def _sanitize_snapshot(value: object) -> dict | None:
         public_quality = _project_dict(quality, _SNAPSHOT_QUALITY_FIELDS)
         anchors = quality.get("live_anchors")
         if isinstance(anchors, dict):
-            public_quality["live_anchors"] = _project_dict(anchors, _LIVE_ANCHOR_FIELDS)
+            public_anchors = _project_dict(anchors, _LIVE_ANCHOR_FIELDS)
+            if "raybet_live_anchor" in anchors:
+                public_anchors["market_live_anchor"] = anchors["raybet_live_anchor"]
+            public_quality["live_anchors"] = public_anchors
         result["quality"] = public_quality
     return result
 
@@ -379,6 +398,37 @@ def _copy_projected_list(target: dict, source: dict, key: str, fields: frozenset
 
 def _project_dict(value: dict, fields: frozenset[str]) -> dict:
     return {key: value[key] for key in fields if key in value}
+
+
+def _neutralize_provider_names(value: object) -> object:
+    if isinstance(value, dict):
+        return {
+            _neutralize_provider_text(str(key)): _neutralize_provider_names(item)
+            for key, item in value.items()
+        }
+    if isinstance(value, list):
+        return [_neutralize_provider_names(item) for item in value]
+    if isinstance(value, str):
+        return _neutralize_provider_text(value)
+    return value
+
+
+def _neutralize_provider_text(value: str) -> str:
+    result = value
+    for pattern, replacement in _PROVIDER_TERMS:
+        result = pattern.sub(
+            lambda match, replacement=replacement: _match_case(replacement, match.group(0)),
+            result,
+        )
+    return result
+
+
+def _match_case(replacement: str, source: str) -> str:
+    if source.isupper():
+        return replacement.upper()
+    if source[:1].isupper():
+        return replacement.capitalize()
+    return replacement
 
 
 def _sanitize_runtime_payload(payload: dict) -> dict:

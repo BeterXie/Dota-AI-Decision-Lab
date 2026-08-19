@@ -16,28 +16,27 @@ from app.providers.liquipedia.runtime import LiquipediaRuntimeSeeder
 from app.repositories.raw import RawEventRepository
 
 SCHEDULE_HTML = """
-<table class="wikitable wikitable-striped infobox_matches_content">
-  <tr>
-    <td class="team-left"><a href="/dota2/Team_Liquid">Team Liquid</a></td>
-    <td class="versus">vs. <span>(Bo3)</span></td>
-    <td class="team-right"><a href="/dota2/Team_Spirit">Team Spirit</a></td>
-  </tr>
-  <tr>
-    <td class="match-filler" colspan="3">
-      <span data-timestamp="1787054400">12:00</span>
-      <a href="/dota2/The_International/2026">The International 2026</a>
-      - Group Stage
-    </td>
-  </tr>
-</table>
+<div class="match-info">
+  <span class="match-info-countdown"><span data-timestamp="1787054400">12:00</span></span>
+  <div class="match-info-header">
+    <div class="match-info-header-opponent match-info-header-opponent-left">
+      <span class="name"><a href="/dota2/Team_Liquid" title="Team Liquid">Liquid</a></span>
+    </div>
+    <div class="match-info-header-scoreholder"><span>vs</span><span>(Bo3)</span></div>
+    <div class="match-info-header-opponent">
+      <span class="name"><a href="/dota2/Team_Spirit" title="Team Spirit">Spirit</a></span>
+    </div>
+  </div>
+  <div class="match-info-tournament"><span class="match-info-tournament-name">
+    <a href="/dota2/The_International/2026">The International 2026</a>
+  </span></div>
+  <div class="match-page-button"><a href="/dota2/Match:TI2026-Liquid-Spirit">Details</a></div>
+</div>
 """
 
 TOURNAMENT_HTML = """
-<span class="tournaments-list-heading">Upcoming</span>
-<ul class="tournaments-list-type-list"><li>
-  <span class="tournaments-list-name">
-    <a href="/dota2/The_International/2026">The International 2026</a>
-  </span>
+<ul><li>Ongoing
+  <ul><li>The_International/2026 | TI 2026 | startdate=Aug 13 | enddate=Aug 23</li></ul>
 </li></ul>
 """
 

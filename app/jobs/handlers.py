@@ -124,11 +124,13 @@ class ApplicationJobHandlers:
     async def bootstrap_dltv_match(self, job: DurableJob) -> None:
         valve_match_id = _required_int(job.payload, "valve_match_id")
         series_id = _optional_int(job.payload.get("dltv_series_id"))
+        ended_at = _datetime(job.payload.get("ended_at"))
         async with self._d.session_factory() as session, session.begin():
             result = await self._d.dltv_bootstrap.bootstrap(
                 session,
                 valve_match_id=valve_match_id,
                 dltv_series_id=series_id,
+                ended_at=ended_at,
             )
             await self._d.health.dependency(
                 "DLTV_DRAFT",
@@ -791,6 +793,12 @@ class ApplicationJobHandlers:
 
     async def _postmatch_response(self, valve_match_id: int, *, expected_team_ids: set[UUID]):
         failures: list[str] = []
+        async with self._d.session_factory() as session, session.begin():
+            await self._d.historical_team_resolver.repair_match_placeholders(
+                session,
+                provider_match_id=str(valve_match_id),
+                expected_team_ids=expected_team_ids,
+            )
         providers = tuple(
             provider
             for provider in (

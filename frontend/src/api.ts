@@ -96,8 +96,6 @@ export interface LiveObservation {
   last_state_change_received_at: string;
   message_age_seconds?: number;
   effective_state_age_seconds?: number;
-  connection_id: string | null;
-  reconnect_generation: number;
 }
 
 export interface AiDecision {
@@ -156,7 +154,7 @@ export interface MapSideIdentity {
   status: "RESOLVED" | "UNRESOLVED" | "CONFLICT" | string;
   radiant_team_id: string | null;
   dire_team_id: string | null;
-  source: string | null;
+  source?: string | null;
   confidence: number | null;
   observed_at: string | null;
   raw_event_id: string | null;
@@ -201,7 +199,6 @@ export interface MapSummary {
   series_score?: SeriesScore | null;
   series_maps?: SeriesSiblingMap[];
   scheduled_at: string | null;
-  provider_match_id: number | null;
   tournament_name: string | null;
   round: string | null;
   raw_status: number | null;
@@ -265,7 +262,7 @@ export interface MapSummary {
       blockers?: string[];
       warnings?: string[];
       live_anchors?: {
-        raybet_live_anchor: string | null;
+        market_live_anchor: string | null;
         data_lag_seconds: number | null;
       };
     } | null;
@@ -320,13 +317,9 @@ export interface FutureOddsCapture {
 
 export interface ResultEvidence {
   id: string;
-  provider: string;
-  provider_match_id: string;
   winner_team_id: string | null;
   result_observed_at: string;
   first_usable_at: string;
-  raw_event_id: string;
-  normalizer_version: string;
   identity_confidence: number;
   conflict_status: string;
 }

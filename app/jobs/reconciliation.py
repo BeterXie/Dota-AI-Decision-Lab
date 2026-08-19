@@ -2,7 +2,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
-from sqlalchemy import func, select
+from sqlalchemy import String, and_, cast, func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.ai.eligibility import ai_record_is_game_time_eligible
@@ -17,6 +17,7 @@ from app.live.anchor import picks_ended_anchor
 from app.models import (
     AiDecisionRecord,
     CanonicalMap,
+    CanonicalTeam,
     DecisionEvaluationRecord,
     DecisionFutureOdds,
     DecisionSnapshotRecord,
@@ -29,6 +30,7 @@ from app.models import (
     MapResultRecord,
     OddsObservationRecord,
     ProviderMatchMapping,
+    ProviderTeamMapping,
 )
 from app.runtime_config import active_ai_experiments
 from app.time import ensure_utc
@@ -45,6 +47,7 @@ class ReconciliationResult:
     settlement_jobs: int
     evaluation_jobs: int
     checkpoint_sweep_jobs: int = 0
+    map_started_events: int = 0
 
 
 class ReconciliationService:
@@ -76,6 +79,7 @@ class ReconciliationService:
         reclaimed = await self._jobs.reclaim_expired(
             session, lease_seconds=self._lease_seconds, now=now
         )
+        map_started_events = await self._reconcile_map_started_events(session)
         checkpoint_sweep_jobs = await self._reconcile_live_checkpoints(session, now=now)
         draft_jobs = await self._reconcile_drafts(session)
         snapshot_jobs = await self._reconcile_snapshots(session, now=now)
@@ -94,7 +98,48 @@ class ReconciliationService:
             settlement_jobs=settlement_jobs,
             evaluation_jobs=evaluation_jobs,
             checkpoint_sweep_jobs=checkpoint_sweep_jobs,
+            map_started_events=map_started_events,
         )
+
+    async def _reconcile_map_started_events(self, session: AsyncSession) -> int:
+        canonical_map_text = func.replace(
+            cast(DltvLiveObservationRecord.canonical_map_id, String), "-", ""
+        )
+        missing_started_event = ~select(DomainEventRecord.id).where(
+            DomainEventRecord.event_type == DomainEventType.MAP_STARTED.value,
+            func.replace(DomainEventRecord.aggregate_id, "-", "") == canonical_map_text,
+        ).exists()
+        rows = list(
+            (
+                await session.execute(
+                    select(
+                        DltvLiveObservationRecord.canonical_map_id,
+                        func.min(DltvLiveObservationRecord.received_at),
+                    )
+                    .where(
+                        DltvLiveObservationRecord.canonical_map_id.is_not(None),
+                        DltvLiveObservationRecord.game_time_seconds > 0,
+                        missing_started_event,
+                    )
+                    .group_by(DltvLiveObservationRecord.canonical_map_id)
+                    .order_by(func.min(DltvLiveObservationRecord.received_at))
+                    .limit(500)
+                )
+            ).all()
+        )
+        for canonical_map_id, first_positive_at in rows:
+            await self._events.record(
+                session,
+                DomainEvent(
+                    event_type=DomainEventType.MAP_STARTED,
+                    aggregate_type="canonical_map",
+                    aggregate_id=str(canonical_map_id),
+                    dedupe_key=f"map-started:{canonical_map_id}",
+                    payload={"canonical_map_id": str(canonical_map_id)},
+                    occurred_at=first_positive_at,
+                ),
+            )
+        return len(rows)
 
     async def _reconcile_live_checkpoints(self, session: AsyncSession, *, now: datetime) -> int:
         """Close the trigger gap when the DLTV fast socket goes quiet.
@@ -225,6 +270,33 @@ class ReconciliationService:
             .group_by(DltvLiveObservationRecord.canonical_map_id)
             .subquery()
         )
+        generated_placeholder_ids = select(ProviderTeamMapping.canonical_team_id).join(
+            CanonicalTeam,
+            CanonicalTeam.id == ProviderTeamMapping.canonical_team_id,
+        ).where(
+            CanonicalTeam.name
+            == func.upper(ProviderTeamMapping.provider)
+            + " team "
+            + ProviderTeamMapping.provider_team_id
+        )
+        missing_result = ~select(MapResultRecord.id).where(
+            MapResultRecord.canonical_map_id == CanonicalMap.id
+        ).exists()
+        conflicted_result = select(MapResultRecord.id).where(
+            MapResultRecord.canonical_map_id == CanonicalMap.id,
+            or_(
+                MapResultRecord.winner_team_id.is_(None),
+                MapResultRecord.provider_conflict.is_(True),
+            ),
+        ).exists()
+        repairable_placeholder = select(HistoricalMapRecord.id).where(
+            HistoricalMapRecord.canonical_map_id == CanonicalMap.id,
+            or_(
+                HistoricalMapRecord.radiant_team_id.in_(generated_placeholder_ids),
+                HistoricalMapRecord.dire_team_id.in_(generated_placeholder_ids),
+                HistoricalMapRecord.winner_team_id.in_(generated_placeholder_ids),
+            ),
+        ).exists()
         candidates = list(
             (
                 await session.execute(
@@ -247,10 +319,13 @@ class ReconciliationService:
                         )
                         .exists(),
                         latest_live.c.latest_received_at < now - timedelta(minutes=3),
-                        latest_live.c.latest_received_at >= now - timedelta(days=2),
-                        ~select(MapResultRecord.id)
-                        .where(MapResultRecord.canonical_map_id == CanonicalMap.id)
-                        .exists(),
+                        or_(
+                            and_(
+                                latest_live.c.latest_received_at >= now - timedelta(days=2),
+                                missing_result,
+                            ),
+                            and_(conflicted_result, repairable_placeholder),
+                        ),
                     )
                     .limit(500)
                 )
@@ -259,7 +334,7 @@ class ReconciliationService:
         bucket = int(now.timestamp()) // 900
         created = 0
         for canonical_map_id, valve_match_id, _latest_received_at in candidates:
-            dedupe_key = f"reconcile-postmatch-v2:{canonical_map_id}:{bucket}"
+            dedupe_key = f"reconcile-postmatch-v3:{canonical_map_id}:{bucket}"
             existing = await session.scalar(
                 select(DurableJobRecord.id).where(
                     DurableJobRecord.job_type == JobType.RESOLVE_POSTMATCH.value,

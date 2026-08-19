@@ -85,8 +85,8 @@ export function BillingPage({
           <h1>{locale === "zh-CN" ? "先体验，再解锁你关心的比赛" : "Start free, then unlock what you follow"}</h1>
           <p>
             {locale === "zh-CN"
-              ? "小组赛 AI 决策、AI 表现和复盘对 Free 开放。付费阶段按系列赛或赛事购买，不按天数过期。"
-              : "Group-stage AI decisions, AI Performance and Review are open on Free Access. Paid stages are unlocked by series or event, with no time expiry."}
+              ? "小组赛与确认赛果后的基础 AI 决策公开。系列赛或赛事 Pass 解锁进行中的完整 AI 与实时通知，且不按天数过期。"
+              : "Group-stage and confirmed post-match core AI decisions are public. A Series or Event Pass unlocks full live AI and alerts without a time expiry."}
           </p>
         </div>
         <div className="billing-status">
@@ -112,7 +112,7 @@ export function BillingPage({
             <section className="billing-panel">
               <div className="billing-eyebrow">SERIES PASS · ONE BO SERIES</div>
               <h2>{locale === "zh-CN" ? "解锁当前系列赛" : "Unlock this BO series"}</h2>
-              <p>{locale === "zh-CN" ? "永久解锁这场 BO 系列赛付费阶段的 AI 决策和实时通知；历史决策一直保留。" : "Permanently unlock paid-stage AI decisions and realtime notifications for this BO series. Historical decisions remain available."}</p>
+              <p>{locale === "zh-CN" ? "解锁这场 BO 系列赛进行中的完整 AI 决策和实时通知；赛后继续保留完整历史视图。" : "Unlock full live AI decisions and realtime alerts for this BO series, with the full historical view retained afterward."}</p>
               {hasSelectedSeriesGrant ? (
                 <strong>{locale === "zh-CN" ? "✓ 当前账号已拥有这场系列赛权限" : "✓ This series is already unlocked"}</strong>
               ) : (
@@ -133,7 +133,7 @@ export function BillingPage({
             <section className="billing-panel">
               <div className="billing-eyebrow">EVENT PASS · ONE EVENT</div>
               <h2>{locale === "zh-CN" ? "解锁当前赛事" : "Unlock this event"}</h2>
-              <p>{locale === "zh-CN" ? "永久覆盖该赛事全部系列赛的付费阶段 AI 决策和实时通知；历史决策一直保留。" : "Permanently cover paid-stage AI decisions and realtime notifications for every series in this event. Historical decisions remain available."}</p>
+              <p>{locale === "zh-CN" ? "覆盖该赛事全部系列赛进行中的完整 AI 决策和实时通知；赛后继续保留完整历史视图。" : "Cover full live AI decisions and realtime alerts for every series in this event, with the full historical view retained afterward."}</p>
               {hasSelectedEventGrant ? (
                 <strong>{locale === "zh-CN" ? "✓ 当前账号已拥有这项赛事权限" : "✓ This event is already unlocked"}</strong>
               ) : (
@@ -151,9 +151,9 @@ export function BillingPage({
           )}
 
           <section className="billing-grid" aria-label="Competition access options">
-            <AccessCard title={locale === "zh-CN" ? "Free Access" : "Free Access"} eyebrow="FREE · DISCOVERY" copy={locale === "zh-CN" ? "小组赛 AI 决策、AI 表现和复盘全站开放。实时通知和付费阶段 AI 需要对应 Pass。" : "Group-stage AI decisions, AI Performance and Review are open. Realtime notifications and paid-stage AI need the relevant pass."} items={locale === "zh-CN" ? ["小组赛 AI 决策", "AI 表现", "比赛复盘"] : ["Group-stage AI decisions", "AI Performance", "Match Review"]} />
-            <AccessCard title={locale === "zh-CN" ? "Series Pass" : "Series Pass"} eyebrow="SERIES · ONE-TIME" copy={locale === "zh-CN" ? "绑定一个 BO 系列赛，永久解锁该系列赛的付费阶段 AI 和实时通知。" : "Bind one BO series and permanently unlock its paid-stage AI and realtime notifications."} items={locale === "zh-CN" ? ["一个 BO 系列赛", "付费阶段 AI", "实时通知"] : ["One BO series", "Paid-stage AI", "Realtime notifications"]} />
-            <AccessCard title={locale === "zh-CN" ? "Event Pass" : "Event Pass"} eyebrow="EVENT · ONE-TIME" copy={locale === "zh-CN" ? "绑定一个赛事，覆盖赛事内全部系列赛的付费阶段 AI 和实时通知。" : "Bind one event and cover paid-stage AI and realtime notifications for every series in it."} items={locale === "zh-CN" ? ["一个完整赛事", "所有付费阶段", "实时通知"] : ["One full event", "Every paid stage", "Realtime notifications"]} />
+            <AccessCard title={locale === "zh-CN" ? "Free Access" : "Free Access"} eyebrow="FREE · DISCOVERY" copy={locale === "zh-CN" ? "小组赛、AI 表现、复盘和确认赛果后的基础 AI 决策公开。" : "Group-stage AI, AI Performance, Review and confirmed post-match core AI decisions are public."} items={locale === "zh-CN" ? ["小组赛 AI 决策", "赛后基础 AI", "AI 表现与复盘"] : ["Group-stage AI", "Post-match core AI", "Performance & Review"]} />
+            <AccessCard title={locale === "zh-CN" ? "Series Pass" : "Series Pass"} eyebrow="SERIES · ONE-TIME" copy={locale === "zh-CN" ? "绑定一个 BO 系列赛，解锁进行中的完整 AI、实时通知和赛后完整历史视图。" : "Bind one BO series for full live AI, realtime alerts and the full post-match history."} items={locale === "zh-CN" ? ["一个 BO 系列赛", "进行中的完整 AI", "实时通知"] : ["One BO series", "Full live AI", "Realtime notifications"]} />
+            <AccessCard title={locale === "zh-CN" ? "Event Pass" : "Event Pass"} eyebrow="EVENT · ONE-TIME" copy={locale === "zh-CN" ? "绑定一个赛事，覆盖全部系列赛的完整 AI、实时通知和赛后完整历史视图。" : "Bind one event for full AI, realtime alerts and full post-match history across every series."} items={locale === "zh-CN" ? ["一个完整赛事", "进行中的完整 AI", "实时通知"] : ["One full event", "Full live AI", "Realtime notifications"]} />
           </section>
 
           {(seriesCheckout.error || eventCheckout.error) && <section className="billing-panel billing-error" role="alert">{locale === "zh-CN" ? "支付请求失败，请稍后重试。" : "The payment request failed. Please try again."}</section>}

@@ -31,10 +31,10 @@ Free AI Decision responses use the public projection: normalized model decisions
 post-hoc evaluation fields may be shown, while the frozen canonical snapshot payload, bankroll
 internals, future-odds captures, and other private execution context remain unavailable.
 
-A settled map does **not** change its commercial scope. Paid-stage and unknown-stage AI Decisions
-continue to require an applicable GLOBAL, Event, Series, or Map access grant after the result is
-known. Review and AI Performance remain public, so post-match evaluation can still be inspected
-without turning paid historical AI Decision content into anonymous access.
+A paid-stage or unknown-stage map requires an applicable GLOBAL, Event, Series, or Map access grant
+while it is active. After a non-conflicting winner is confirmed, its AI Decisions become public to
+everyone through the same restricted public projection used by Free Access. Merely creating a
+pending or conflicting result row does not unlock the map.
 
 ### Series Pass
 
@@ -50,8 +50,9 @@ checkout endpoint binds the transaction to one canonical event. A verified `tran
 event grants both premium entitlements with `EVENT` scope; authorization resolves that grant
 through every series and map in the event.
 
-Both passes keep historical AI Decisions available after the event ends for the purchasing account.
-Realtime notifications are never replayed for historical snapshots.
+Both passes provide full AI Decision access while the covered competition is active. Confirmed
+post-match decisions are public for everyone, while realtime notifications are never replayed for
+historical snapshots.
 
 Full approved refunds, chargebacks, and chargeback warnings revoke only the affected purchase
 source and permanently block that purchase from automatic reactivation. Partial refunds do not

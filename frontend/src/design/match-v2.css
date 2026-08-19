@@ -73,6 +73,51 @@
 .match-series-navigator nav small { overflow: hidden; color: #71879a; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
 .match-series-navigator nav a.is-active small { color: #68cfd1; }
 
+.match-live-section { margin-top: 14px; }
+.match-live-pulse {
+  overflow: hidden;
+  border: 1px solid var(--product-border);
+  border-radius: 12px;
+  background: rgba(11, 22, 33, 0.88);
+}
+.match-live-heading { min-height: 58px; display: flex; align-items: center; justify-content: space-between; gap: 20px; padding: 12px 18px; border-bottom: 1px solid rgba(143, 166, 188, 0.1); }
+.match-live-heading h2 { margin: 4px 0 0; color: #e7eff4; font-size: 17px; line-height: 1.25; }
+.match-live-status { display: inline-flex; align-items: center; gap: 7px; color: #65d6b2; font-size: 9px; font-weight: 760; }
+.match-live-status::before { width: 6px; height: 6px; border-radius: 50%; background: currentColor; content: ""; }
+.match-live-status.is-stale,
+.match-live-status.is-disconnected,
+.match-live-status.is-unsynced { color: #ddb36a; }
+.match-live-status.is-unavailable,
+.match-live-status.is-final { color: #8799a7; }
+.match-live-main { display: grid; grid-template-columns: minmax(220px, 0.72fr) minmax(420px, 1.55fr) minmax(230px, 0.78fr); min-height: 170px; padding: 17px 18px; }
+.match-live-lead { min-width: 0; display: grid; align-content: center; justify-items: start; padding-right: 20px; border-right: 1px solid rgba(143, 166, 188, 0.1); }
+.match-live-lead > span { color: #74899a; font-size: 9px; }
+.match-live-lead > strong { max-width: 100%; margin-top: 5px; overflow-wrap: anywhere; color: #dbe6ec; font-size: 19px; line-height: 1.25; }
+.match-live-lead > b { margin-top: 3px; color: #a9bac5; font-size: 27px; line-height: 1.1; font-weight: 720; }
+.match-live-lead > b.is-team-a { color: #64d2ba; }
+.match-live-lead > b.is-team-b { color: #ee838a; }
+.match-live-lead > p { max-width: 250px; margin: 9px 0 0; color: #b59259; font-size: 9px; line-height: 1.55; }
+.match-live-chart { position: relative; min-width: 0; height: 150px; margin: 0 18px; }
+.match-live-chart-side { position: absolute; z-index: 2; left: 48px; color: #6c8294; font-size: 8px; pointer-events: none; }
+.match-live-chart-side.is-team-a { top: 0; color: #58bba7; }
+.match-live-chart-side.is-team-b { bottom: 18px; color: #d5767e; }
+.match-live-chart-loading { width: 100%; height: 100%; background: linear-gradient(90deg, rgba(20, 34, 47, 0.5), rgba(30, 47, 61, 0.72), rgba(20, 34, 47, 0.5)); background-size: 200% 100%; animation: matchSkeleton 1.3s ease infinite; }
+.match-live-chart-empty { height: 100%; display: grid; place-items: center; border-top: 1px solid rgba(143, 166, 188, 0.08); border-bottom: 1px solid rgba(143, 166, 188, 0.08); color: #64798b; text-align: center; font-size: 9px; }
+.match-live-changes { min-width: 0; display: grid; align-content: center; border-left: 1px solid rgba(143, 166, 188, 0.1); }
+.match-live-changes > div { min-width: 0; display: grid; grid-template-columns: minmax(62px, 0.7fr) minmax(0, 1.2fr); align-items: center; gap: 2px 10px; min-height: 43px; padding: 7px 0 7px 18px; border-top: 1px solid rgba(143, 166, 188, 0.08); }
+.match-live-changes > div:first-child { border-top: 0; }
+.match-live-changes span { color: #6f8496; font-size: 8px; }
+.match-live-changes strong { min-width: 0; overflow-wrap: anywhere; color: #c7d3db; text-align: right; font-size: 9px; }
+.match-live-changes small { grid-column: 1 / -1; color: #607587; text-align: right; font-size: 8px; }
+.match-live-unavailable { min-height: 126px; display: grid; place-items: center; align-content: center; gap: 6px; padding: 20px; text-align: center; }
+.match-live-unavailable strong { color: #b9c7d0; font-size: 12px; }
+.match-live-unavailable span { color: #6e8294; font-size: 9px; }
+.match-live-trust { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); background: rgba(143, 166, 188, 0.1); gap: 1px; border-top: 1px solid rgba(143, 166, 188, 0.1); }
+.match-live-trust > div { min-width: 0; display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 38px; padding: 8px 18px; background: rgba(7, 16, 25, 0.82); }
+.match-live-trust span { color: #627789; font-size: 8px; }
+.match-live-trust strong { color: #aebdc7; text-align: right; font-size: 9px; font-weight: 650; }
+.match-live-trust strong.is-warning { color: #d2aa68; }
+
 .match-state-section .match-signal-card { min-height: 0; }
 .match-intelligence-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: stretch; }
 .match-intelligence-grid > .analytics-card { min-height: 470px; border-color: var(--product-border); background: rgba(13, 24, 36, 0.82); }
@@ -186,6 +231,10 @@
   .match-intelligence-grid { grid-template-columns: 1fr; }
   .match-detail-grid { grid-template-columns: 1fr; }
   .match-ai-card { min-height: 320px; }
+  .match-live-main { grid-template-columns: minmax(190px, 0.7fr) minmax(0, 1.3fr); }
+  .match-live-changes { grid-column: 1 / -1; grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 12px; border-top: 1px solid rgba(143, 166, 188, 0.1); border-left: 0; }
+  .match-live-changes > div { border-top: 0; border-left: 1px solid rgba(143, 166, 188, 0.08); }
+  .match-live-changes > div:first-child { border-left: 0; }
 }
 
 @media (max-width: 680px) {
@@ -212,6 +261,15 @@
   .match-draft-sides { grid-template-columns: 1fr; }
   .match-draft-card,
   .match-ai-card { padding: 13px; }
+  .match-live-heading { padding: 11px 14px; }
+  .match-live-main { grid-template-columns: 1fr; padding: 14px; }
+  .match-live-lead { padding: 0 0 13px; border-right: 0; border-bottom: 1px solid rgba(143, 166, 188, 0.1); }
+  .match-live-lead > p { max-width: none; }
+  .match-live-chart { height: 148px; margin: 13px 0 0; }
+  .match-live-changes { grid-column: auto; grid-template-columns: 1fr; margin-top: 8px; border-top: 0; }
+  .match-live-changes > div { border-top: 1px solid rgba(143, 166, 188, 0.08); border-left: 0; padding-left: 0; }
+  .match-live-changes > div:first-child { border-top: 0; }
+  .match-live-trust { grid-template-columns: 1fr; }
   .match-skeleton-grid { grid-template-columns: 1fr; }
 }
 

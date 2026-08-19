@@ -10,7 +10,7 @@ from app.auth.models import EmailLoginChallengeRecord, UserAccountRecord
 from app.auth.service import EmailAuthService, InvalidLoginCodeError, normalize_email
 from app.db import Base
 from app.entitlements import AI_DECISIONS_ENTITLEMENT, EntitlementService
-from app.models import CanonicalMap, MapResultRecord
+from app.models import CanonicalMap, CanonicalTeam, MapResultRecord
 from app.runtime.health import HealthRegistry
 from app.web import create_app
 from app.web.auth import AuthGuardMiddleware
@@ -158,8 +158,14 @@ async def test_auth_api_keeps_matches_public_and_requires_entitlement_for_ai(tmp
             auth_cookie_secure=False,
         )
         premium_map_id = UUID("11111111-1111-1111-1111-111111111111")
+        winner_team_id = UUID("22222222-2222-2222-2222-222222222222")
         async with factory() as session, session.begin():
-            session.add(CanonicalMap(id=premium_map_id, map_number=1))
+            session.add_all(
+                (
+                    CanonicalMap(id=premium_map_id, map_number=1),
+                    CanonicalTeam(id=winner_team_id, name="Winner"),
+                )
+            )
         premium_path = f"/api/maps/{premium_map_id}/ai-decisions"
         async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
             assert (await client.get("/health")).status_code == 200
@@ -238,6 +244,19 @@ async def test_auth_api_keeps_matches_public_and_requires_entitlement_for_ai(tmp
             settled = await client.get(premium_path)
             assert settled.status_code == 401
             assert settled.json() == {"detail": "authentication required"}
+
+            async with factory() as db_session, db_session.begin():
+                result = await db_session.scalar(
+                    select(MapResultRecord).where(
+                        MapResultRecord.canonical_map_id == premium_map_id
+                    )
+                )
+                assert result is not None
+                result.winner_team_id = winner_team_id
+
+            confirmed = await client.get(premium_path)
+            assert confirmed.status_code == 200
+            assert confirmed.json()["canonical_map_id"] == str(premium_map_id)
     finally:
         await service.close()
         await engine.dispose()

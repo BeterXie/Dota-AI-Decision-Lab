@@ -201,7 +201,7 @@ async def test_readiness_funnel_is_cumulative_and_explains_first_blocker() -> No
     assert payload["scope"]["series_count"] == 3
     assert [(stage["key"], stage["count"]) for stage in payload["stages"]] == [
         ("scheduled", 3),
-        ("raybet_linked", 2),
+        ("market_linked", 2),
         ("market_ready", 2),
         ("map_identity", 2),
         ("live_ready", 2),
@@ -222,11 +222,11 @@ async def test_readiness_funnel_is_cumulative_and_explains_first_blocker() -> No
         "reason": "DRAFT_INCOMPLETE",
     }
     assert by_teams["Aurora vs Xtreme Gaming"]["blocker"] == {
-        "stage": "raybet_linked",
-        "reason": "RAYBET_IDENTITY_MISSING",
+        "stage": "market_linked",
+        "reason": "MARKET_IDENTITY_MISSING",
     }
     reasons = {item["reason"]: item["count"] for item in payload["failure_reasons"]}
-    assert reasons == {"DRAFT_INCOMPLETE": 1, "RAYBET_IDENTITY_MISSING": 1}
+    assert reasons == {"DRAFT_INCOMPLETE": 1, "MARKET_IDENTITY_MISSING": 1}
     await engine.dispose()
 
 

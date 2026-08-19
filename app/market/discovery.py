@@ -103,11 +103,9 @@ class RayBetDiscoveryService:
                             link_result = await self._existing_series_linker.link(session, match)
                             if link_result.canonical_series_id is not None:
                                 await self._on_match(session, match)
-                            elif link_result.fallback_allowed:
-                                await self._on_match(session, match)
                             else:
                                 logger.warning(
-                                    "raybet_identity_fallback_blocked",
+                                    "raybet_identity_unresolved",
                                     provider_match_id=match.provider_match_id,
                                     reason=link_result.reason,
                                 )

@@ -148,8 +148,8 @@ function premiumIntroCopy(surface: PremiumSurfaceKey, zh: boolean) {
       eyebrow: zh ? "会员" : "MEMBERSHIP",
       title: zh ? "选择适合你的方案" : "Choose the access that fits you",
       description: zh
-        ? "小组赛 AI 决策、AI 表现和复盘免费开放。付费阶段按系列赛或赛事购买，并永久绑定对应比赛。"
-        : "Group-stage AI decisions, AI Performance and Review are free. Paid stages are unlocked permanently by series or event.",
+        ? "小组赛与确认赛果后的基础 AI 决策公开。系列赛或赛事 Pass 解锁进行中的完整 AI 与实时通知。"
+        : "Group-stage and confirmed post-match core AI decisions are public. A Series or Event Pass unlocks full live AI and realtime alerts.",
       notes: zh ? ["小组赛免费", "系列赛 Pass", "赛事 Pass"] : ["Group stage free", "Series Pass", "Event Pass"]
     };
   }

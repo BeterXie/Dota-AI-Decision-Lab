@@ -11,7 +11,7 @@ from app.draft.coordinator import DltvBootstrapCoordinator
 from app.draft.role_assignment import DraftRoleAssignmentService, _resolve_side_from_history
 from app.events.outbox import EventRepository
 from app.identity.resolver import IdentityResolver
-from app.models import DraftSlotRecord, DraftSnapshotRecord, ProviderRawEvent
+from app.models import DomainEventRecord, DraftSlotRecord, DraftSnapshotRecord, ProviderRawEvent
 from app.providers.common import TimedPayload
 from app.providers.dltv.draft_picks import DltvProviderPick
 from app.repositories.raw import RawEventRepository
@@ -157,6 +157,84 @@ class _FixtureStratzClient:
 class _UnusedBootstrapClient:
     async def get_live(self, valve_match_id: int) -> TimedPayload:
         raise AssertionError("rebuild must not call the live DLTV endpoint")
+
+
+class _FixtureBootstrapClient:
+    def __init__(self, payload: dict, received_at: datetime) -> None:
+        self.payload = payload
+        self.received_at = received_at
+
+    async def get_live(self, valve_match_id: int) -> TimedPayload:
+        return TimedPayload(
+            payload=self.payload,
+            request_started_at=self.received_at - timedelta(milliseconds=100),
+            received_at=self.received_at,
+        )
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_positive_game_time_emits_one_map_started_event() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    received_at = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
+    valve_match_id = 8940730389
+    payload = json.loads(
+        (Path(__file__).parent / "fixtures" / "dltv_bootstrap.json").read_text(
+            encoding="utf-8"
+        )
+    )
+    raw_events = RawEventRepository()
+    coordinator = DltvBootstrapCoordinator(
+        client=_FixtureBootstrapClient(payload, received_at),
+        raw_events=raw_events,
+        events=EventRepository(),
+        identities=IdentityResolver(),
+        role_assignment=DraftRoleAssignmentService(
+            stratz=_FixtureStratzClient(received_at + timedelta(seconds=1)),
+            raw_events=raw_events,
+        ),
+    )
+
+    async with factory() as session, session.begin():
+        first = await coordinator.bootstrap(session, valve_match_id=valve_match_id)
+    ended_at = received_at + timedelta(minutes=45)
+    async with factory() as session, session.begin():
+        second = await coordinator.bootstrap(
+            session,
+            valve_match_id=valve_match_id,
+            ended_at=ended_at,
+        )
+
+    async with factory() as session:
+        started_events = list(
+            (
+                await session.scalars(
+                    select(DomainEventRecord).where(
+                        DomainEventRecord.event_type == "MAP_STARTED"
+                    )
+                )
+            ).all()
+        )
+        ended_events = list(
+            (
+                await session.scalars(
+                    select(DomainEventRecord).where(
+                        DomainEventRecord.event_type == "MAP_ENDED"
+                    )
+                )
+            ).all()
+        )
+
+    assert second.resolved.canonical_map_id == first.resolved.canonical_map_id
+    assert len(started_events) == 1
+    assert started_events[0].aggregate_id == str(first.resolved.canonical_map_id)
+    assert started_events[0].occurred_at == received_at.replace(tzinfo=None)
+    assert len(ended_events) == 1
+    assert ended_events[0].aggregate_id == str(first.resolved.canonical_map_id)
+    assert ended_events[0].occurred_at == ended_at.replace(tzinfo=None)
+    await engine.dispose()
 
 
 async def _rebuild_fixture():

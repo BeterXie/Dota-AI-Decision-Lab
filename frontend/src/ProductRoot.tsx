@@ -1,6 +1,5 @@
 import React from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { App } from "./App";
 import { fetchMaps } from "./api";
 import { fetchAuthSession, logout, type AuthSessionState } from "./authApi";
 import { AccountPage } from "./components/AccountPage";
@@ -12,7 +11,7 @@ import { MatchPage } from "./components/MatchPage";
 import { PremiumSurface, type PremiumSurfaceKey } from "./components/PremiumSurface";
 import { ProductShell, type ProductNavKey } from "./components/ProductShell";
 import { TeamPage } from "./components/TeamPage";
-import { I18nProvider } from "./i18n";
+import { I18nProvider, useI18n } from "./i18n";
 import { matchIdFromPath } from "./matches";
 import { teamSlugFromPath } from "./teams";
 
@@ -20,7 +19,6 @@ const authSessionKey = ["auth", "session"] as const;
 
 export function ProductRoot() {
   const pathname = typeof window !== "undefined" ? window.location.pathname : "/";
-  if (!isProductRoute(pathname)) return <App />;
   return <I18nProvider><ProductExperience pathname={pathname} /></I18nProvider>;
 }
 
@@ -30,10 +28,11 @@ function ProductExperience({ pathname }: { pathname: string }) {
   const premiumSurface = premiumSurfaceForPath(pathname);
   const adminRoute = pathname === "/admin/runtime" || pathname.startsWith("/admin/runtime/");
   const accountRoute = pathname === "/account" || pathname.startsWith("/account/");
+  const eventsRoute = pathname === "/events" || pathname.startsWith("/events/");
   const isHome = pathname === "/";
   const matchRouteId = matchIdFromPath(pathname);
   const teamRouteSlug = teamSlugFromPath(pathname);
-  const needsMatchDirectory = premiumSurface === null && !accountRoute && !adminRoute;
+  const needsMatchDirectory = isHome || eventsRoute || matchRouteId !== null || teamRouteSlug !== null;
   const auth = useQuery({
     queryKey: authSessionKey,
     queryFn: fetchAuthSession,
@@ -136,7 +135,7 @@ function ProductExperience({ pathname }: { pathname: string }) {
         onLogin={() => setLoginOpen(true)}
       />
     );
-  } else {
+  } else if (eventsRoute) {
     page = (
       <EventsPage
         matches={matches.data ?? []}
@@ -146,6 +145,8 @@ function ProductExperience({ pathname }: { pathname: string }) {
         pathname={pathname}
       />
     );
+  } else {
+    page = <ProductNotFound />;
   }
 
   return (
@@ -185,20 +186,23 @@ function activeNavForPath(
   if (premiumSurface === "billing") return "billing";
   if (premiumSurface === "notifications") return null;
   if (pathname === "/") return "home";
-  return "events";
-}
-
-function isProductRoute(pathname: string): boolean {
-  return (
-    pathname === "/" ||
+  if (
     pathname === "/events" ||
     pathname.startsWith("/events/") ||
     pathname.startsWith("/matches/") ||
-    pathname.startsWith("/teams/") ||
-    pathname === "/account" ||
-    pathname.startsWith("/account/") ||
-    pathname === "/admin/runtime" ||
-    pathname.startsWith("/admin/runtime/") ||
-    premiumSurfaceForPath(pathname) !== null
-  );
+    pathname.startsWith("/teams/")
+  ) return "events";
+  return null;
 }
+
+const ProductNotFound: React.FC = () => {
+  const { locale } = useI18n();
+  return (
+    <section className="product-container match-not-found">
+      <span aria-hidden="true">404</span>
+      <h1>{locale === "zh-CN" ? "没有找到这个页面" : "Page not found"}</h1>
+      <p>{locale === "zh-CN" ? "这个地址不存在，或者页面已经移动。" : "This address does not exist, or the page has moved."}</p>
+      <a className="product-btn product-btn-primary" href="/">{locale === "zh-CN" ? "返回首页" : "Back home"}</a>
+    </section>
+  );
+};

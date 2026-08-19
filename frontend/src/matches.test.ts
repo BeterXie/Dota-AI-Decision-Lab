@@ -107,9 +107,9 @@ describe("match AI access", () => {
     ).toBe("MAP");
   });
 
-  it("keeps settled paid-stage decisions locked without a pass", () => {
-    expect(aiAccessScope(undefined, { ...match, phase: "POSTMATCH" })).toBeNull();
-    expect(aiAccessScope(session({}), { ...match, phase: "POSTMATCH" })).toBeNull();
+  it("opens confirmed post-match decisions to every user", () => {
+    expect(aiAccessScope(undefined, { ...match, phase: "POSTMATCH" })).toBe("POSTMATCH");
+    expect(aiAccessScope(session({}), { ...match, phase: "POSTMATCH" })).toBe("POSTMATCH");
   });
 
   it("does not treat unrelated grants as access", () => {

@@ -62,6 +62,16 @@ describe("event aggregation", () => {
     expect(events.map((event) => event.name)).toEqual(["Future Cup", "Finished Cup"]);
   });
 
+  it("keeps an event ongoing between completed and upcoming series", () => {
+    const [event] = buildEventSummaries([
+      match({ id: "done", series_id: "series-done", phase: "POSTMATCH" }),
+      match({ id: "next", series_id: "series-next", phase: "PREMATCH" })
+    ]);
+
+    expect(event.status).toBe("LIVE");
+    expect(event.nextMatch?.id).toBe("next");
+  });
+
   it("collapses multiple maps into one series row and keeps the latest score", () => {
     const [event] = buildEventSummaries([
       match({ id: "map-1", series_id: "series-a", phase: "POSTMATCH", series_score: { team_a: 1, team_b: 0 } }),

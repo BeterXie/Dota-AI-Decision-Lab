@@ -20,6 +20,42 @@ from app.providers.liquipedia.projection import LiquipediaCanonicalProjector
 
 
 @pytest.mark.asyncio
+async def test_raybet_without_liquipedia_identity_stays_unresolved() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    resolver = IdentityResolver()
+    scheduled_at = datetime(2026, 8, 18, 12, 0, tzinfo=UTC)
+
+    with pytest.raises(IdentityAmbiguousError, match="RAYBET_LIQUIPEDIA_SERIES_REQUIRED"):
+        async with factory.begin() as session:
+            await resolver.observe_raybet_match(
+                session,
+                ProviderMatch(
+                    provider_match_id=38423263,
+                    game_id=151,
+                    tournament_id=9001,
+                    tournament_name="TI 2026",
+                    team_a_id=16236,
+                    team_a_name="Spirit",
+                    team_b_id=16129,
+                    team_b_name="Liquid",
+                    round="bo3",
+                    provider_status=1,
+                    scheduled_at=scheduled_at,
+                    observed_at=scheduled_at,
+                ),
+            )
+
+    async with factory() as session:
+        assert await session.scalar(select(func.count()).select_from(CanonicalEvent)) == 0
+        assert await session.scalar(select(func.count()).select_from(CanonicalSeries)) == 0
+        assert await session.scalar(select(func.count()).select_from(ProviderMatchMapping)) == 0
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_raybet_reuses_liquipedia_series_and_event_identity() -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:

@@ -275,6 +275,51 @@ async def test_series_frame_removal_emits_one_map_ended_event() -> None:
     await engine.dispose()
 
 
+@pytest.mark.asyncio
+async def test_series_frame_removal_requeues_identity_with_end_evidence() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    valve_match_id = 8940730389
+    series_id = 427609
+    collector = DltvSocketCollector(
+        session_factory=factory,
+        raw_events=RawEventRepository(),
+        events=EventRepository(),
+    )
+    live_at = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
+    ended_at = datetime(2026, 8, 12, 12, 45, tzinfo=UTC)
+
+    await collector.collect(
+        "__nd2_series",
+        {"live": {str(valve_match_id): series_id}},
+        received_at=live_at,
+    )
+    await collector.collect("__nd2_series", {"live": {}}, received_at=ended_at)
+
+    async with factory() as session:
+        events = list(
+            (
+                await session.scalars(
+                    select(DomainEventRecord)
+                    .where(DomainEventRecord.event_type == "DLTV_MATCH_DISCOVERED")
+                    .order_by(DomainEventRecord.occurred_at)
+                )
+            ).all()
+        )
+
+    assert len(events) == 2
+    assert events[1].dedupe_key == f"dltv-ended:{valve_match_id}"
+    assert events[1].payload == {
+        "valve_match_id": valve_match_id,
+        "dltv_series_id": series_id,
+        "ended_at": ended_at.isoformat(),
+        "reason": "MAP_ENDED_IDENTITY_PENDING",
+    }
+    await engine.dispose()
+
+
 class _FakeSocketIo:
     def __init__(self) -> None:
         self.connected = False

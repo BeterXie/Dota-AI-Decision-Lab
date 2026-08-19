@@ -8,7 +8,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.domain.identity import ProviderMatch
 from app.identity.aliases import equivalent_team_aliases, normalize_alias
 from app.models import (
-    CanonicalEvent,
     CanonicalHero,
     CanonicalMap,
     CanonicalPlayer,
@@ -101,34 +100,7 @@ class IdentityResolver:
                 confidence=0.99 if exact_best_of else 0.97,
             )
             return series.id
-
-        event_id = await self._resolve_event(
-            session,
-            provider="raybet",
-            provider_event_id=(
-                str(match.tournament_id) if match.tournament_id is not None else None
-            ),
-            name=match.tournament_name,
-        )
-        series = CanonicalSeries(
-            event_id=event_id,
-            team_a_id=team_a_id,
-            team_b_id=team_b_id,
-            best_of=best_of,
-            scheduled_at=match.scheduled_at,
-        )
-        session.add(series)
-        await session.flush()
-        self._set_match_mapping(
-            session,
-            existing=existing,
-            provider="raybet",
-            provider_match_id=provider_match_id,
-            canonical_series_id=series.id,
-            resolved_by="PROVIDER_DISCOVERY",
-            confidence=1.0,
-        )
-        return series.id
+        raise IdentityAmbiguousError("RAYBET_LIQUIPEDIA_SERIES_REQUIRED")
 
     async def resolve_dltv_bootstrap(
         self,
@@ -175,33 +147,25 @@ class IdentityResolver:
                 resolution_method="VALVE_MATCH_ID",
             )
 
-        event_id = await self._resolve_event(
-            session,
-            provider="dltv",
-            provider_event_id=str(identity.event_id) if identity.event_id is not None else None,
-            name=None,
-        )
-        candidates = await self._series_candidates(
+        candidates = await self._liquipedia_series_candidates(
             session,
             team_a_id=first_team_id,
             team_b_id=second_team_id,
             scheduled_at=identity.started_at,
+            best_of=None,
         )
         if len(candidates) > 1:
-            raise IdentityAmbiguousError("IDENTITY_AMBIGUOUS")
-        if candidates:
-            series = candidates[0]
-            method = "CANONICAL_TEAMS_TIME"
-        else:
-            series = CanonicalSeries(
-                event_id=event_id,
-                team_a_id=first_team_id,
-                team_b_id=second_team_id,
-                scheduled_at=identity.started_at,
-            )
-            session.add(series)
-            await session.flush()
-            method = "DLTV_CANONICAL_CREATE"
+            raise IdentityAmbiguousError("DLTV_LIQUIPEDIA_SERIES_AMBIGUOUS")
+        if not candidates:
+            raise IdentityAmbiguousError("DLTV_LIQUIPEDIA_SERIES_REQUIRED")
+        series = candidates[0]
+        await self._bind_provider_event(
+            session,
+            provider="dltv",
+            provider_event_id=str(identity.event_id) if identity.event_id is not None else None,
+            canonical_event_id=series.event_id,
+        )
+        method = "LIQUIPEDIA_TEAMS_TIME"
         _validate_series_sides(series, radiant_team_id, dire_team_id)
 
         if identity.map_number is not None:
@@ -356,36 +320,6 @@ class IdentityResolver:
         )
         return canonical_team_id
 
-    async def _resolve_event(
-        self,
-        session: AsyncSession,
-        *,
-        provider: str,
-        provider_event_id: str | None,
-        name: str | None,
-    ) -> UUID | None:
-        if provider_event_id is None:
-            return None
-        mapping = await session.scalar(
-            select(ProviderEventMapping).where(
-                ProviderEventMapping.provider == provider,
-                ProviderEventMapping.provider_event_id == provider_event_id,
-            )
-        )
-        if mapping is not None:
-            return mapping.canonical_event_id
-        event = CanonicalEvent(name=name or f"{provider}:{provider_event_id}")
-        session.add(event)
-        await session.flush()
-        session.add(
-            ProviderEventMapping(
-                provider=provider,
-                provider_event_id=provider_event_id,
-                canonical_event_id=event.id,
-            )
-        )
-        return event.id
-
     async def _liquipedia_series_candidates(
         self,
         session: AsyncSession,
@@ -480,34 +414,6 @@ class IdentityResolver:
                 confidence=confidence,
             )
         )
-
-    async def _series_candidates(
-        self,
-        session: AsyncSession,
-        *,
-        team_a_id: UUID,
-        team_b_id: UUID,
-        scheduled_at,
-    ) -> list[CanonicalSeries]:
-        statement = select(CanonicalSeries).where(
-            or_(
-                and_(
-                    CanonicalSeries.team_a_id == team_a_id,
-                    CanonicalSeries.team_b_id == team_b_id,
-                ),
-                and_(
-                    CanonicalSeries.team_a_id == team_b_id,
-                    CanonicalSeries.team_b_id == team_a_id,
-                ),
-            )
-        )
-        if scheduled_at is not None:
-            statement = statement.where(
-                CanonicalSeries.scheduled_at.is_not(None),
-                CanonicalSeries.scheduled_at >= scheduled_at - self._start_time_window,
-                CanonicalSeries.scheduled_at <= scheduled_at + self._start_time_window,
-            )
-        return list((await session.scalars(statement)).all())
 
     async def _match_mapping(
         self, session: AsyncSession, provider: str, provider_match_id: str

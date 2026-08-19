@@ -32,7 +32,7 @@ MAX_SERIES = 500
 
 STAGES: tuple[tuple[str, str], ...] = (
     ("scheduled", "SCHEDULED"),
-    ("raybet_linked", "RAYBET_LINKED"),
+    ("market_linked", "MARKET_LINKED"),
     ("market_ready", "MARKET_READY"),
     ("map_identity", "MAP_IDENTITY"),
     ("live_ready", "LIVE_READY"),
@@ -274,7 +274,7 @@ class DecisionReadinessService:
 
             facts = {
                 "scheduled": True,
-                "raybet_linked": series.id in raybet_series_ids,
+                "market_linked": series.id in raybet_series_ids,
                 "market_ready": series.id in market_series_ids,
                 "map_identity": bool(series_map_ids),
                 "live_ready": bool(series_map_ids & live_map_ids),
@@ -392,14 +392,14 @@ def _first_blocker(
     draft_curve_map_ids: set[UUID],
     ai_statuses: Counter[str],
 ) -> tuple[str, str] | None:
-    if not facts["raybet_linked"]:
-        return "raybet_linked", "RAYBET_IDENTITY_MISSING"
+    if not facts["market_linked"]:
+        return "market_linked", "MARKET_IDENTITY_MISSING"
     if not facts["market_ready"]:
         return "market_ready", "MARKET_OBSERVATION_MISSING"
     if not facts["map_identity"]:
         return "map_identity", "CANONICAL_MAP_MISSING"
     if not facts["live_ready"]:
-        return "live_ready", "DLTV_LIVE_MISSING"
+        return "live_ready", "LIVE_DATA_MISSING"
     if not facts["snapshot_ready"]:
         live_series_maps = series_map_ids & live_map_ids
         if not live_series_maps & draft_present_map_ids:

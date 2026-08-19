@@ -44,7 +44,7 @@ export function resolveVerifiedMapSides(match: MapSummary | MapDetail): Verified
   return {
     radiant,
     dire,
-    source: sideIdentity.source,
+    source: sideIdentity.source ?? null,
     confidence: sideIdentity.confidence,
     observedAt: sideIdentity.observed_at
   };
