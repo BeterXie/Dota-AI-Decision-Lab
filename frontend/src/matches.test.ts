@@ -94,6 +94,19 @@ describe("match AI access", () => {
     expect(aiAccessScope(undefined, { ...match, stage_key: "GROUP_STAGE" })).toBe("FREE");
   });
 
+  it("preserves stronger explicit access on a free group-stage map", () => {
+    const groupStageMatch = { ...match, stage_key: "GROUP_STAGE" };
+    expect(aiAccessScope(session({ entitlements: ["ai_decisions"] }), groupStageMatch)).toBe("GLOBAL");
+    expect(
+      aiAccessScope(
+        session({
+          grants: [{ entitlement: "ai_decisions", scope_type: "MAP", scope_ref: "map-1", campaign_key: null, starts_at: null, expires_at: null }]
+        }),
+        groupStageMatch
+      )
+    ).toBe("MAP");
+  });
+
   it("keeps settled paid-stage decisions locked without a pass", () => {
     expect(aiAccessScope(undefined, { ...match, phase: "POSTMATCH" })).toBeNull();
     expect(aiAccessScope(session({}), { ...match, phase: "POSTMATCH" })).toBeNull();
