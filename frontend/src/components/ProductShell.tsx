@@ -143,11 +143,13 @@ export const ProductShell: React.FC<ProductShellProps> = ({
                   <span className="account-menu-icon"><UiIcon name="ticket" size={15} /></span>
                   <strong>{locale === "zh-CN" ? "会员中心" : "Membership"}</strong><span className="menu-chevron">›</span>
                 </a>
-                <a className="account-menu-row admin-menu-entry" href="/admin/runtime" role="menuitem">
-                  <span className="account-menu-icon" aria-hidden="true">⚙</span>
-                  <div><strong>{locale === "zh-CN" ? "管理控制台" : "Admin control plane"}</strong><small>{locale === "zh-CN" ? "Runtime 配置与 AI 提供商" : "Runtime configuration & AI providers"}</small></div>
-                  <span className="menu-chevron">›</span>
-                </a>
+                {session?.runtime_admin && (
+                  <a className="account-menu-row admin-menu-entry" href="/admin/runtime" role="menuitem">
+                    <span className="account-menu-icon"><UiIcon name="settings" size={15} /></span>
+                    <div><strong>{locale === "zh-CN" ? "管理控制台" : "Admin control plane"}</strong><small>{locale === "zh-CN" ? "Runtime 配置与 AI 提供商" : "Runtime configuration & AI providers"}</small></div>
+                    <span className="menu-chevron">›</span>
+                  </a>
+                )}
               </div>
               <div className="account-menu-footer">
                 <button type="button" disabled={logoutBusy} onClick={() => void handleLogout()}>

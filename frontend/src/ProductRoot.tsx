@@ -64,6 +64,7 @@ function ProductExperience({ pathname }: { pathname: string }) {
       user: null,
       entitlements: [],
       grants: [],
+      runtime_admin: false,
       providers: session?.providers
     });
   };

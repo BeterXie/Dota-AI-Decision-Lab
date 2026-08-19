@@ -10,6 +10,7 @@ import {
   MagicWand,
   Menu,
   Notification,
+  Settings,
   Star,
   Ticket,
   Time,
@@ -41,6 +42,7 @@ type IconName =
   | "logout"
   | "menu"
   | "notification"
+  | "settings"
   | "spark"
   | "star"
   | "ticket"
@@ -150,6 +152,7 @@ export const UiIcon: React.FC<{ name: IconName; size?: number }> = ({ name, size
   if (name === "logout") return <Logout {...props} />;
   if (name === "menu") return <Menu {...props} />;
   if (name === "notification") return <Notification {...props} />;
+  if (name === "settings") return <Settings {...props} />;
   if (name === "star") return <Star {...props} />;
   if (name === "ticket") return <Ticket {...props} />;
   if (name === "trophy") return <Trophy {...props} />;

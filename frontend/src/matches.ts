@@ -1,6 +1,8 @@
 import type { MapSummary } from "./api";
 import type { AuthSessionState } from "./authApi";
 
+// POSTMATCH remains in the display union for older UI copy paths, but the access
+// resolver never returns it: settlement does not unlock paid-stage AI content.
 export type AiAccessScope = "GLOBAL" | "EVENT" | "SERIES" | "MAP" | "FREE" | "POSTMATCH" | null;
 
 const AI_DECISIONS_ENTITLEMENT = "ai_decisions";
@@ -31,11 +33,10 @@ export function findMatchByRoute(matches: MapSummary[], routeId: string): MapSum
 
 export function aiAccessScope(
   session: AuthSessionState | undefined,
-  match: Pick<MapSummary, "series_id" | "canonical_map_id" | "canonical_event_id" | "stage_key" | "phase"> | null
+  match: Pick<MapSummary, "series_id" | "canonical_map_id" | "canonical_event_id" | "stage_key"> | null
 ): AiAccessScope {
-  if (session?.entitlements?.includes(AI_DECISIONS_ENTITLEMENT)) return "GLOBAL";
   if (!match) return null;
-  if (match.phase === "POSTMATCH") return "POSTMATCH";
+  if (session?.entitlements?.includes(AI_DECISIONS_ENTITLEMENT)) return "GLOBAL";
 
   const grants = session?.grants ?? [];
   if (
@@ -71,12 +72,6 @@ export function aiAccessScope(
   ) {
     return "MAP";
   }
-  if (
-    session?.enabled &&
-    session.authenticated &&
-    match.stage_key === "GROUP_STAGE"
-  ) {
-    return "FREE";
-  }
+  if (match.stage_key === "GROUP_STAGE") return "FREE";
   return null;
 }

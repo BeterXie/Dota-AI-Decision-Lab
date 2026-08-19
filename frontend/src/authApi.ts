@@ -30,6 +30,8 @@ export interface AuthSessionState {
   entitlements: string[];
   /** Includes GLOBAL plus resource-scoped EVENT/SERIES/MAP grants. */
   grants: AccessGrant[];
+  /** UI discoverability only; server-side admin routes still enforce their own allowlist. */
+  runtime_admin?: boolean;
   providers?: AuthProviderAvailability;
 }
 

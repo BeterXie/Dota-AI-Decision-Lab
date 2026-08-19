@@ -297,14 +297,20 @@ async def _secret_runtime_status(
     database_decryptable = False
     if db_configured:
         database_decryptable = await _database_secret_decryptable(session, key, bootstrap)
-    operational = database_decryptable or (not db_configured and fallback_available)
-    if db_configured and not database_decryptable and fallback_available:
-        operational = False
+
+    fallback_effective = fallback_available and (
+        not db_configured
+        or bootstrap.config_master_key is None
+        or session.get_bind().dialect.name != "postgresql"
+    )
+    operational = database_decryptable or fallback_effective
     storage = (
         "DATABASE_ENCRYPTED"
-        if db_configured
+        if database_decryptable
         else "BOOTSTRAP_FALLBACK"
-        if fallback_available
+        if fallback_effective
+        else "DATABASE_ENCRYPTED_UNAVAILABLE"
+        if db_configured
         else "NOT_CONFIGURED"
     )
     return {

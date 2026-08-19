@@ -4,6 +4,8 @@ const publicMatch = {
   id: "map-live",
   series_id: "series-live",
   canonical_map_id: "map-live",
+  canonical_event_id: "event-ti15",
+  stage_key: "GROUP_STAGE",
   entity_type: "MAP",
   identity_status: "RESOLVED",
   phase: "LIVE",
@@ -102,14 +104,10 @@ const publicMatch = {
   decisions: []
 };
 
-const detail = {
+const paidMatch = {
   ...publicMatch,
-  market_timeline: [],
-  live_timeline: [publicMatch.live],
-  checkpoint_decisions: [],
-  future_odds: [],
-  result: null,
-  result_evidence: []
+  stage_key: "PAID_STAGE",
+  round: "淘汰赛"
 };
 
 const anonymousSession = {
@@ -160,7 +158,23 @@ const aiPayload = {
   ]
 };
 
-async function installRoutes(page: Page, session: typeof anonymousSession | typeof scopedSession) {
+function detailFor(match: typeof publicMatch) {
+  return {
+    ...match,
+    market_timeline: [],
+    live_timeline: [match.live],
+    checkpoint_decisions: [],
+    future_odds: [],
+    result: null,
+    result_evidence: []
+  };
+}
+
+async function installRoutes(
+  page: Page,
+  session: typeof anonymousSession | typeof scopedSession,
+  match: typeof publicMatch = publicMatch
+) {
   let aiRequests = 0;
   await page.addInitScript(() => {
     window.localStorage.setItem("dota-ai-decision-lab-locale", "zh-CN");
@@ -170,11 +184,11 @@ async function installRoutes(page: Page, session: typeof anonymousSession | type
     let payload: unknown = null;
     let status = 200;
     if (path === "/api/auth/session") payload = session;
-    else if (path === "/api/matches") payload = [publicMatch];
-    else if (path === "/api/maps/map-live") payload = detail;
+    else if (path === "/api/matches") payload = [match];
+    else if (path === "/api/maps/map-live") payload = detailFor(match);
     else if (path === "/api/maps/map-live/ai-decisions") {
       aiRequests += 1;
-      if (session.authenticated) payload = aiPayload;
+      if (session.authenticated || match.stage_key === "GROUP_STAGE") payload = aiPayload;
       else {
         status = 401;
         payload = { detail: "authentication required" };
@@ -185,7 +199,7 @@ async function installRoutes(page: Page, session: typeof anonymousSession | type
   return () => aiRequests;
 }
 
-test("public match page exposes match intelligence without requesting premium AI", async ({ page }) => {
+test("group-stage public match exposes match intelligence and free AI decisions", async ({ page }) => {
   const aiRequestCount = await installRoutes(page, anonymousSession);
   await page.goto("/matches/map-live");
 
@@ -196,9 +210,11 @@ test("public match page exposes match intelligence without requesting premium AI
   await expect(page.getByText("14", { exact: true })).toBeVisible();
   await expect(page.getByText("Juggernaut", { exact: true })).toBeVisible();
   await expect(page.getByText("1.72", { exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "登录后查看 AI 判断" })).toBeVisible();
-  await expect(page.getByRole("button", { name: "登录", exact: true })).toBeVisible();
-  expect(aiRequestCount()).toBe(0);
+  await expect(page.getByText("Free 小组赛", { exact: true })).toBeVisible();
+  await expect(page.getByText("GPT", { exact: true })).toBeVisible();
+  await expect(page.getByText("gpt-match", { exact: true })).toBeVisible();
+  await expect(page.getByText("72%", { exact: true })).toBeVisible();
+  await expect.poll(aiRequestCount).toBeGreaterThan(0);
 
   const noOverflow = await page.evaluate(
     () => document.documentElement.scrollWidth === document.documentElement.clientWidth
@@ -207,15 +223,17 @@ test("public match page exposes match intelligence without requesting premium AI
 });
 
 test("map-scoped access requests and renders AI without requiring global Pro", async ({ page }) => {
-  const aiRequestCount = await installRoutes(page, scopedSession);
+  const aiRequestCount = await installRoutes(page, scopedSession, paidMatch);
   await page.goto("/matches/map-live");
 
   await expect(page.getByText("本局权限", { exact: true })).toBeVisible();
-  await expect(page.getByText("openai", { exact: true })).toBeVisible();
-  await expect(page.locator(".match-ai-decision").getByText("Team Liquid", { exact: true })).toBeVisible();
-  await expect(page.getByText("72%", { exact: true })).toBeVisible();
-  await expect(page.getByText(/当前局面和市场价格/)).toBeVisible();
-  expect(aiRequestCount()).toBeGreaterThan(0);
+  const card = page.locator(".player-ai-card").filter({ hasText: "GPT" }).first();
+  await expect(card).toBeVisible();
+  await expect(card.getByText("gpt-match", { exact: true })).toBeVisible();
+  await expect(card.getByText("72%", { exact: true })).toBeVisible();
+  await card.click();
+  await expect(page.getByText(/Team Liquid 的当前局面和市场价格/)).toBeVisible();
+  await expect.poll(aiRequestCount).toBeGreaterThan(0);
 
   const noOverflow = await page.evaluate(
     () => document.documentElement.scrollWidth === document.documentElement.clientWidth
