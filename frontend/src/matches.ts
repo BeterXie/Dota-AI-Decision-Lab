@@ -36,7 +36,6 @@ export function aiAccessScope(
   match: Pick<MapSummary, "series_id" | "canonical_map_id" | "canonical_event_id" | "stage_key"> | null
 ): AiAccessScope {
   if (!match) return null;
-  if (match.stage_key === "GROUP_STAGE") return "FREE";
   if (session?.entitlements?.includes(AI_DECISIONS_ENTITLEMENT)) return "GLOBAL";
 
   const grants = session?.grants ?? [];
@@ -73,5 +72,6 @@ export function aiAccessScope(
   ) {
     return "MAP";
   }
+  if (match.stage_key === "GROUP_STAGE") return "FREE";
   return null;
 }
