@@ -218,21 +218,23 @@ def _auth_router(
                 active = await entitlements.active_entitlements(user.id)
             grants = [item.public_payload() for item in await entitlements.active_grants(user.id)]
         auth_config = await runtime_auth()
-        return {
+        payload = {
             "enabled": enabled,
             "authenticated": user is not None if enabled else True,
             "user": _user_payload(user) if user is not None else None,
             "entitlements": list(active),
             "grants": grants,
-            "runtime_admin": bool(
-                runtime_config is not None
-                and user is not None
-                and runtime_config.is_admin_email(user.email)
-            ),
             "providers": {
                 key: enabled and value for key, value in auth_config.provider_payload.items()
             },
         }
+        if (
+            runtime_config is not None
+            and user is not None
+            and runtime_config.is_admin_email(user.email)
+        ):
+            payload["runtime_admin"] = True
+        return payload
 
     @router.get("/session")
     async def auth_session(request: Request) -> dict:
