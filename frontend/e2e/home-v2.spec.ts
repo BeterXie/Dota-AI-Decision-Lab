@@ -73,6 +73,8 @@ test("2.0 homepage explains the product and surfaces live, upcoming and complete
   await mockHomeApi(page);
   await page.goto("/");
 
+  await expect(page).toHaveTitle("DotaScope");
+  await expect(page.getByRole("link", { name: "DotaScope" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "看懂比赛，验证 AI，追踪真实表现" })).toBeVisible();
   if ((page.viewportSize()?.width ?? 0) <= 760) {
     await page.getByRole("button", { name: "打开主导航" }).click();
@@ -111,7 +113,7 @@ test("avatar opens the unified login dialog and does not fake unconfigured socia
   await page.getByRole("button", { name: "登录", exact: true }).click();
 
   await expect(page.getByRole("dialog")).toBeVisible();
-  await expect(page.getByRole("heading", { name: "登录 Dota AI Decision Lab" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "登录 DotaScope" })).toBeVisible();
   await expect(page.getByRole("button", { name: /使用 Google 账号继续/ })).toBeDisabled();
   await expect(page.getByRole("button", { name: /使用 Steam 登录/ })).toBeDisabled();
   await expect(page.getByLabel("邮箱")).toBeVisible();
