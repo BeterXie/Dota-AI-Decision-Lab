@@ -36,11 +36,15 @@ def test_qq_bridge_runner_rejects_non_loopback_host(tmp_path: Path) -> None:
         QQBotBridgeRunner(settings, store=store)
 
 
-def test_websocket_origin_policy_allows_only_loopback_browser_origins() -> None:
+def test_websocket_origin_policy_allows_loopback_and_production_same_origin() -> None:
     assert _websocket_origin_allowed(None) is True
     assert _websocket_origin_allowed("http://127.0.0.1:8000") is True
     assert _websocket_origin_allowed("http://localhost:5173") is True
     assert _websocket_origin_allowed("https://[::1]:8443") is True
+    assert _websocket_origin_allowed("https://dota.example", "dota.example") is True
+    assert _websocket_origin_allowed("https://dota.example:8443", "dota.example:8443") is True
+    assert _websocket_origin_allowed("https://dota.example", "api.example") is False
+    assert _websocket_origin_allowed("https://dota.example:8443", "dota.example") is False
     assert _websocket_origin_allowed("https://evil.example") is False
     assert _websocket_origin_allowed("null") is False
 
@@ -92,7 +96,8 @@ async def test_auth_disabled_fails_closed_for_protected_http_routes() -> None:
 
 
 @pytest.mark.asyncio
-async def test_auth_disabled_keeps_explicit_public_http_routes_available() -> None:
+@pytest.mark.parametrize("path", ["/api/matches", "/api/access/maps/00000000-0000-0000-0000-000000000001"])
+async def test_auth_disabled_keeps_explicit_public_http_routes_available(path: str) -> None:
     inner_called = False
 
     async def inner(scope: dict[str, Any], receive, send) -> None:
@@ -121,8 +126,8 @@ async def test_auth_disabled_keeps_explicit_public_http_routes_available() -> No
         "http_version": "1.1",
         "method": "GET",
         "scheme": "http",
-        "path": "/api/matches",
-        "raw_path": b"/api/matches",
+        "path": path,
+        "raw_path": path.encode("ascii"),
         "query_string": b"",
         "headers": [],
         "client": ("127.0.0.1", 50000),
