@@ -9,6 +9,7 @@ import {
   fetchReferral,
   type PassOffer
 } from "../billingApi";
+import { PRODUCT_NAME } from "../brand";
 import { useI18n } from "../i18n";
 import "./billing.css";
 
@@ -80,7 +81,7 @@ export function BillingPage({
       <section className="billing-hero">
         <div>
           <a className="billing-back" href="/">← {locale === "zh-CN" ? "返回赛事" : "Back to events"}</a>
-          <div className="billing-eyebrow">DOTA AI DECISION LAB · ACCESS</div>
+          <div className="billing-eyebrow">{PRODUCT_NAME.toUpperCase()} · ACCESS</div>
           <h1>{locale === "zh-CN" ? "先体验，再解锁你关心的比赛" : "Start free, then unlock what you follow"}</h1>
           <p>
             {locale === "zh-CN"
