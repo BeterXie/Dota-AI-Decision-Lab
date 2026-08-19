@@ -13,6 +13,8 @@ source, an optional validity window, and a competition scope.
 
 `EntitlementService.active_entitlements()` returns GLOBAL rows only. Resource grants are exposed
 through `active_grants()` and checked through `access_scope()` / `has_resource_entitlement()`.
+Competition-facing map authorization is resolved through `app.access_policy.resolve_map_access()`;
+API and UI projections must not introduce a separate post-match or stage-based access rule.
 
 ## Product behavior
 
