@@ -5,17 +5,15 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from sqlalchemy.orm import load_only
 
+from app.access_policy import resolve_map_access
 from app.auth import AuthenticatedUser
-from app.domain.competition import is_group_stage
-from app.entitlements import AI_DECISIONS_ENTITLEMENT, EntitlementService
+from app.entitlements import EntitlementService
 from app.models import (
     AiDecisionRecord,
     CanonicalMap,
-    CanonicalSeries,
     DecisionEvaluationRecord,
     DecisionFutureOdds,
     DecisionSnapshotRecord,
-    MapResultRecord,
 )
 from app.web.api import _canonical_decision_rounds, _decision_payload, _future_odds_payload
 from app.web.performance import build_ai_performance_payload
@@ -35,29 +33,15 @@ def create_premium_router(
     async def map_ai_decisions(canonical_map_id: UUID, request: Request) -> dict:
         user = _optional_request_user(request)
         async with session_factory() as session:
-            record = await session.get(CanonicalMap, canonical_map_id)
-            if record is None:
+            access = await resolve_map_access(
+                session,
+                entitlements,
+                canonical_map_id,
+                user=user,
+            )
+            if access is None:
                 raise HTTPException(status_code=404, detail="map not found")
-            series = (
-                await session.get(CanonicalSeries, record.series_id)
-                if record.series_id is not None
-                else None
-            )
-            result = await session.scalar(
-                select(MapResultRecord).where(MapResultRecord.canonical_map_id == record.id)
-            )
-            free_group_stage = series is not None and is_group_stage(series.stage_key)
-            paid_scope = None
-            if user is not None:
-                paid_scope = await entitlements.access_scope(
-                    user.id,
-                    AI_DECISIONS_ENTITLEMENT,
-                    canonical_event_id=series.event_id if series is not None else None,
-                    canonical_series_id=record.series_id,
-                    canonical_map_id=record.id,
-                )
-            allowed = result is not None or free_group_stage or paid_scope is not None
-            if not allowed:
+            if not access.ai_allowed:
                 if user is None:
                     raise HTTPException(
                         status_code=status.HTTP_401_UNAUTHORIZED,
@@ -67,13 +51,10 @@ def create_premium_router(
                     status_code=status.HTTP_403_FORBIDDEN,
                     detail="AI Decision access is not granted for this match",
                 )
-            public_projection = result is not None and (
-                user is None or (not free_group_stage and paid_scope is None)
-            )
             return await _map_ai_decisions_payload(
                 session,
-                record,
-                public=public_projection,
+                access.canonical_map,
+                public=access.ai_public_projection,
             )
 
     @router.get("/api/ai-performance")
