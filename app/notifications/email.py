@@ -18,6 +18,8 @@ from app.providers.common import create_system_ssl_context
 from app.snapshots.repository import SnapshotRepository
 
 EMAIL_TEMPLATE_VERSION = "decision-email-v2"
+_LEGACY_SUBJECT_PREFIX = "[Dota AI Decision Lab]"
+_DEFAULT_SUBJECT_PREFIX = "[DotaScope]"
 
 
 @dataclass(frozen=True, slots=True)
@@ -107,7 +109,9 @@ class DecisionEmailNotificationService:
         self._sender = sender
         self._sender_from = sender_from
         self._recipients = recipients
-        self._subject_prefix = subject_prefix
+        self._subject_prefix = (
+            _DEFAULT_SUBJECT_PREFIX if subject_prefix == _LEGACY_SUBJECT_PREFIX else subject_prefix
+        )
         self._max_decision_age_seconds = max_decision_age_seconds
 
     async def prepare(
@@ -259,7 +263,7 @@ def render_decision_email(
     price_b = price_by_team.get(team_b_id)
 
     text_lines = [
-        "Dota AI Decision Lab - 比赛决策通知",
+        "DotaScope - 比赛决策通知",
         "",
         f"对阵：{team_a} vs {team_b}",
         f"局数：第 {_display(identity.get('map_number'))} 局",
@@ -350,7 +354,7 @@ def render_decision_email(
 <body style="margin:0;background:#f4f4f4;color:#161616;font-family:Arial,sans-serif">
 <div style="max-width:760px;margin:0 auto;background:#ffffff">
 <div style="padding:24px;background:#161616;color:#ffffff">
-<div style="font-size:13px;color:#a8a8a8">Dota AI Decision Lab · 比赛决策通知</div>
+<div style="font-size:13px;color:#a8a8a8">DotaScope · 比赛决策通知</div>
 <h1 style="margin:8px 0 4px;font-size:24px">{escape(team_a)} vs {escape(team_b)}</h1>
 <div>{header_meta}</div>
 </div>

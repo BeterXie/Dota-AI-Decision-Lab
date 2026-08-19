@@ -13,6 +13,7 @@ import {
   type MapSummary
 } from "./api";
 import { fetchAuthSession, logout, type AuthSessionState } from "./authApi";
+import { PRODUCT_NAME } from "./brand";
 import { I18nProvider, useI18n } from "./i18n";
 import { AppShell } from "./components/AppShell";
 import { AuthAccountBadge } from "./components/AuthAccountBadge";
@@ -120,7 +121,7 @@ function AuthenticatedApp() {
     );
   } else if (notificationRoute) {
     if (auth.isLoading) {
-      content = <div className="auth-bootstrap">Dota AI Decision Lab</div>;
+      content = <div className="auth-bootstrap">{PRODUCT_NAME}</div>;
     } else if (hasNotificationAccess && session?.user) {
       content = (
         <Suspense fallback={<div className="auth-bootstrap">Notification Center</div>}>
@@ -144,7 +145,7 @@ function AuthenticatedApp() {
     );
   } else if (reviewRoute) {
     content = (
-      <Suspense fallback={<div className="auth-bootstrap">Dota AI Decision Lab</div>}>
+      <Suspense fallback={<div className="auth-bootstrap">{PRODUCT_NAME}</div>}>
         <ReviewPage />
       </Suspense>
     );

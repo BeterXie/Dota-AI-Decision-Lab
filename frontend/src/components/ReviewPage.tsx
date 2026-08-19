@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
+import { PRODUCT_NAME } from "../brand";
 import { translate, useI18n, type Locale } from "../i18n";
 import {
   fetchReviewMatches,
@@ -43,7 +44,7 @@ export function ReviewPage() {
       <header className="review-header">
         <div className="review-brand">
           <a href="/" className="review-back">← {t("reviewLiveDashboard")}</a>
-          <div><span className="review-kicker">DOTA AI DECISION LAB</span><h1>{t("reviewTitle")}</h1></div>
+          <div><span className="review-kicker">{PRODUCT_NAME.toUpperCase()}</span><h1>{t("reviewTitle")}</h1></div>
         </div>
         <div className="review-header-actions">
           <button className={locale === "zh-CN" ? "active" : ""} onClick={() => setLocale("zh-CN")}>中文</button>
