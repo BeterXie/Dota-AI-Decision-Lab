@@ -1,0 +1,8 @@
+User-agent: *
+Allow: /
+Disallow: /admin/
+Disallow: /api/
+Disallow: /notifications
+Disallow: /billing
+
+Sitemap: https://dotascope.com/sitemap.xml

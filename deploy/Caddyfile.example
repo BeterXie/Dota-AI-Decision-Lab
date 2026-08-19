@@ -1,0 +1,38 @@
+# DotaScope production edge example.
+#
+# Keep the Python application bound to 127.0.0.1:8000. Caddy is the only
+# internet-facing listener and terminates HTTPS for dotascope.com.
+#
+# Do not enable HSTS until certificate issuance, apex/www redirects and OAuth
+# callbacks have been proven stable in production.
+
+www.dotascope.com {
+	redir https://dotascope.com{uri} permanent
+}
+
+dotascope.com {
+	encode zstd gzip
+
+	# Availability details and Prometheus metrics are intentionally not public.
+	@private_diagnostics path /ready /metrics
+	respond @private_diagnostics 404
+
+	header {
+		X-Content-Type-Options "nosniff"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		X-Frame-Options "DENY"
+		Permissions-Policy "camera=(), microphone=(), geolocation=()"
+		-Server
+		# Enable only after HTTPS and redirects are stable:
+		# Strict-Transport-Security "max-age=31536000; includeSubDomains"
+	}
+
+	# Caddy preserves WebSocket upgrades automatically. Preserve the public Host
+	# so /ws/status same-origin checks see dotascope.com rather than 127.0.0.1.
+	reverse_proxy 127.0.0.1:8000 {
+		header_up Host {host}
+		header_up X-Forwarded-Host {host}
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Real-IP {remote_host}
+	}
+}
