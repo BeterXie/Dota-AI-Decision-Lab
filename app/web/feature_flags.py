@@ -12,6 +12,7 @@ class RuntimeFeatureFlagMiddleware(BaseHTTPMiddleware):
 
     Billing webhooks/account maintenance deliberately stay reachable when new
     checkout creation is disabled, so subscription state can still reconcile.
+    Match Review remains a separate Free Access surface from AI Performance.
     """
 
     def __init__(self, app, *, policy: RuntimePolicyService) -> None:
@@ -30,14 +31,18 @@ class RuntimeFeatureFlagMiddleware(BaseHTTPMiddleware):
 
 
 def _is_performance_path(path: str) -> bool:
-    return path == "/api/ai-performance" or path.startswith("/api/review/")
+    return path == "/api/ai-performance" or path.startswith("/api/review/ai-quality/")
 
 
 def _is_new_checkout_path(path: str) -> bool:
     if not path.startswith("/api/billing/"):
         return False
     return path.startswith("/api/billing/checkout/") or (
-        path.startswith("/api/billing/series/") and path.endswith("/checkout")
+        (
+            path.startswith("/api/billing/series/")
+            or path.startswith("/api/billing/events/")
+        )
+        and path.endswith("/checkout")
     )
 
 
