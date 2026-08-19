@@ -41,6 +41,8 @@ async def resolve_map_access(
 
     Free Access intentionally receives the public AI projection only; it never
     exposes the frozen canonical snapshot payload or future-odds internals.
+    An explicit entitlement always takes precedence over Free Access so stronger
+    authorization never produces a weaker projection.
     """
 
     canonical_map = await session.get(CanonicalMap, canonical_map_id)
@@ -71,7 +73,8 @@ async def resolve_map_access(
         )
 
     free_group_stage = series is not None and is_group_stage(series.stage_key)
-    if free_group_stage:
+    public_projection = free_group_stage and ai_scope is None
+    if public_projection:
         ai_scope = "FREE"
 
     return MapAccessDecision(
@@ -79,7 +82,7 @@ async def resolve_map_access(
         series=series,
         ai_allowed=free_group_stage or ai_scope is not None,
         ai_scope=ai_scope,
-        ai_public_projection=free_group_stage,
+        ai_public_projection=public_projection,
         notification_allowed=notification_scope is not None,
         notification_scope=notification_scope,
     )
