@@ -1369,12 +1369,14 @@ def _match_phase(
     observed_at: datetime,
     live_state_max_age_seconds: float,
 ) -> str:
-    if result is not None:
-        return "POSTMATCH" if _confirmed_result(result) else "AWAITING_RESULT"
+    if _confirmed_result(result):
+        return "POSTMATCH"
     if live is not None:
         message_age = elapsed_seconds(observed_at, live.last_message_received_at)
         if 0 <= message_age <= live_state_max_age_seconds:
             return "LIVE"
+        return "AWAITING_RESULT"
+    if result is not None:
         return "AWAITING_RESULT"
     if scheduled_at is not None and ensure_utc(scheduled_at) >= ensure_utc(observed_at):
         return "PREMATCH"
@@ -1383,11 +1385,7 @@ def _match_phase(
 
 def _confirmed_result(result: MapResultRecord | None) -> bool:
     """Only a non-conflicting winner is a publishable final result."""
-    return (
-        result is not None
-        and result.winner_team_id is not None
-        and not result.provider_conflict
-    )
+    return result is not None and result.winner_team_id is not None and not result.provider_conflict
 
 
 async def _draft_slot_payloads(

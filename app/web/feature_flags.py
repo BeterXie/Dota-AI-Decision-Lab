@@ -38,10 +38,7 @@ def _is_new_checkout_path(path: str) -> bool:
     if not path.startswith("/api/billing/"):
         return False
     return path.startswith("/api/billing/checkout/") or (
-        (
-            path.startswith("/api/billing/series/")
-            or path.startswith("/api/billing/events/")
-        )
+        (path.startswith("/api/billing/series/") or path.startswith("/api/billing/events/"))
         and path.endswith("/checkout")
     )
 

@@ -96,7 +96,9 @@ async def test_auth_disabled_fails_closed_for_protected_http_routes() -> None:
 
 
 @pytest.mark.asyncio
-@pytest.mark.parametrize("path", ["/api/matches", "/api/access/maps/00000000-0000-0000-0000-000000000001"])
+@pytest.mark.parametrize(
+    "path", ["/api/matches", "/api/access/maps/00000000-0000-0000-0000-000000000001"]
+)
 async def test_auth_disabled_keeps_explicit_public_http_routes_available(path: str) -> None:
     inner_called = False
 
