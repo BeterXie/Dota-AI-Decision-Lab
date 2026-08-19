@@ -23,9 +23,7 @@ class ResendLoginCodeSender:
         )
         self._sender_from = sender_from
         self._subject_prefix = (
-            _DEFAULT_SUBJECT_PREFIX
-            if subject_prefix == _LEGACY_SUBJECT_PREFIX
-            else subject_prefix
+            _DEFAULT_SUBJECT_PREFIX if subject_prefix == _LEGACY_SUBJECT_PREFIX else subject_prefix
         )
 
     async def send_login_code(
