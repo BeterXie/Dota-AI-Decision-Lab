@@ -236,8 +236,8 @@ async def test_auth_api_keeps_matches_public_and_requires_entitlement_for_ai(tmp
                     )
                 )
             settled = await client.get(premium_path)
-            assert settled.status_code == 200
-            assert settled.json()["canonical_map_id"] == str(premium_map_id)
+            assert settled.status_code == 401
+            assert settled.json() == {"detail": "authentication required"}
     finally:
         await service.close()
         await engine.dispose()
