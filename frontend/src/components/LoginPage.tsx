@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { requestLoginCode, verifyLoginCode, type AuthSessionState } from "../authApi";
+import { PRODUCT_NAME } from "../brand";
 import { useI18n } from "../i18n";
 
 interface LoginPageProps {
@@ -84,7 +85,7 @@ export const LoginPage: React.FC<LoginPageProps> = ({ onAuthenticated }) => {
         <div className="auth-card-header">
           <div className="auth-brand-mark">❖</div>
           <div>
-            <div className="auth-eyebrow">{t("authLoginEyebrow")}</div>
+            <div className="auth-eyebrow">{PRODUCT_NAME}</div>
             <h1 id="auth-title">
               {stage === "email" ? t("authLoginTitle") : t("authCodeTitle")}
             </h1>
