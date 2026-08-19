@@ -10,14 +10,21 @@ interface AiDecisionGroup {
   latest: AiDecision;
 }
 
-export function PlayerAiDecisionStrip({ decisions }: { decisions: AiDecision[] }) {
+export function PlayerAiDecisionStrip({
+  decisions,
+  embedded = false
+}: {
+  decisions: AiDecision[];
+  embedded?: boolean;
+}) {
   const { locale, t } = useI18n();
   const [selected, setSelected] = useState<AiDecisionGroup | null>(null);
   const groups = useMemo(() => groupByAi(decisions), [decisions]);
   const summaries = useMemo(
     () => groups.map((group) => summaryFor(group)),
     [groups]
-  );  const probabilities = summaries.flatMap((summary) => summary.fair == null ? [] : [summary.fair]);
+  );
+  const probabilities = summaries.flatMap((summary) => summary.fair == null ? [] : [summary.fair]);
   const min = probabilities.length ? Math.min(...probabilities) : null;
   const max = probabilities.length ? Math.max(...probabilities) : null;
   const spread = min == null || max == null ? null : (max - min) * 100;
@@ -27,13 +34,15 @@ export function PlayerAiDecisionStrip({ decisions }: { decisions: AiDecision[] }
   }, {});
 
   return (
-    <section className="ai-decision-container player-ai-strip">
-      <div className="player-section-heading">
-        <div><span className="section-kicker">MULTI-AI</span><h3>{t("independentAiDecisions")}</h3></div>
-        <div className="player-agreement-summary">
-          {Object.entries(counts).map(([action, count]) => <span key={action}><b>{count}</b> {displayAction(action, locale)}</span>)}
+    <section className={`ai-decision-container player-ai-strip${embedded ? " player-ai-strip-embedded" : ""}`}>
+      {!embedded && (
+        <div className="player-section-heading">
+          <div><span className="section-kicker">MULTI-AI</span><h3>{t("independentAiDecisions")}</h3></div>
+          <div className="player-agreement-summary">
+            {Object.entries(counts).map(([action, count]) => <span key={action}><b>{count}</b> {displayAction(action, locale)}</span>)}
+          </div>
         </div>
-      </div>
+      )}
 
       {groups.length ? (
         <div className="player-ai-cards">
@@ -49,6 +58,10 @@ export function PlayerAiDecisionStrip({ decisions }: { decisions: AiDecision[] }
                   {group.rounds.length === 1
                     ? locale === "zh-CN" ? "1 轮决策" : "1 round"
                     : locale === "zh-CN" ? `${group.rounds.length} 轮决策` : `${group.rounds.length} rounds`}
+                </div>
+                <div className="player-ai-checkpoint">
+                  {locale === "zh-CN" ? "最新决策 · " : "Latest · "}
+                  {formatCheckpoint(group.latest.snapshot_decision_at, group.latest.snapshot_mode, locale, false)}
                 </div>
                 <div className={`player-ai-action ${actionTone(summary.action)}`} style={actionStyle(summary.action)}>{displayAction(summary.action, locale)}</div>
                 <div className="player-ai-metrics">
@@ -82,7 +95,7 @@ export function PlayerAiDecisionStrip({ decisions }: { decisions: AiDecision[] }
           <div className="modal-card ai-rounds-modal" onClick={(event) => event.stopPropagation()}>
             <div className="modal-header">
               <h3>{providerLabel(selected.provider)} · {selected.model}</h3>
-              <button className="close-btn" onClick={() => setSelected(null)}>✕</button>
+              <button className="close-btn" type="button" onClick={() => setSelected(null)}>✕</button>
             </div>
             <div className="modal-body">
               <div className="ai-bankroll-summary">
@@ -169,12 +182,8 @@ function groupByAi(decisions: AiDecision[]): AiDecisionGroup[] {
   }
   const groups = [...byKey.values()];
   for (const group of groups) {
-    group.rounds.sort((a, b) => {
-      const timeA = a.snapshot_decision_at ? Date.parse(a.snapshot_decision_at) : Date.parse(a.request_started_at);
-      const timeB = b.snapshot_decision_at ? Date.parse(b.snapshot_decision_at) : Date.parse(b.request_started_at);
-      return (Number.isFinite(timeA) ? timeA : 0) - (Number.isFinite(timeB) ? timeB : 0);
-    });
-    group.latest = group.rounds[group.rounds.length - 1];
+    group.rounds.sort((a, b) => decisionTime(b) - decisionTime(a));
+    group.latest = group.rounds[0];
   }
   groups.sort((a, b) => a.provider.localeCompare(b.provider) || a.model.localeCompare(b.model));
   return groups;
@@ -190,6 +199,13 @@ function summaryFor(group: AiDecisionGroup) {
     bankrollBefore: numberOrNull(item.bankroll_before),
     settledPnl: settledPnl(group)
   };
+}
+
+function decisionTime(item: AiDecision): number {
+  const snapshotTime = item.snapshot_decision_at ? Date.parse(item.snapshot_decision_at) : NaN;
+  if (Number.isFinite(snapshotTime)) return snapshotTime;
+  const requestTime = Date.parse(item.request_started_at);
+  return Number.isFinite(requestTime) ? requestTime : 0;
 }
 
 
@@ -209,7 +225,7 @@ function numberOrNull(value: number | string | null | undefined): number | null 
 }
 
 function initialBankroll(group: AiDecisionGroup): number | null {
-  const firstWithBankroll = group.rounds.find((item) => numberOrNull(item.bankroll_before) != null);
+  const firstWithBankroll = [...group.rounds].reverse().find((item) => numberOrNull(item.bankroll_before) != null);
   return firstWithBankroll ? numberOrNull(firstWithBankroll.bankroll_before) : null;
 }
 
@@ -308,12 +324,13 @@ function providerLabel(value: string): string {
   return value;
 }
 
-function formatCheckpoint(value: string | undefined, mode: string | undefined, locale: string): string {
+function formatCheckpoint(value: string | undefined, mode: string | undefined, locale: string, includeLabel = true): string {
   if (!value) return mode || (locale === "zh-CN" ? "历史决策" : "Previous round");
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return mode ?? "";
   const time = date.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
   const suffix = mode ? ` · ${mode}` : "";
+  if (!includeLabel) return `${time}${suffix}`;
   return locale === "zh-CN" ? `决策时点 · ${time}${suffix}` : `Checkpoint · ${time}${suffix}`;
 }
 

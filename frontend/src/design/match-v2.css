@@ -78,7 +78,7 @@
 .match-intelligence-grid > .analytics-card { min-height: 470px; border-color: var(--product-border); background: rgba(13, 24, 36, 0.82); }
 .match-lineup-section .lineup-card { border-color: var(--product-border); background: rgba(13, 24, 36, 0.82); }
 .match-ai-section .match-ai-card { min-height: 0; }
-.match-ai-section .match-ai-lock { min-height: 170px; padding: 14px 20px; }
+.match-ai-section .match-ai-lock { min-height: 226px; padding: 0; }
 .match-signal-card,
 .match-draft-card,
 .match-ai-card,
@@ -134,25 +134,33 @@
 .match-draft-slots small { color: #607589; font-size: 7px; }
 
 .match-ai-card { position: relative; overflow: hidden; }
+.match-ai-card.has-access { overflow: visible; }
 .match-ai-card.has-access { border-color: rgba(83, 197, 202, 0.18); background: radial-gradient(circle at 90% 0%, rgba(49, 169, 181, 0.1), transparent 32%), rgba(13, 24, 36, 0.84); }
 .match-ai-card.is-locked { background: radial-gradient(circle at 88% 0%, rgba(136, 93, 197, 0.09), transparent 32%), rgba(13, 24, 36, 0.84); }
-.match-ai-decisions { display: grid; gap: 7px; margin-top: 15px; }
-.match-ai-decision { display: grid; grid-template-columns: minmax(95px, 0.8fr) minmax(90px, 1fr) 48px; gap: 8px 10px; align-items: center; padding: 10px; border: 1px solid rgba(142, 166, 188, 0.1); border-radius: 8px; background: rgba(5, 13, 21, 0.34); }
-.match-ai-decision > div { min-width: 0; display: grid; gap: 2px; }
-.match-ai-decision > div strong,
-.match-ai-decision > div span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.match-ai-decision > div strong { color: #b7c7d2; font-size: 9px; text-transform: capitalize; }
-.match-ai-decision > div span { color: #64798d; font-size: 7px; }
-.match-ai-decision > b { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #77d0d1; font-size: 10px; }
-.match-ai-decision > em { color: #9ab0bf; text-align: right; font-style: normal; font-size: 9px; }
-.match-ai-decision > p { grid-column: 1 / -1; margin: 1px 0 0; color: #71869a; font-size: 8px; line-height: 1.55; }
-.match-ai-lock { min-height: 240px; display: grid; place-items: center; align-content: center; padding: 20px; text-align: center; }
-.match-ai-lock > span { width: 42px; height: 42px; display: grid; place-items: center; border: 1px solid rgba(155, 108, 221, 0.16); border-radius: 50%; background: rgba(137, 96, 199, 0.08); color: #b184e0; font-size: 17px; }
-.match-ai-lock h3 { margin: 11px 0 0; color: #d6e0e7; font-size: 14px; }
-.match-ai-lock p { max-width: 390px; margin: 7px 0 15px; color: #718499; font-size: 9px; line-height: 1.7; }
+.match-ai-lock { position: relative; isolation: isolate; min-height: 240px; margin-top: 15px; overflow: hidden; border: 1px solid rgba(142, 166, 188, 0.16); border-radius: 10px; background: rgba(5, 13, 21, 0.36); text-align: center; }
+.match-ai-lock::after { position: absolute; z-index: 1; inset: 0; content: ""; background: linear-gradient(180deg, rgba(8, 17, 28, 0.24), rgba(8, 17, 28, 0.52) 46%, rgba(8, 17, 28, 0.76)); -webkit-backdrop-filter: blur(8px) saturate(0.78); backdrop-filter: blur(8px) saturate(0.78); box-shadow: inset 0 0 0 1px rgba(117, 212, 211, 0.06); pointer-events: none; }
+.match-ai-preview { position: absolute; z-index: 0; inset: 0; display: grid; align-content: center; gap: 8px; padding: 22px; opacity: 0.92; filter: blur(2px); transform: scale(1.04); pointer-events: none; }
+.match-ai-preview-head { display: grid; grid-template-columns: minmax(80px, 0.8fr) 28px 28px; gap: 9px; align-items: center; padding: 0 10px 3px; }
+.match-ai-preview-head span,
+.match-ai-preview-head i { display: block; height: 6px; border-radius: 999px; background: rgba(94, 203, 207, 0.38); }
+.match-ai-preview-head i { background: rgba(142, 166, 188, 0.2); }
+.match-ai-preview-row { display: grid; grid-template-columns: 34px minmax(0, 1fr) 54px; gap: 10px; align-items: center; min-height: 47px; padding: 8px 10px; border: 1px solid rgba(142, 166, 188, 0.18); border-radius: 8px; background: linear-gradient(90deg, rgba(24, 45, 61, 0.86), rgba(18, 34, 49, 0.78)); box-shadow: 0 8px 22px rgba(0, 0, 0, 0.12); }
+.match-ai-preview-row > span { width: 27px; height: 27px; border-radius: 6px; background: linear-gradient(135deg, rgba(95, 174, 183, 0.5), rgba(95, 174, 183, 0.16)); }
+.match-ai-preview-row > div { display: grid; gap: 6px; }
+.match-ai-preview-row > div b,
+.match-ai-preview-row > div small { display: block; height: 7px; border-radius: 999px; background: rgba(216, 231, 237, 0.38); }
+.match-ai-preview-row > div small { width: 62%; height: 5px; background: rgba(113, 188, 193, 0.34); }
+.match-ai-preview-row > i { height: 12px; border-radius: 999px; background: rgba(97, 211, 210, 0.42); }
+.match-ai-lock-content { position: relative; z-index: 2; min-height: 240px; display: grid; place-items: center; align-content: center; padding: 22px 20px; }
+.match-ai-lock-icon { width: 42px; height: 42px; display: grid; place-items: center; border: 1px solid rgba(155, 108, 221, 0.22); border-radius: 50%; background: rgba(137, 96, 199, 0.12); color: #c092e6; font-size: 17px; }
+.match-ai-lock-status { margin-top: 10px; color: #75d4d3; font-size: 10px; font-weight: 760; letter-spacing: 0.01em; }
+.match-ai-lock-status.is-pending { color: #a9b8c2; }
+.match-ai-lock h3 { margin: 7px 0 0; color: #dce6ec; font-size: 14px; }
+.match-ai-lock p { max-width: 390px; margin: 7px 0 15px; color: #8296a7; font-size: 9px; line-height: 1.7; }
 .match-ai-disclaimer { margin: 12px 0 0; padding-top: 10px; border-top: 1px solid rgba(143, 166, 188, 0.08); color: #65798d; font-size: 8px; line-height: 1.6; }
 .match-ai-loading { display: grid; gap: 8px; margin-top: 17px; }
 .match-ai-loading span { height: 61px; border-radius: 8px; background: linear-gradient(90deg, rgba(20, 34, 48, 0.7), rgba(31, 49, 63, 0.8), rgba(20, 34, 48, 0.7)); background-size: 200% 100%; animation: matchSkeleton 1.3s ease infinite; }
+.match-ai-card.has-access .player-ai-strip-embedded { margin-top: 15px; padding: 0; border: 0; border-radius: 0; background: transparent; }
 
 .match-empty-message { min-height: 100px; display: grid; place-items: center; padding: 16px; color: #64798c; text-align: center; font-size: 9px; line-height: 1.6; }
 .match-identity-note { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 13px; padding: 18px; }
@@ -204,7 +212,6 @@
   .match-draft-sides { grid-template-columns: 1fr; }
   .match-draft-card,
   .match-ai-card { padding: 13px; }
-  .match-ai-decision { grid-template-columns: minmax(80px, 0.8fr) minmax(70px, 1fr) 42px; }
   .match-skeleton-grid { grid-template-columns: 1fr; }
 }
 

@@ -14,6 +14,7 @@ import { useI18n } from "../i18n";
 import { CanonicalMarketCard } from "./CanonicalMarketCard";
 import { LineupCard } from "./LineupCard";
 import { PlayerDraftAdvantageCard } from "./PlayerDraftAdvantageCard";
+import { PlayerAiDecisionStrip } from "./PlayerAiDecisionStrip";
 import { TeamCrest, UiIcon } from "./VisualIdentity";
 import { resolveVerifiedMapSides } from "../utils/mapSides";
 
@@ -31,6 +32,11 @@ interface MatchAiPayload {
   latest_snapshot: MapSummary["latest_snapshot"];
   decisions: AiDecision[];
   checkpoint_decisions: AiDecision[];
+}
+
+interface PublicAiSummary {
+  analysis_available: boolean;
+  completed_models: number;
 }
 
 export const MatchPage: React.FC<MatchPageProps> = ({
@@ -284,30 +290,56 @@ const AiMatchCard: React.FC<{
   locale: string;
   onLogin: () => void;
 }> = ({ match, scope, signedIn, authEnabled, loading, data, locale, onLogin }) => {
-  const successful = (data?.decisions ?? []).filter((decision) => decision.parse_status === "SUCCESS" && decision.decision).slice(0, 3);
+  const decisionRounds = data?.checkpoint_decisions?.length
+    ? data.checkpoint_decisions
+    : data?.decisions ?? [];
+  const successful = decisionRounds.filter((decision) => decision.parse_status === "SUCCESS" && decision.decision);
+  const publicAi = (match as MapSummary & { ai_access?: PublicAiSummary }).ai_access;
+  const decisionGenerated = publicAi
+    ? publicAi.analysis_available || publicAi.completed_models > 0
+    : Boolean(match.latest_snapshot);
   const billingHref = match.series_id ? `/billing?series=${encodeURIComponent(match.series_id)}` : "/billing";
+  const accessHeading = !authEnabled
+    ? (locale === "zh-CN" ? "AI 权限当前不可用" : "AI access is unavailable")
+    : !signedIn
+      ? (locale === "zh-CN" ? "登录后查看完整 AI 决策" : "Sign in to view the full AI decision")
+      : (locale === "zh-CN" ? "解锁这场比赛的 AI 决策" : "Unlock this match's AI decision");
   return (
     <article className={`match-ai-card ${scope ? "has-access" : "is-locked"}`}>
       <PanelHeading kicker="AI INTELLIGENCE" title={locale === "zh-CN" ? "AI 怎么看这场比赛" : "How AI sees this match"} aside={scope ? scopeLabel(scope, locale) : undefined} />
       {scope ? (
         loading ? <div className="match-ai-loading"><span /><span /><span /></div> : successful.length > 0 ? (
-          <div className="match-ai-decisions">
-            {successful.map((decision) => (
-              <div className="match-ai-decision" key={decision.id}>
-                <div><strong>{decision.provider}</strong><span>{decision.model}</span></div>
-                <b>{actionLabel(decision, match, locale)}</b>
-                <em>{confidenceText(decision.decision?.confidence)}</em>
-                <p>{decision.decision?.primary_reasons?.[0] || (locale === "zh-CN" ? "暂无可展示的主要理由" : "No primary reason available")}</p>
+          <PlayerAiDecisionStrip decisions={successful} embedded />
+        ) : <EmptyCardMessage text={locale === "zh-CN" ? "你的权限已生效，但这场比赛暂时还没有成功的 AI 判断。" : "Your access is active, but this match has no successful AI call yet."} />
+      ) : (
+        <div className={`match-ai-lock ${decisionGenerated ? "has-decision" : "is-pending"}`}>
+          <div className="match-ai-preview" aria-hidden="true">
+            <div className="match-ai-preview-head"><span /><i /><i /></div>
+            {[
+              "model-a",
+              "model-b",
+              "model-c"
+            ].map((key) => (
+              <div className="match-ai-preview-row" key={key}>
+                <span />
+                <div><b /><small /></div>
+                <i />
               </div>
             ))}
           </div>
-        ) : <EmptyCardMessage text={locale === "zh-CN" ? "你的权限已生效，但这场比赛暂时还没有成功的 AI 判断。" : "Your access is active, but this match has no successful AI call yet."} />
-      ) : (
-        <div className="match-ai-lock">
-          <span aria-hidden="true"><UiIcon name="lock" size={18} /></span>
-          <h3>{!authEnabled ? (locale === "zh-CN" ? "AI 权限当前不可用" : "AI access is unavailable") : !signedIn ? (locale === "zh-CN" ? "登录后查看 AI 判断" : "Sign in to view AI calls") : (locale === "zh-CN" ? "这场比赛的 AI 判断需要对应权限" : "AI calls for this match require access")}</h3>
-          <p>{locale === "zh-CN" ? "小组赛 AI 决策免费开放；付费阶段的 AI 决策需要对应赛事或系列赛 Pass。赛事、比分、Draft、Live 和市场信息继续公开。" : "Group-stage AI decisions are free; paid-stage AI decisions require the relevant Event or Series Pass. Event, score, Draft, live and market information remain public."}</p>
-          {authEnabled && (!signedIn ? <button className="product-btn product-btn-primary" type="button" onClick={onLogin}>{locale === "zh-CN" ? "登录" : "Sign in"}<span>→</span></button> : <a className="product-btn product-btn-primary" href={billingHref}>{locale === "zh-CN" ? "查看赛事 Pass" : "View competition pass"}<span>→</span></a>)}
+          <div className="match-ai-lock-content">
+            <span className="match-ai-lock-icon" aria-hidden="true"><UiIcon name="lock" size={18} /></span>
+            <span className={`match-ai-lock-status ${decisionGenerated ? "is-ready" : "is-pending"}`} role="status">
+              {decisionGenerated
+                ? (locale === "zh-CN" ? "AI 已产生决策方案" : "AI decision is ready")
+                : (locale === "zh-CN" ? "AI 尚未产生决策方案" : "AI decision is not ready yet")}
+            </span>
+            <h3>{accessHeading}</h3>
+            <p>{decisionGenerated
+              ? (locale === "zh-CN" ? "解锁后查看完整决策、置信度和分析理由。" : "Unlock to view the full decision, confidence, and reasoning.")
+              : (locale === "zh-CN" ? "决策生成后会显示在这里，解锁后可实时查看。" : "The decision will appear here once generated. Unlock to follow it in real time.")}</p>
+            {authEnabled && (!signedIn ? <button className="product-btn product-btn-primary" type="button" onClick={onLogin}>{locale === "zh-CN" ? "登录" : "Sign in"}<span>→</span></button> : <a className="product-btn product-btn-primary" href={billingHref}>{locale === "zh-CN" ? "查看赛事 Pass" : "View competition pass"}<span>→</span></a>)}
+          </div>
         </div>
       )}
       <p className="match-ai-disclaimer">{locale === "zh-CN" ? "AI 内容用于分析和 Shadow 验证，不代表真实下注执行或收益承诺。" : "AI content is for analysis and Shadow validation, not real betting execution or a promise of returns."}</p>
@@ -398,18 +430,6 @@ function scopeLabel(scope: Exclude<AiAccessScope, null>, locale: string): string
         : scope === "POSTMATCH"
           ? "赛后公开"
           : "本局权限";
-}
-
-function actionLabel(decision: AiDecision, match: MapSummary, locale: string): string {
-  const action = decision.decision?.action || "";
-  if (action === "BUY_A" || action === "BET_A") return match.team_a?.name || (locale === "zh-CN" ? "队伍 A" : "Team A");
-  if (action === "BUY_B" || action === "BET_B") return match.team_b?.name || (locale === "zh-CN" ? "队伍 B" : "Team B");
-  if (action === "NO_BUY" || action === "NO_BET" || action === "PASS") return locale === "zh-CN" ? "暂不行动" : "No action";
-  return action || (locale === "zh-CN" ? "判断完成" : "Decision ready");
-}
-
-function confidenceText(value: number | undefined): string {
-  return value == null ? "—" : `${Math.round(value * 100)}%`;
 }
 
 async function fetchMatchAi(id: string): Promise<MatchAiPayload> {

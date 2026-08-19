@@ -90,8 +90,6 @@ textarea {
 .product-root .match-market-fallback em,
 .product-root .match-panel-heading > em,
 .product-root .match-draft-slots i,
-.product-root .match-ai-decision > div span,
-.product-root .match-ai-decision > p,
 .product-root .match-ai-disclaimer,
 .product-root .player-intelligence-strip span,
 .product-root .section-kicker,
@@ -190,9 +188,6 @@ textarea {
 .product-root .match-draft-side h3,
 .product-root .match-draft-slots strong,
 .product-root .match-draft-slots small,
-.product-root .match-ai-decision > div strong,
-.product-root .match-ai-decision > b,
-.product-root .match-ai-decision > em,
 .product-root .match-ai-lock p,
 .product-root .match-empty-message,
 .product-root .match-identity-note p,
@@ -344,7 +339,6 @@ textarea {
 .product-root .event-team-name.is-large b,
 .product-root .event-series-teams .event-team-name b,
 .product-root .match-state-list strong,
-.product-root .match-ai-decision > div strong,
 .product-root .player-ai-action,
 .product-root .performance-model-name strong,
 .product-root .performance-metric strong {
@@ -363,11 +357,6 @@ textarea {
 
 .product-root .match-draft-slots > div:not(.match-empty-message) {
   min-height: 48px;
-}
-
-.product-root .match-ai-decision {
-  min-height: 66px;
-  padding-block: 11px;
 }
 
 .product-root .product-section-title h2,
@@ -468,23 +457,6 @@ textarea {
   font-size: 24px;
 }
 
-.product-root .match-ai-decision > div strong,
-.product-root .match-ai-decision > b {
-  font-size: var(--type-secondary);
-}
-
-.product-root .match-ai-decision > div span,
-.product-root .match-ai-decision > em {
-  font-size: var(--type-caption);
-}
-
-.product-root .match-ai-decision > p {
-  margin-top: 4px;
-  color: var(--text-secondary);
-  font-size: var(--type-secondary);
-  line-height: 1.65;
-}
-
 .product-root .rosh-direction-metric span,
 .product-root .rosh-direction-metric strong,
 .product-root .player-market-meta,
@@ -514,9 +486,6 @@ textarea {
     font-size: 17px;
   }
 
-  .product-root .match-ai-decision > p {
-    font-size: 14px;
-  }
 }
 
 @media (max-width: 430px) {
@@ -554,7 +523,4 @@ textarea {
     font-size: 10px;
   }
 
-  .product-root .match-ai-decision > p {
-    font-size: 13px;
-  }
 }
