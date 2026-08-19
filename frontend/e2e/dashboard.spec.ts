@@ -10,7 +10,7 @@ const runtime = {
   observed_at: now
 };
 
-const decision = { id: "d1", snapshot_id: "snapshot-1", provider: "openai", model: "gpt-5.6", model_version: "gpt-5.6", prompt_version: "v2", decision_policy_version: "shadow-v1", snapshot_hash: "fixture-hash", request_started_at: now, response_received_at: now, parse_status: "PARSED", latency_seconds: 0.8, decision: { action: "BUY_A", confidence: 0.66, fair_probability_a: 0.59, primary_reasons: ["Draft edge"], counter_arguments: ["Late crossover"], data_quality_concerns: [] }, error: null };
+const decision = { id: "d1", snapshot_id: "snapshot-1", provider: "openai", model: "gpt-5.6", model_version: "gpt-5.6", prompt_version: "v2", decision_policy_version: "shadow-v1", snapshot_hash: "fixture-hash", snapshot_decision_at: now, snapshot_mode: "POST_DRAFT", request_started_at: now, response_received_at: now, parse_status: "SUCCESS", latency_seconds: 0.8, decision: { action: "BUY_A", confidence: 0.66, fair_probability_a: 0.59, primary_reasons: ["Draft edge"], counter_arguments: ["Late crossover"], data_quality_concerns: [] }, error: null };
 
 const match = {
   entity_type: "MAP",
@@ -29,6 +29,7 @@ const match = {
   provider_observed_at: now,
   team_a: { id: "team-a", name: "Team Spirit" },
   team_b: { id: "team-b", name: "Tundra" },
+  side_identity: { status: "RESOLVED", radiant_team_id: "team-a", dire_team_id: "team-b", source: "DLTV_BOOTSTRAP", confidence: 1, observed_at: now },
   market: [
     { odds_id: 101, selection_team_id: "team-a", price: "1.86", fair_probability: 0.537, raw_status: 1, normalized_status: "UNKNOWN", metadata_version: "v1", market_type: "Winner", match_stage: "Map 2", received_at: now, age_seconds: 2 },
     { odds_id: 102, selection_team_id: "team-b", price: "2.04", fair_probability: 0.463, raw_status: 1, normalized_status: "UNKNOWN", metadata_version: "v1", market_type: "Winner", match_stage: "Map 2", received_at: now, age_seconds: 2 }
@@ -91,39 +92,37 @@ async function mockApi(page: Page, { entitled }: { entitled: boolean }) {
 
 test("keeps ordinary match data public while premium AI remains locked", async ({ page }) => {
   await mockApi(page, { entitled: false });
-  await page.goto("/match-console?e2e=public-match");
+  await page.goto(`/matches/${mapId}?e2e=public-match`);
 
   await expect(page.getByText("Team Spirit", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Tundra", { exact: true }).first()).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Live AI decisions" })).toBeVisible();
-  await expect(page.getByText(/AI analysis is ready/)).toBeVisible();
-  await expect(page.getByRole("button", { name: "Sign in for AI access" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "How AI sees this match" })).toBeVisible();
+  await expect(page.getByText("AI decision is ready", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sign in to view the full AI decision" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Sign in →", exact: true })).toBeVisible();
   await expect(page.getByText("BUY A", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "R.O.S.H. Draft Advantage" })).toBeVisible();
   await expect(page.getByText("Collapse", { exact: true })).toBeVisible();
 });
 
-test("renders player-first premium AI decision workspace for entitled users", async ({ page }) => {
+test("renders the current premium AI decision workspace for entitled users", async ({ page }) => {
   await mockApi(page, { entitled: true });
-  await page.goto("/match-console?e2e=player-first");
+  await page.goto(`/matches/${mapId}?e2e=entitled-match`);
 
   await expect(page.getByText("Team Spirit", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Tundra", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("Decision available with limitations", { exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Independent AI decisions" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "How AI sees this match" })).toBeVisible();
+  await expect(page.getByText("Global access", { exact: true })).toBeVisible();
+  await expect(page.getByText("GPT", { exact: true })).toBeVisible();
   await expect(page.getByText("BUY A", { exact: true }).last()).toBeVisible();
   await expect(page.getByRole("heading", { name: "R.O.S.H. Draft Advantage" })).toBeVisible();
-  await expect(page.getByText("Radiant advantage", { exact: true })).toBeVisible();
-  await expect(page.getByText("Radiant +3.2pp", { exact: true })).toBeVisible();
-  await expect(page.getByText("54m → Dire", { exact: true })).toBeVisible();
+  await expect(page.getByText("Team Spirit · Radiant advantage", { exact: true })).toBeVisible();
+  await expect(page.getByText("Team Spirit · Radiant +3.2pp", { exact: true })).toBeVisible();
+  await expect(page.getByText("54m → Tundra · Dire", { exact: true })).toBeVisible();
   await expect(page.getByText("Team Spirit advantage", { exact: true })).toHaveCount(0);
   await expect(page.getByText("DRAFT LINEUP", { exact: true })).toBeVisible();
   await expect(page.getByText("Collapse", { exact: true })).toBeVisible();
 
   const noOverflow = await page.evaluate(() => document.documentElement.scrollWidth === document.documentElement.clientWidth);
   expect(noOverflow).toBe(true);
-
-  await page.getByTitle("Open Engineering Diagnostics").click();
-  await expect(page.getByText("System Diagnostics & Engineering Audit", { exact: true })).toBeVisible();
-  await expect(page.getByText("SnapshotCoordinator", { exact: true })).toBeVisible();
 });

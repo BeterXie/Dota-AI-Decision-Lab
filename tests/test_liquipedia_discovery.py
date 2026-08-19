@@ -20,11 +20,9 @@ class FakeMediaWikiClient:
             revision_id=4242,
             source_url="https://liquipedia.net/dota2/Liquipedia:Tournaments",
             html="""
-            <span class="tournaments-list-heading">Upcoming</span>
-            <ul class="tournaments-list-type-list"><li>
-              <span class="tournaments-list-name">
-                <a href="/dota2/The_International/2026">The International 2026</a>
-              </span>
+            <ul><li>Upcoming
+              <ul><li>The_International/2026 | The International 2026 |
+                startdate=Aug 13 | enddate=Aug 23</li></ul>
             </li></ul>
             """,
             request_started_at=now,
@@ -55,5 +53,5 @@ async def test_discovery_persists_revision_source_transport_and_raw_html() -> No
         assert raw.payload["transport"] == "httpx"
         assert raw.payload["observation_count"] == 1
         assert "The_International/2026" in raw.payload["html"]
-        assert raw.parser_version == "liquipedia-mediawiki-v1"
+        assert raw.parser_version == "liquipedia-mediawiki-v2"
     await engine.dispose()

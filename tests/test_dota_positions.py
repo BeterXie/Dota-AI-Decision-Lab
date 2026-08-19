@@ -14,6 +14,8 @@ from app.identity.resolver import IdentityResolver
 from app.models import DomainEventRecord, DraftSlotRecord, DraftSnapshotRecord, ProviderRawEvent
 from app.providers.common import TimedPayload
 from app.providers.dltv.draft_picks import DltvProviderPick
+from app.providers.liquipedia.models import LiquipediaSeriesObservation
+from app.providers.liquipedia.projection import LiquipediaCanonicalProjector
 from app.repositories.raw import RawEventRepository
 
 
@@ -172,6 +174,30 @@ class _FixtureBootstrapClient:
         )
 
 
+async def _seed_liquipedia_series(session, payload: dict) -> None:
+    db = payload["db"]
+    scheduled_at = datetime.fromisoformat(db["series"]["started_at"].replace("Z", "+00:00"))
+    result = await LiquipediaCanonicalProjector().project_series(
+        session,
+        [
+            LiquipediaSeriesObservation(
+                team_a_name=db["first_team"]["title"],
+                team_a_page="Fixture/Dire_Sample",
+                team_b_name=db["second_team"]["title"],
+                team_b_page="Fixture/Radiant_Sample",
+                tournament_name="Fixture Event",
+                tournament_page="Fixture/Event",
+                stage="Group Stage",
+                best_of=3,
+                scheduled_at=scheduled_at,
+                state="UPCOMING",
+                provider_key=f"Match:fixture-{db['series']['id']}",
+            )
+        ],
+    )
+    assert result.series_created == 1
+
+
 @pytest.mark.asyncio
 async def test_bootstrap_positive_game_time_emits_one_map_started_event() -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
@@ -196,6 +222,7 @@ async def test_bootstrap_positive_game_time_emits_one_map_started_event() -> Non
     )
 
     async with factory() as session, session.begin():
+        await _seed_liquipedia_series(session, payload)
         first = await coordinator.bootstrap(session, valve_match_id=valve_match_id)
     ended_at = received_at + timedelta(minutes=45)
     async with factory() as session, session.begin():
@@ -243,6 +270,7 @@ async def _rebuild_fixture():
     )
     raw_events = RawEventRepository()
     async with factory() as session, session.begin():
+        await _seed_liquipedia_series(session, payload)
         session.add(
             ProviderRawEvent(
                 provider="dltv",
