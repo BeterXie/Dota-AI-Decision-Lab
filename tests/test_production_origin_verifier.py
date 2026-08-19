@@ -62,10 +62,7 @@ def test_production_origin_verifier_rejects_public_diagnostics() -> None:
         if url == "https://dotascope.com/":
             return httpx.Response(
                 200,
-                text=(
-                    '<link rel="canonical" href="https://dotascope.com/" />'
-                    "DotaScope"
-                ),
+                text=('<link rel="canonical" href="https://dotascope.com/" />DotaScope'),
             )
         if url == "https://dotascope.com/robots.txt":
             return httpx.Response(200, text="Sitemap: https://dotascope.com/sitemap.xml")
