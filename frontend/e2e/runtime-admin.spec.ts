@@ -381,7 +381,7 @@ test("secrets page replaces a missing key without ever rendering plaintext", asy
     page
       .getByRole("row")
       .filter({ hasText: "Gemini API Key" })
-      .getByText("已配置", { exact: true })
+      .getByText("运行可用", { exact: true })
   ).toBeVisible();
 });
 
