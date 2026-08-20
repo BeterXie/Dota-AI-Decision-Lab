@@ -69,6 +69,10 @@ class QQBotService:
     def client(self) -> QQBridgeClient:
         return self._client
 
+    async def create_share_link(self, callback_data: str) -> str:
+        """Create an official QQ share link for a user-scoped pairing code."""
+        return await self._client.create_share_link(callback_data)
+
     @property
     def store(self) -> QQBotStore:
         return self._store
@@ -170,11 +174,23 @@ class QQBotService:
                 try:
                     cursor = self._store.cursor(account.app_id)
                     batch = await self._client.events(cursor)
-                    if batch.cursor > cursor:
-                        self._store.save_cursor(account.app_id, batch.cursor)
+                    if batch.cursor < cursor:
+                        # The bridge buffer is in-memory and may have restarted
+                        # since the last poll. Re-read from its new origin so a
+                        # newly invited user's FRIEND_ADD event is not skipped.
+                        logger.info(
+                            "qq_bridge_cursor_reset",
+                            account_id=account.app_id,
+                            previous_cursor=cursor,
+                            bridge_cursor=batch.cursor,
+                        )
+                        cursor = 0
+                        batch = await self._client.events(cursor)
                     async with self._session_factory() as session, session.begin():
                         for message in batch.events:
                             await self._handle_message(session, message)
+                    if batch.cursor >= cursor:
+                        self._store.save_cursor(account.app_id, batch.cursor)
                     await self._update_health(
                         "READY",
                         messages=len(batch.events),

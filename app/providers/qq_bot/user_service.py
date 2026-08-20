@@ -31,6 +31,8 @@ class UserScopedQQBotService(LegacyQQBotService):
         self._pairing_attempts = PairingAttemptLimiter()
 
     async def prepare_decision_notification(self, session, *, snapshot, decisions) -> None:
+        if not self._notifications_enabled():
+            return
         reason = await self._decision_notification_block_reason(session, snapshot)
         if reason is not None:
             return
@@ -60,6 +62,8 @@ class UserScopedQQBotService(LegacyQQBotService):
         )
 
     async def send_decision_notification(self, *, snapshot, decisions) -> int:
+        if not self._notifications_enabled():
+            return 0
         decision_ids = [item.id for item in decisions]
         delivery_ids = await self._notification_center.batch_delivery_ids(
             channel=CHANNEL_QQ,
@@ -152,11 +156,19 @@ class UserScopedQQBotService(LegacyQQBotService):
         return tuple(merged.values())
 
     async def _handle_message(self, session, message: QQInboundMessage) -> None:
-        if not message.text.strip() or not message.sender_id or not self._message_allowed(message):
+        if (not message.text.strip() and not message.scene_param) or not message.sender_id:
+            return
+        pairing_code = (
+            message.scene_param
+            if message.event_type == "FRIEND_ADD" and message.scene_param
+            else _pairing_code_from_text(message.text)
+        )
+        # A valid one-time pairing code is the authorization boundary, so an
+        # allowlist of existing C2C users must not block a newly invited user.
+        if pairing_code is None and not self._message_allowed(message):
             return
         normalized = message.text.strip().casefold()
         destination_key = qq_destination_key(message.scope, message.target_id)
-        pairing_code = _pairing_code_from_text(message.text)
         preference_command = (
             normalized in _SUBSCRIBE_COMMANDS
             or normalized in _UNSUBSCRIBE_COMMANDS
@@ -212,6 +224,17 @@ class UserScopedQQBotService(LegacyQQBotService):
                 target_id=message.target_id,
                 text=reply,
                 msg_id=message.message_id,
+            )
+            return
+
+        if message.event_type == "FRIEND_ADD":
+            await self._client.send_text(
+                scope="c2c",
+                target_id=message.target_id,
+                text=(
+                    "👋 已添加 Dota AI Decision Lab。请在网页 Notification Center "
+                    "生成 QQ 配对码后，再发送「绑定 <配对码>」完成通知绑定。"
+                ),
             )
             return
 
@@ -280,6 +303,10 @@ class UserScopedQQBotService(LegacyQQBotService):
             )
             return
         await super()._handle_message(session, message)
+
+    def _notifications_enabled(self) -> bool:
+        getter = getattr(self._store, "decision_notifications_enabled", None)
+        return bool(getter()) if callable(getter) else True
 
 
 def _pairing_code_from_text(text: str) -> str | None:

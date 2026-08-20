@@ -34,6 +34,14 @@ export interface PairingCode {
   code: string;
   command: string;
   expires_at: string;
+  share_url?: string | null;
+  contact_url?: string | null;
+  pairing_mode?:
+    | "QQ_SHARE_LINK"
+    | "QQ_CONTACT_LINK"
+    | "WECHAT_CONTACT_LINK"
+    | "MANUAL_MESSAGE"
+    | string;
 }
 
 export async function fetchNotificationCenter(): Promise<NotificationCenterState> {

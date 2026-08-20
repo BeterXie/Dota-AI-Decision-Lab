@@ -74,29 +74,36 @@ silent. The message uses the immutable snapshot's match, odds, live, draft, hist
 quality data. Resend requests use a persistent notification ID as the idempotency key so
 job retries and runtime restarts do not produce duplicate messages.
 
-The runtime can also push the same side-change decisions to your personal WeChat through the
-official WeChat ClawBot channel **without running OpenClaw**. It speaks Tencent's iLink bot
-HTTP API directly (`https://ilinkai.weixin.qq.com`), the same protocol used by the official
+The runtime can also push the same side-change decisions through the official WeChat ClawBot
+channel **without running OpenClaw**. It speaks Tencent's iLink bot HTTP API directly
+(`https://ilinkai.weixin.qq.com`), the same protocol used by the official
 `@tencent-weixin/openclaw-weixin` plugin. Enable it with `WECHAT_CLAWBOT_ENABLED=true`, then
-bind your WeChat once:
+let an administrator bind the shared bot account once:
 
 ```powershell
 .\.venv\Scripts\python.exe tools\wechat_clawbot.py login   # scan the QR code with WeChat
 .\.venv\Scripts\python.exe tools\wechat_clawbot.py status
 .\.venv\Scripts\python.exe tools\wechat_clawbot.py send "test"
+# Optional: target one known contact instead of every stored direct chat.
+.\.venv\Scripts\python.exe tools\wechat_clawbot.py send "test" --user-id <wechat-user-id>
 ```
 
-Credentials are stored under `WECHAT_CLAWBOT_STATE_DIR` (default `.runtime/wechat-clawbot`,
-gitignored). The inbound worker accepts `当前比赛`, `当前比赛赔率`, `为什么买 <队伍>`, `暂停通知` /
-`恢复通知` in the direct chat. Official support is one-to-one direct chat only; WeChat
-group posting is not part of the official ClawBot channel yet.
+Credentials and per-user context tokens are stored under `WECHAT_CLAWBOT_STATE_DIR` (default
+`.runtime/wechat-clawbot`, gitignored). The QR scanner authenticates the bot, not a notification recipient. Every ordinary
+user starts a separate direct chat, generates a pairing code in Notification Center, and sends
+`绑定 <code>` to the same bot. Each `from_user_id` and `context_token` is stored independently,
+so one bot can serve multiple users without sharing the administrator session. Set
+`WECHAT_CLAWBOT_CONTACT_URL` when users need a public contact/deep link. The inbound worker
+accepts `当前比赛`, `当前比赛赔率`, `为什么买 <队伍>`, `暂停通知` / `恢复通知` after that chat is
+bound. Official support is one-to-one direct chat only; WeChat group posting is not part of the
+official ClawBot channel yet.
 
 The same AI decision push and command surface is available through the QQ Bot installed by
 the harness profile. The runtime starts a supervised Node bridge that loads
 `@tencent-connect/qqbot-nodejs` from `~/.dsh/profiles/qqbot/node_modules` (or from
 `QQ_BOT_SDK_ROOT` / a local `qqbot_bridge` install) and connects the official QQ open
-platform WebSocket gateway. Enable it with `QQ_BOT_ENABLED=true`, then bind your robot
-once with the harness QR connector:
+platform WebSocket gateway. Enable it with `QQ_BOT_ENABLED=true`, then let an administrator
+bind the robot once with the harness QR connector:
 
 ```powershell
 .\.venv\Scripts\python.exe -m tools.qq_bot login   # scan the QR code with phone QQ
@@ -106,13 +113,17 @@ once with the harness QR connector:
 ```
 
 Binding credentials live under `QQ_BOT_STATE_DIR` (default `.runtime/qq-bot`, gitignored).
-Private-chat users are auto-subscribed to decision pushes on their first message. Groups are
-subscribed by sending `订阅通知` (and can `退订通知`); explicit always-on targets can be
-configured with `QQ_BOT_DECISION_TARGETS=c2c:<openid>,group:<group_openid>`. Inbound
-commands are `比赛` / `当前比赛`, `赔率` / `当前比赛赔率`, `为什么买 <队伍>`, `暂停通知` /
-`恢复通知`, and `帮助`. Groups only trigger the bot when it is `@` mentioned by default
+Each QQ user opens the shared bot through the Notification Center's official share link (or
+the configured `QQ_BOT_CONTACT_URL` fallback), then completes a one-time `绑定 <code>` command
+in their own C2C chat. The share link embeds the pairing code in the official `FRIEND_ADD`
+callback; the administrator never scans again. Groups are subscribed by sending `订阅通知` (and
+can `退订通知`); explicit always-on targets can be configured with
+`QQ_BOT_DECISION_TARGETS=c2c:<openid>,group:<group_openid>`. Inbound commands are `比赛` /
+`当前比赛`, `赔率` / `当前比赛赔率`, `为什么买 <队伍>`, `暂停通知` / `恢复通知`, and `帮助`.
+Groups only trigger the bot when it is `@` mentioned by default
 (`QQ_BOT_GROUP_REQUIRE_MENTION=true`); optional `QQ_BOT_ALLOWED_C2C` / `QQ_BOT_ALLOWED_GROUPS`
-allowlists restrict who may query the bot. If this machine does not have the harness
+allowlists restrict ordinary queries (the one-time `绑定 <code>` handshake is still passed
+through for Python-side verification). If this machine does not have the harness
 profile, install the two Tencent packages locally with
 `npm install --prefix qqbot_bridge`.
 

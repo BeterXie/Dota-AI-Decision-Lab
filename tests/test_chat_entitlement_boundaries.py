@@ -26,10 +26,11 @@ from app.web import create_app
 class _ChatCenter:
     def __init__(self, user_id: UUID | None) -> None:
         self.user_id = user_id
+        self.users_by_destination: dict[str, UUID] = {}
         self.preference_calls: list[tuple[str, str, bool]] = []
 
     async def bound_active_user_id(self, *, channel: str, destination_key: str) -> UUID | None:
-        return self.user_id
+        return self.users_by_destination.get(destination_key, self.user_id)
 
     async def set_preference_for_destination(
         self,
@@ -39,7 +40,7 @@ class _ChatCenter:
         enabled: bool,
     ) -> bool:
         self.preference_calls.append((channel, destination_key, enabled))
-        return self.user_id is not None
+        return destination_key in self.users_by_destination or self.user_id is not None
 
 
 class _Entitlements:
@@ -251,13 +252,12 @@ async def test_wechat_ai_query_and_pause_use_bound_account_state(monkeypatch) ->
 
     monkeypatch.setattr(wechat_user_service, "command_reply", premium_reply)
     await service._handle_message(object(), account, _wechat_message("为什么买 OG"))
-    assert "需要先绑定登录账号" in client.sent[-1]["text"]
+    assert "尚未绑定登录账号" in client.sent[-1]["text"]
     assert called is False
 
     user_id = uuid4()
     center.user_id = user_id
     entitlements.allowed = True
-    account.user_id = "wechat-user"
     await service._handle_message(object(), account, _wechat_message("为什么买 OG"))
     assert client.sent[-1]["text"] == "wechat-premium"
     assert entitlements.calls[-1] == (user_id, AI_DECISIONS_ENTITLEMENT)
@@ -268,7 +268,7 @@ async def test_wechat_ai_query_and_pause_use_bound_account_state(monkeypatch) ->
 
 
 @pytest.mark.asyncio
-async def test_wechat_pairing_binds_account_and_rejects_other_sender(monkeypatch) -> None:
+async def test_wechat_pairing_binds_each_direct_sender_independently(monkeypatch) -> None:
     client = _WeChatClient()
     account = WeChatAccount(
         account_id="bot-account",
@@ -279,16 +279,45 @@ async def test_wechat_pairing_binds_account_and_rejects_other_sender(monkeypatch
 
     class _Store:
         def __init__(self) -> None:
-            self.saved: list[WeChatAccount] = []
+            self.saved: list[tuple[str, str, str | None]] = []
 
-        def save_account(self, value: WeChatAccount) -> None:
-            self.saved.append(value)
+        def save_contact(
+            self,
+            account_id: str,
+            user_id: str,
+            *,
+            context_token: str | None = None,
+        ) -> None:
+            self.saved.append((account_id, user_id, context_token))
+
+        def context_token(self, account_id: str, user_id: str) -> str | None:
+            for saved_account_id, saved_user_id, token in reversed(self.saved):
+                if saved_account_id == account_id and saved_user_id == user_id:
+                    return token
+            return None
 
     store = _Store()
 
     class _Center:
+        def __init__(self) -> None:
+            self.bound: dict[str, UUID] = {}
+
         async def consume_pairing_code(self, **kwargs):
+            destination = kwargs["destination"]
+            self.bound[destination["user_id"]] = uuid4()
             return object()
+
+        async def bound_active_user_id(self, *, channel: str, destination_key: str) -> UUID | None:
+            return self.bound.get(destination_key.split(":", 1)[-1])
+
+        async def set_preference_for_destination(
+            self,
+            *,
+            channel: str,
+            destination_key: str,
+            enabled: bool,
+        ) -> bool:
+            return destination_key.split(":", 1)[-1] in self.bound
 
     service = wechat_user_service.UserScopedWeChatClawBotService(
         client=client,
@@ -297,19 +326,17 @@ async def test_wechat_pairing_binds_account_and_rejects_other_sender(monkeypatch
         jobs=object(),
     )
     service._notification_center = _Center()
-    monkeypatch.setattr(wechat_user_service, "_pairing_code_from_text", lambda _: "PAIR")
-
     await service._handle_message(object(), account, _wechat_message("绑定 PAIR"))
 
-    assert store.saved and store.saved[-1].user_id == "wechat-user"
+    assert store.saved and store.saved[-1][1] == "wechat-user"
     assert "已绑定" in client.sent[-1]["text"]
 
-    bound = store.saved[-1]
     sent_before = len(client.sent)
     for text in ("当前比赛", "订阅通知"):
         foreign = _wechat_message(text).model_copy(update={"from_user_id": "other-user"})
-        await service._handle_message(object(), bound, foreign)
-    assert len(client.sent) == sent_before
+        await service._handle_message(object(), account, foreign)
+    assert len(client.sent) == sent_before + 2
+    assert {item[1] for item in store.saved} == {"wechat-user", "other-user"}
 
 
 @pytest.mark.asyncio

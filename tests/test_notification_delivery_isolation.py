@@ -106,12 +106,20 @@ async def test_wechat_failed_recipient_does_not_block_later_recipient(monkeypatc
     class Client:
         async def send_text(self, account, *, to_user_id: str, **kwargs) -> str:
             attempted.append(to_user_id)
+            contexts[to_user_id] = kwargs.get("context_token")
             if to_user_id == "bad-user":
                 raise RuntimeError("simulated WeChat failure")
             return "wechat-message"
 
-    account = SimpleNamespace(account_id="bot-account", context_token="context")
-    store = SimpleNamespace(accounts=lambda: [account])
+    contexts: dict[str, str | None] = {}
+    account = SimpleNamespace(account_id="bot-account", user_id=None, context_token=None)
+    store = SimpleNamespace(
+        accounts=lambda: [account],
+        context_token=lambda account_id, user_id: {
+            "bad-user": "ctx-bad",
+            "good-user": "ctx-good",
+        }.get(user_id),
+    )
     bad = _target("WECHAT", {"account_id": "bot-account", "user_id": "bad-user"})
     good = _target("WECHAT", {"account_id": "bot-account", "user_id": "good-user"})
     center = _DeliveryCenter({bad.delivery_id: bad, good.delivery_id: good})
@@ -136,5 +144,6 @@ async def test_wechat_failed_recipient_does_not_block_later_recipient(monkeypatc
         await service.send_decision_notification(snapshot=snapshot, decisions=decisions)
 
     assert attempted == ["bad-user", "good-user"]
+    assert contexts == {"bad-user": "ctx-bad", "good-user": "ctx-good"}
     assert center.failed == [bad.delivery_id]
     assert center.sent == [good.delivery_id]

@@ -6,7 +6,7 @@ from pathlib import Path
 import structlog
 
 from app.providers.local_state import LocalStateStore
-from app.providers.wechat_clawbot.models import WeChatAccount
+from app.providers.wechat_clawbot.models import WeChatAccount, WeChatContact
 
 logger = structlog.get_logger()
 
@@ -24,12 +24,14 @@ class WeChatClawBotStore(LocalStateStore):
     def __init__(self, root: str | Path) -> None:
         super().__init__(root)
         self._accounts_path = self._root / "accounts.json"
+        self._contacts_path = self._root / "contacts.json"
         self._preferences_path = self._root / "preferences.json"
         self._cursor_dir = self._root / "cursors"
         self._ensure_private_directory(self._cursor_dir, force=True)
         # Existing plaintext stores from before the permission hardening still
         # need to be locked down once at startup, not only on next write.
         self._restrict_file_permissions(self._accounts_path)
+        self._restrict_file_permissions(self._contacts_path)
         self._restrict_file_permissions(self._preferences_path)
         for path in self._cursor_dir.glob("*.json"):
             self._restrict_file_permissions(path)
@@ -72,6 +74,84 @@ class WeChatClawBotStore(LocalStateStore):
                     path.unlink()
             except Exception as exc:
                 logger.warning("wechat_clawbot_cursor_cleanup_failed", error=str(exc))
+        self.write_json(
+            self._contacts_path,
+            [
+                item.model_dump(mode="json")
+                for item in self.contacts()
+                if item.account_id != account_id
+            ],
+        )
+
+    def contacts(self) -> list[WeChatContact]:
+        result = []
+        for raw in self.read_json_list(self._contacts_path):
+            try:
+                result.append(WeChatContact.model_validate(raw))
+            except Exception as exc:
+                logger.warning("wechat_clawbot_invalid_contact_state", error=str(exc))
+        # Preserve the single-peer state written by older releases. It is
+        # treated as a legacy contact, not as an account-wide access control.
+        known = {(item.account_id, item.user_id) for item in result}
+        now = datetime.now(UTC)
+        for account in self.accounts():
+            if account.user_id and (account.account_id, account.user_id) not in known:
+                result.append(
+                    WeChatContact(
+                        account_id=account.account_id,
+                        user_id=account.user_id,
+                        context_token=account.context_token,
+                        first_seen_at=account.created_at,
+                        last_seen_at=now,
+                    )
+                )
+        return result
+
+    def contacts_for_account(self, account_id: str) -> list[WeChatContact]:
+        return [item for item in self.contacts() if item.account_id == account_id]
+
+    def contact(self, account_id: str, user_id: str) -> WeChatContact | None:
+        return next(
+            (
+                item
+                for item in self.contacts()
+                if item.account_id == account_id and item.user_id == user_id
+            ),
+            None,
+        )
+
+    def context_token(self, account_id: str, user_id: str) -> str | None:
+        contact = self.contact(account_id, user_id)
+        return contact.context_token if contact is not None else None
+
+    def save_contact(
+        self,
+        account_id: str,
+        user_id: str,
+        *,
+        context_token: str | None = None,
+        seen_at: datetime | None = None,
+    ) -> WeChatContact:
+        now = seen_at or datetime.now(UTC)
+        existing = self.contact(account_id, user_id)
+        contact = WeChatContact(
+            account_id=account_id,
+            user_id=user_id,
+            context_token=(context_token or (existing.context_token if existing else None)),
+            first_seen_at=existing.first_seen_at if existing else now,
+            last_seen_at=now,
+        )
+        rows = {
+            (item.account_id, item.user_id): item
+            for item in self.contacts()
+            if not (item.account_id == account_id and item.user_id == user_id)
+        }
+        rows[(account_id, user_id)] = contact
+        self.write_json(
+            self._contacts_path,
+            [item.model_dump(mode="json") for item in rows.values()],
+        )
+        return contact
 
     def cursor(self, account_id: str) -> str:
         path = self._cursor_path(account_id)

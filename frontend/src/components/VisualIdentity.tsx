@@ -2,7 +2,9 @@ import React from "react";
 import {
   Calendar,
   Checkmark,
+  Copy,
   Group,
+  Launch,
   Layers,
   Language,
   Locked,
@@ -36,7 +38,9 @@ type IconName =
   | "calendar"
   | "check"
   | "clock"
+  | "copy"
   | "layers"
+  | "launch"
   | "language"
   | "lock"
   | "logout"
@@ -146,7 +150,9 @@ export const UiIcon: React.FC<{ name: IconName; size?: number }> = ({ name, size
   if (name === "calendar") return <Calendar {...props} />;
   if (name === "check") return <Checkmark {...props} />;
   if (name === "clock") return <Time {...props} />;
+  if (name === "copy") return <Copy {...props} />;
   if (name === "layers") return <Layers {...props} />;
+  if (name === "launch") return <Launch {...props} />;
   if (name === "language") return <Language {...props} />;
   if (name === "lock") return <Locked {...props} />;
   if (name === "logout") return <Logout {...props} />;

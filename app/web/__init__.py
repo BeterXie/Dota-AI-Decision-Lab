@@ -1,3 +1,4 @@
+from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 import structlog
@@ -53,6 +54,9 @@ def create_app(
     development_grant_emails: tuple[str, ...] = (),
     settings: Settings | None = None,
     promotion_settings: PromotionSettings | None = None,
+    qq_pairing_link_factory: Callable[[str], Awaitable[str]] | None = None,
+    qq_contact_url: str | None = None,
+    wechat_contact_url: str | None = None,
 ) -> FastAPI:
     runtime_settings = settings or get_settings()
     if auth_enabled is None:
@@ -127,7 +131,14 @@ def create_app(
         )
     )
     app.include_router(create_access_router(session_factory, entitlement_service))
-    app.include_router(create_notification_router(session_factory))
+    app.include_router(
+        create_notification_router(
+            session_factory,
+            qq_pairing_link_factory=qq_pairing_link_factory,
+            qq_contact_url=qq_contact_url,
+            wechat_contact_url=wechat_contact_url,
+        )
+    )
     app.include_router(create_promotion_router(promotion_service))
     app.include_router(create_quality_router(session_factory))
     app.include_router(create_runtime_admin_router(runtime_config, runtime_policy))

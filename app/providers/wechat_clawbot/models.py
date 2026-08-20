@@ -32,6 +32,18 @@ class WeChatAccount(BaseModel):
     created_at: datetime
 
 
+class WeChatContact(BaseModel):
+    """A direct-chat peer on a shared WeChat ClawBot account."""
+
+    model_config = ConfigDict(frozen=True)
+
+    account_id: str
+    user_id: str
+    context_token: str | None = None
+    first_seen_at: datetime
+    last_seen_at: datetime
+
+
 class WeChatInboundMessage(BaseModel):
     model_config = ConfigDict(frozen=True)
 

@@ -655,7 +655,10 @@ QR 登录确认后的 `bot_token`、服务端 `baseurl` 与长轮询游标只持
 决策推送与邮件共用同一个“下注换边才通知”触发点，经 SEND_WECHAT_DECISION durable job 投递；
 入站只处理 direct chat（官方通道当前不承诺群聊自动发言）；
 入站命令只允许读取/开关操作：当前比赛、为什么买、暂停通知、恢复通知；
-未绑定账号时 readiness 上报 ACTION_REQUIRED，并提示运行 tools/wechat_clawbot.py login。
+管理员只通过 tools/wechat_clawbot.py login 扫码一次，QR 登录的 ilink_user_id 不作为收件人；
+每个 direct-chat sender 以 (account_id, user_id) 独立保存 context_token，普通用户必须用
+Notification Center 一次性配对码完成自己的绑定；同一个 bot account 可服务多个用户；
+未绑定 bot account 时 readiness 上报 ACTION_REQUIRED，并提示运行 tools/wechat_clawbot.py login。
 ```
 
 ### 5.1B QQ Bot Direct Channel
@@ -672,7 +675,9 @@ HTTP 提供 `/health`、`/events`、`/send`；Python service 长轮询入站事�
 
 ```text
 决策推送与邮件共用同一个“下注换边才通知”触发点，经 SEND_QQ_DECISION durable job 投递；
-私聊用户在首次消息后自动订阅决策推送；群聊通过“订阅通知”订阅、“退订通知”退订；
+管理员只通过 tools/qq_bot login 扫码一次；每个 QQ 用户在自己的 C2C 会话中通过
+官方 share link/FRIEND_ADD callback 或一次性“绑定 <code>”完成 Notification Center 绑定；
+同一个 QQ Bot 可服务多个 C2C 用户，群聊仍通过“订阅通知”订阅、“退订通知”退订；
 QQ_BOT_DECISION_TARGETS 中的 c2c:<openid> / group:<group_openid> 始终作为显式推送目标；
 群聊默认只在 @机器人 时响应（QQ_BOT_GROUP_REQUIRE_MENTION=true）；
 入站命令只允许读取/开关操作：比赛、赔率、为什么买、暂停通知、恢复通知、订阅通知、退订通知；
@@ -4819,7 +4824,9 @@ docs/ARCHITECTURE.md -> WHAT TO BUILD
 ## Pre-release Runtime Safety and Recovery
 
 - SPA static serving is containment-checked after path resolution; request paths and symlinks may never escape `frontend/dist`.
-- WeChat direct-chat commands are authorized to the account's bound `user_id`; server-directed iLink endpoints must stay inside the configured trust domain.
+- WeChat direct-chat commands are authorized by the active Notification Center binding for the
+  `(account_id, user_id)` destination; each contact's context token is isolated, and
+  server-directed iLink endpoints must stay inside the configured trust domain.
 - Future-odds `MISSING` is retryable evidence state, not a tombstone. MAP closing capture is anchored to `MAP_ENDED` (or result first-usable fallback during reconciliation), never `MAP_STARTED`, and late retry generations are bounded to the live recovery window.
 - Reconciliation may explicitly reopen `FAILED_TERMINAL` jobs for the same semantic intent while preserving `JobAttemptRecord` history. AI terminal recovery is limited to the exact current experiment key and must not become implicit historical replay.
 - Broadcast-clock and real-time checkpoint sources share one `(canonical_map_id, minute)` dedupe identity.

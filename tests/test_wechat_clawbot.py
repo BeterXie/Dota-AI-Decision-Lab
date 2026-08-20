@@ -31,13 +31,17 @@ from app.providers.chat_commands import (
     render_decision_notification,
 )
 from app.providers.wechat_clawbot.client import WeChatClawBotClient
-from app.providers.wechat_clawbot.models import WeChatAccount, WeChatInboundMessage
+from app.providers.wechat_clawbot.models import (
+    WeChatAccount,
+    WeChatInboundMessage,
+    WeChatUpdateBatch,
+)
 from app.providers.wechat_clawbot.service import WeChatClawBotService
 from app.providers.wechat_clawbot.storage import WeChatClawBotStore
 from app.snapshots.repository import SnapshotRepository
 
 
-def _account(tmp_path: Path, *, user_id: str = "wechat-user-1") -> WeChatAccount:
+def _account(tmp_path: Path, *, user_id: str | None = "wechat-user-1") -> WeChatAccount:
     return WeChatAccount(
         account_id="bot-1@im.bot",
         token="bot-token",
@@ -122,14 +126,23 @@ async def test_client_get_updates_parses_text_and_cursor() -> None:
     await client.close()
 
 
-def test_store_persists_account_cursor_and_preferences(tmp_path: Path) -> None:
+def test_store_persists_account_cursor_preferences_and_multiple_contacts(tmp_path: Path) -> None:
     store = WeChatClawBotStore(tmp_path)
-    account = _account(tmp_path)
+    account = _account(tmp_path, user_id=None)
 
     store.save_account(account)
     assert store.account_count() == 1
     assert store.accounts()[0].token == "bot-token"
     assert store.cursor(account.account_id) == ""
+
+    store.save_contact(account.account_id, "wechat-user-a", context_token="ctx-a")
+    store.save_contact(account.account_id, "wechat-user-b", context_token="ctx-b")
+    assert {item.user_id for item in store.contacts_for_account(account.account_id)} == {
+        "wechat-user-a",
+        "wechat-user-b",
+    }
+    assert store.context_token(account.account_id, "wechat-user-a") == "ctx-a"
+    assert store.context_token(account.account_id, "wechat-user-b") == "ctx-b"
 
     store.save_cursor(account.account_id, "cursor-1")
     assert store.cursor(account.account_id) == "cursor-1"
@@ -140,6 +153,59 @@ def test_store_persists_account_cursor_and_preferences(tmp_path: Path) -> None:
     store.remove_account(account.account_id)
     assert store.account_count() == 0
     assert store.cursor(account.account_id) == ""
+
+
+@pytest.mark.asyncio
+async def test_service_does_not_advance_cursor_when_message_handling_fails(tmp_path: Path) -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    store = WeChatClawBotStore(tmp_path)
+    account = _account(tmp_path, user_id=None)
+    store.save_account(account)
+    store.save_cursor(account.account_id, "cursor-before")
+
+    class Client:
+        def __init__(self) -> None:
+            self.calls = 0
+
+        async def get_updates(self, _account, cursor: str) -> WeChatUpdateBatch:
+            self.calls += 1
+            assert cursor == "cursor-before"
+            service._stop.set()
+            return WeChatUpdateBatch(
+                messages=(
+                    WeChatInboundMessage(
+                        message_type=1,
+                        from_user_id="wechat-user",
+                        text="绑定 ABCD-1234",
+                    ),
+                ),
+                cursor="cursor-after",
+            )
+
+        async def close(self) -> None:
+            return None
+
+    client = Client()
+    service = WeChatClawBotService(
+        client=client,
+        store=store,
+        session_factory=factory,
+        jobs=JobRepository(),
+    )
+
+    async def fail(*_args) -> None:
+        raise RuntimeError("temporary inbound failure")
+
+    service._handle_message = fail  # type: ignore[method-assign]
+    await service.run_inbound()
+
+    assert client.calls == 1
+    assert store.cursor(account.account_id) == "cursor-before"
+    await service.stop()
+    await engine.dispose()
 
 
 @pytest.mark.asyncio
@@ -233,10 +299,12 @@ async def test_service_prepare_notification_is_idempotent(tmp_path: Path) -> Non
 @pytest.mark.asyncio
 async def test_service_renders_and_sends_decision_notification(tmp_path: Path) -> None:
     store = WeChatClawBotStore(tmp_path)
-    account = _account(tmp_path)
+    account = _account(tmp_path, user_id=None)
     store.save_account(account)
+    store.save_contact(account.account_id, "wechat-user-a", context_token="ctx-a")
+    store.save_contact(account.account_id, "wechat-user-b", context_token="ctx-b")
 
-    sent: list[tuple[str, str]] = []
+    sent: list[tuple[str, str, str | None, str | None]] = []
 
     class RecordingClient:
         async def send_text(
@@ -250,7 +318,7 @@ async def test_service_renders_and_sends_decision_notification(tmp_path: Path) -
             idempotency_key: str | None = None,
         ) -> str:
 
-            sent.append((to_user_id, text))
+            sent.append((to_user_id, text, context_token, idempotency_key))
             return "client-id"
 
         async def close(self) -> None:
@@ -311,8 +379,10 @@ async def test_service_renders_and_sends_decision_notification(tmp_path: Path) -
             parse_status="SUCCESS",
         )
         count = await service.send_decision_notification(snapshot=snapshot, decisions=[decision])
-        assert count == 1
-        assert sent[0][0] == "wechat-user-1"
+        assert count == 2
+        assert {item[0] for item in sent} == {"wechat-user-a", "wechat-user-b"}
+        assert {item[2] for item in sent} == {"ctx-a", "ctx-b"}
+        assert all(item[3] and item[0] in item[3] for item in sent)
         assert "OG" in sent[0][1]
         assert "支持 HULIGANI" in sent[0][1]
         # assert "AI胜率: 65.0%" in sent[0][1]
@@ -675,7 +745,7 @@ async def test_command_routes_odds_before_matches_and_help_lists_it(tmp_path: Pa
 
 
 @pytest.mark.asyncio
-async def test_bound_wechat_account_ignores_unrelated_sender(tmp_path: Path) -> None:
+async def test_wechat_account_accepts_multiple_direct_contacts(tmp_path: Path) -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
@@ -687,7 +757,7 @@ async def test_bound_wechat_account_ignores_unrelated_sender(tmp_path: Path) -> 
         return httpx.Response(200, json={"ret": 0})
 
     store = WeChatClawBotStore(tmp_path)
-    account = _account(tmp_path, user_id="owner-user")
+    account = _account(tmp_path, user_id=None)
     store.save_account(account)
     client = WeChatClawBotClient(
         client=httpx.AsyncClient(
@@ -705,10 +775,18 @@ async def test_bound_wechat_account_ignores_unrelated_sender(tmp_path: Path) -> 
         await service._handle_message(
             session,
             account,
-            WeChatInboundMessage(from_user_id="attacker-user", text="暂停通知"),
+            WeChatInboundMessage(from_user_id="user-a", text="当前比赛"),
         )
-    assert store.decision_notifications_enabled() is True
-    assert sent == []
+        await service._handle_message(
+            session,
+            account,
+            WeChatInboundMessage(from_user_id="user-b", text="当前比赛"),
+        )
+    assert {item.user_id for item in store.contacts_for_account(account.account_id)} == {
+        "user-a",
+        "user-b",
+    }
+    assert len(sent) == 2
     await client.close()
     await engine.dispose()
 

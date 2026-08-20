@@ -1,6 +1,7 @@
 import React, { useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useI18n } from "../i18n";
+import { UiIcon } from "./VisualIdentity";
 import {
   bindVerifiedEmail,
   createPairingCode,
@@ -21,6 +22,7 @@ export function NotificationCenterPage({ userEmail }: { userEmail: string | null
   const { locale } = useI18n();
   const queryClient = useQueryClient();
   const [pairing, setPairing] = useState<Partial<Record<"QQ" | "WECHAT", PairingCode>>>({});
+  const [copiedChannel, setCopiedChannel] = useState<"QQ" | "WECHAT" | null>(null);
   const center = useQuery({
     queryKey: centerKey,
     queryFn: fetchNotificationCenter,
@@ -43,6 +45,17 @@ export function NotificationCenterPage({ userEmail }: { userEmail: string | null
     mutationFn: (channel: "QQ" | "WECHAT") => createPairingCode(channel),
     onSuccess: (data) => setPairing((current) => ({ ...current, [data.channel]: data }))
   });
+
+  const copyCommand = async (value: PairingCode) => {
+    try {
+      if (!navigator.clipboard) throw new Error("clipboard unavailable");
+      await navigator.clipboard.writeText(value.command);
+      setCopiedChannel(value.channel);
+      window.setTimeout(() => setCopiedChannel((current) => current === value.channel ? null : current), 1800);
+    } catch {
+      setCopiedChannel(null);
+    }
+  };
 
   if (center.isLoading) {
     return <div className="notification-page"><div className="notification-loading">Notification Center…</div></div>;
@@ -87,9 +100,12 @@ export function NotificationCenterPage({ userEmail }: { userEmail: string | null
             state={state}
             userHasEmail={Boolean(userEmail)}
             pairing={channel === "EMAIL" ? undefined : pairing[channel]}
+            copied={channel === "EMAIL" ? false : copiedChannel === channel}
             busy={bindEmail.isPending || preference.isPending || remove.isPending || pair.isPending}
+            error={pair.error instanceof Error && pair.variables === channel ? pair.error.message : null}
             onBindEmail={() => bindEmail.mutate()}
-            onPair={(value) => pair.mutate(value)}
+            onPair={(value) => { pair.reset(); pair.mutate(value); }}
+            onCopy={copyCommand}
             onPreference={(value, enabled) => preference.mutate({ channel: value, enabled })}
             onRemove={(bindingId) => remove.mutate(bindingId)}
           />
@@ -130,9 +146,12 @@ function ChannelCard({
   state,
   userHasEmail,
   pairing,
+  copied,
   busy,
+  error,
   onBindEmail,
   onPair,
+  onCopy,
   onPreference,
   onRemove
 }: {
@@ -140,9 +159,12 @@ function ChannelCard({
   state: NotificationCenterState;
   userHasEmail: boolean;
   pairing: PairingCode | undefined;
+  copied: boolean;
   busy: boolean;
+  error: string | null;
   onBindEmail: () => void;
   onPair: (channel: "QQ" | "WECHAT") => void;
+  onCopy: (pairing: PairingCode) => void;
   onPreference: (channel: NotificationChannel, enabled: boolean) => void;
   onRemove: (bindingId: string) => void;
 }) {
@@ -174,6 +196,14 @@ function ChannelCard({
           <BindingRow key={binding.id} binding={binding} busy={busy} onRemove={onRemove} />
         ))}
       </div>
+      <div className={`notification-binding-state ${bindings.length > 0 ? "is-active" : "is-empty"}`}>
+        <span className="notification-state-dot" aria-hidden="true" />
+        <span>
+          {bindings.length > 0
+            ? locale === "zh-CN" ? "已连接此渠道" : "Channel connected"
+            : locale === "zh-CN" ? "尚未连接" : "Not connected"}
+        </span>
+      </div>
 
       {channel === "EMAIL" ? (
         <button
@@ -195,13 +225,48 @@ function ChannelCard({
           </button>
           {pairing ? (
             <div className="notification-pairing-code" role="status">
-              <span>{locale === "zh-CN" ? "发送给机器人" : "Send to the bot"}</span>
+              <div className="notification-pairing-heading">
+                <span>{locale === "zh-CN" ? "完成此会话配对" : "Finish this chat pairing"}</span>
+                <time dateTime={pairing.expires_at}>{formatPairingExpiry(pairing.expires_at, locale)}</time>
+              </div>
+              <div className="notification-pairing-actions">
+                {pairing.share_url || pairing.contact_url ? (
+                  <a
+                    className="notification-contact-link"
+                    href={pairing.share_url || pairing.contact_url || "#"}
+                    target="_blank"
+                    rel="noreferrer noopener"
+                  >
+                    <span>{pairing.share_url ? (locale === "zh-CN" ? "打开 QQ 添加机器人" : "Open QQ and add bot") : (locale === "zh-CN" ? "打开机器人入口" : "Open bot entry")}</span>
+                    <UiIcon name="launch" size={16} />
+                  </a>
+                ) : null}
+                <button
+                  className="notification-copy-button"
+                  type="button"
+                  onClick={() => onCopy(pairing)}
+                  aria-label={locale === "zh-CN" ? "复制配对命令" : "Copy pairing command"}
+                >
+                  <UiIcon name={copied ? "check" : "copy"} size={16} />
+                  {copied ? (locale === "zh-CN" ? "已复制" : "Copied") : (locale === "zh-CN" ? "复制命令" : "Copy command")}
+                </button>
+              </div>
               <code>{pairing.command}</code>
               <small>
-                {locale === "zh-CN" ? "10 分钟内有效；机器人确认后此处会出现绑定。" : "Valid for 10 minutes. Refresh after the bot confirms the binding."}
+                {channel === "QQ" && pairing.share_url
+                  ? locale === "zh-CN" ? "打开官方入口后，机器人会把配对码带入好友申请；无需管理员再次扫码。" : "The official invite carries this code into the friend request; the admin does not scan again."
+                  : locale === "zh-CN" ? "在对应机器人私聊中发送这条命令；确认后刷新本页即可看到连接。" : "Send this command in a direct chat with the matching bot, then refresh after confirmation."}
               </small>
+              {!pairing.share_url && !pairing.contact_url ? (
+                <small className="notification-pairing-missing-entry">
+                  {locale === "zh-CN"
+                    ? "当前未配置公开机器人入口；请先打开管理员提供的 QQ/微信机器人私聊。"
+                    : "No public bot entry is configured; open the direct-chat entry supplied by the administrator first."}
+                </small>
+              ) : null}
             </div>
           ) : null}
+          {error ? <p className="notification-inline-error" role="alert">{error}</p> : null}
         </div>
       )}
     </article>
@@ -260,10 +325,19 @@ function channelDescription(
   }
   if (channel === "QQ") {
     return locale === "zh-CN"
-      ? "生成一次性配对码，只能在 QQ 私聊中发送给机器人完成账号绑定；群聊不支持付费账号绑定。"
-      : "Generate a one-time code and send it to the QQ bot in C2C chat. Group chats cannot be bound to a paid account.";
+      ? "每个 QQ 用户单独配对；官方入口会打开同一个机器人，不会把管理员登录态分享给你。"
+      : "Pair your own QQ chat. The official entry opens the shared bot without exposing the administrator session.";
   }
   return locale === "zh-CN"
-    ? "生成一次性配对码并发给微信机器人；机器人看到的会话才会成为你的推送目标。"
-    : "Generate a one-time code and send it to the WeChat bot; only that verified chat becomes your destination.";
+    ? "每个微信私聊单独配对；管理员只负责让机器人在线，不会替普通用户绑定。"
+    : "Pair your own WeChat chat. The administrator only keeps the shared bot online; your chat remains your destination.";
+}
+
+function formatPairingExpiry(value: string, locale: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return locale === "zh-CN" ? "有效期未知" : "Expiry unknown";
+  return `${locale === "zh-CN" ? "有效至" : "Expires"} ${new Intl.DateTimeFormat(locale === "zh-CN" ? "zh-CN" : "en", {
+    hour: "2-digit",
+    minute: "2-digit"
+  }).format(date)}`;
 }

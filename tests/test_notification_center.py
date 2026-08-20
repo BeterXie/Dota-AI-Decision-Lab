@@ -2,9 +2,11 @@ from datetime import UTC, datetime
 from uuid import uuid4
 
 import pytest
+from httpx import ASGITransport, AsyncClient
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.auth import AuthenticatedUser
 from app.auth.models import UserAccountRecord
 from app.db import Base
 from app.entitlements import (
@@ -22,6 +24,8 @@ from app.notifications.center import (
 )
 from app.notifications.models import NotificationDeliveryRecord
 from app.notifications.secure_center import NotificationCenterService
+from app.runtime.health import HealthRegistry
+from app.web import create_app
 
 
 async def _factory():
@@ -145,6 +149,66 @@ async def test_pairing_code_verifies_qq_destination_and_prevents_cross_account_c
             )
     finally:
         await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_pairing_api_returns_channel_contact_metadata() -> None:
+    engine, factory = await _factory()
+    try:
+        user_id, verified_at = await _user(factory, "pairing@example.com")
+        await EntitlementService(factory).grant(
+            user_id,
+            REALTIME_NOTIFICATIONS_ENTITLEMENT,
+            source="test",
+        )
+        now = datetime.now(UTC)
+        auth_user = AuthenticatedUser(
+            id=user_id,
+            email="pairing@example.com",
+            email_verified_at=verified_at,
+            display_name=None,
+            avatar_url=None,
+            created_at=now,
+        )
+
+        class AuthStub:
+            async def authenticate(self, token: str | None):
+                return auth_user if token == "test-session" else None
+
+        app = create_app(
+            factory,
+            HealthRegistry(),
+            frontend_dist=None,
+            auth_enabled=True,
+            auth_cookie_secure=False,
+            auth_service=AuthStub(),
+            qq_pairing_link_factory=lambda code: _share_link(code),
+            qq_contact_url="https://qq.example/contact",
+            wechat_contact_url="https://wechat.example/contact",
+        )
+
+        async with AsyncClient(
+            transport=ASGITransport(app=app),
+            base_url="http://test",
+            cookies={"dota_session": "test-session"},
+        ) as client:
+            qq = await client.post("/api/notifications/pairing/qq")
+            wechat = await client.post("/api/notifications/pairing/wechat")
+
+        assert qq.status_code == 200
+        assert qq.json()["pairing_mode"] == "QQ_SHARE_LINK"
+        assert qq.json()["share_url"].startswith("https://qq.example/")
+        assert qq.json()["contact_url"] == "https://qq.example/contact"
+        assert wechat.status_code == 200
+        assert wechat.json()["pairing_mode"] == "WECHAT_CONTACT_LINK"
+        assert wechat.json()["contact_url"] == "https://wechat.example/contact"
+        assert wechat.json()["share_url"] is None
+    finally:
+        await engine.dispose()
+
+
+async def _share_link(code: str) -> str:
+    return f"https://qq.example/invite/{code}"
 
 
 @pytest.mark.asyncio

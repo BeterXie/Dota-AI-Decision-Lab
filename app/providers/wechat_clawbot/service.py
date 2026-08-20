@@ -126,29 +126,42 @@ class WeChatClawBotService:
         decision_batch_key = ",".join(sorted(str(item.id) for item in decisions))
         sent = 0
         for account in accounts:
-            if not account.user_id:
-                continue
-            await self._client.send_text(
-                account,
-                to_user_id=account.user_id,
-                text=text,
-                context_token=account.context_token,
-                idempotency_key=(
-                    f"wechat-decision:{snapshot.snapshot_id}:"
-                    f"{decision_batch_key}:{account.account_id}"
-                ),
-            )
-            sent += 1
+            for user_id, context_token in self._account_recipients(account):
+                await self._client.send_text(
+                    account,
+                    to_user_id=user_id,
+                    text=text,
+                    context_token=context_token,
+                    idempotency_key=(
+                        f"wechat-decision:{snapshot.snapshot_id}:"
+                        f"{decision_batch_key}:{account.account_id}:{user_id}"
+                    ),
+                )
+                sent += 1
         return sent
 
-    async def send_to_account(self, account: WeChatAccount, text: str) -> str:
-        if not account.user_id:
-            raise ValueError("WeChat account has no bound user id yet")
+    async def send_to_account(
+        self,
+        account: WeChatAccount,
+        text: str,
+        *,
+        user_id: str | None = None,
+    ) -> str:
+        recipients = self._account_recipients(account)
+        if user_id is not None:
+            recipients = [item for item in recipients if item[0] == user_id]
+            if not recipients:
+                raise ValueError(f"WeChat account has no known contact {user_id!r}")
+        if not recipients:
+            raise ValueError("WeChat account has no known direct-chat contact")
+        if len(recipients) > 1:
+            raise ValueError("WeChat account has multiple contacts; pass user_id")
+        target_user_id, context_token = recipients[0]
         return await self._client.send_text(
             account,
-            to_user_id=account.user_id,
+            to_user_id=target_user_id,
             text=text,
-            context_token=account.context_token,
+            context_token=context_token,
         )
 
     async def run_inbound(self) -> None:
@@ -176,13 +189,18 @@ class WeChatClawBotService:
                         error_code=batch.error_code,
                     )
                     if batch.error_code in {None, 0}:
-                        if batch.cursor:
-                            self._store.save_cursor(account.account_id, batch.cursor)
+                        # Advance the cursor only after every inbound message in
+                        # the batch has been handled successfully. Saving it
+                        # before dispatch would permanently drop a pairing or
+                        # command when the database or transport temporarily
+                        # fails.
                         async with self._session_factory() as session, session.begin():
                             for message in batch.messages:
                                 if message.message_type != MESSAGE_TYPE_USER:
                                     continue
                                 await self._handle_message(session, account, message)
+                        if batch.cursor:
+                            self._store.save_cursor(account.account_id, batch.cursor)
                     await self._update_health(
                         "READY",
                         messages=len(batch.messages),
@@ -252,12 +270,7 @@ class WeChatClawBotService:
     ) -> None:
         if not message.from_user_id:
             return
-        if account.user_id is not None and message.from_user_id != account.user_id:
-            logger.warning(
-                "wechat_clawbot_unauthorized_sender",
-                account_id=account.account_id,
-            )
-            return
+        self._remember_contact(account, message)
         reply = await command_reply(
             session,
             self._store,
@@ -274,13 +287,37 @@ class WeChatClawBotService:
             context_token=message.context_token,
             run_id=message.run_id,
         )
-        updates: dict[str, object] = {}
-        if not account.user_id:
-            updates["user_id"] = message.from_user_id
-        if message.context_token and message.context_token != account.context_token:
-            updates["context_token"] = message.context_token
-        if updates:
-            self._store.save_account(account.model_copy(update=updates))
+
+    def _account_recipients(self, account: WeChatAccount) -> list[tuple[str, str | None]]:
+        contacts_for_account = getattr(self._store, "contacts_for_account", None)
+        if callable(contacts_for_account):
+            contacts = [
+                item
+                for item in contacts_for_account(account.account_id)
+                if getattr(item, "user_id", None)
+            ]
+            if contacts:
+                return [(item.user_id, item.context_token) for item in contacts]
+        # Read old account-level state only as a migration fallback. New
+        # logins deliberately leave these fields empty; contacts are created
+        # from actual inbound direct chats instead.
+        legacy_user_id = getattr(account, "user_id", None)
+        if legacy_user_id:
+            return [(legacy_user_id, getattr(account, "context_token", None))]
+        return []
+
+    def _remember_contact(
+        self,
+        account: WeChatAccount,
+        message: WeChatInboundMessage,
+    ) -> None:
+        save_contact = getattr(self._store, "save_contact", None)
+        if callable(save_contact) and message.from_user_id:
+            save_contact(
+                account.account_id,
+                message.from_user_id,
+                context_token=message.context_token,
+            )
 
     async def _update_health(
         self, status: str, *, message: str | None = None, **metadata: Any

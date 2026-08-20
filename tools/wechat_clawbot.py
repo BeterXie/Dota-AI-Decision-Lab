@@ -13,6 +13,7 @@ import asyncio
 import shutil
 import subprocess
 from datetime import UTC, datetime
+from types import SimpleNamespace
 
 from app.config import get_settings
 from app.providers.wechat_clawbot.client import WeChatClawBotClient
@@ -83,17 +84,36 @@ async def login(timeout_seconds: float = LOGIN_TIMEOUT_SECONDS) -> int:
                 if not status.bot_token or not status.account_id:
                     print("❌ 登录确认但服务器未返回 bot token / bot id。")
                     return 1
+                previous = next(
+                    (item for item in store.accounts() if item.account_id == status.account_id),
+                    None,
+                )
+                if previous is not None and previous.user_id:
+                    # Migrate the pre-multi-user account-level peer before the
+                    # new login clears that legacy field.
+                    store.save_contact(
+                        previous.account_id,
+                        previous.user_id,
+                        context_token=previous.context_token,
+                    )
                 store.save_account(
                     WeChatAccount(
                         account_id=status.account_id,
                         token=status.bot_token,
                         base_url=status.base_url or settings.wechat_clawbot_base_url,
-                        user_id=status.user_id,
+                        # The QR scanner authenticates the bot account. It is
+                        # not a notification recipient. Direct-chat contacts
+                        # are learned from inbound messages and paired per user.
+                        user_id=None,
                         created_at=datetime.now(UTC),
                     )
                 )
                 print("✅ 微信 ClawBot 绑定成功。")
                 print(f"   账号: {status.account_id}")
+                print(
+                    "   管理员登录已完成。普通用户需要各自私聊机器人，"
+                    "再用网页生成的配对码完成绑定。"
+                )
                 print("   运行中的 runtime 会在下个轮询周期自动接入；如需立即生效请重启应用。")
                 return 0
         print("❌ 登录超时，请重新运行 login。")
@@ -109,16 +129,15 @@ async def status() -> int:
     print(f"WECHAT_CLAWBOT_ENABLED={settings.wechat_clawbot_enabled}")
     print(f"已绑定账号: {len(accounts)}")
     for account in accounts:
-        print(
-            f"  - {account.account_id}"
-            f" | user={account.user_id or '首次私聊后自动记录'}"
-            f" | base={account.base_url}"
-        )
+        contacts = store.contacts_for_account(account.account_id)
+        print(f"  - {account.account_id} | contacts={len(contacts)} | base={account.base_url}")
+        for contact in contacts:
+            print(f"      · {contact.user_id} | context={'yes' if contact.context_token else 'no'}")
     print(f"决策通知: {'开启' if store.decision_notifications_enabled() else '暂停'}")
     return 0
 
 
-async def send(text: str) -> int:
+async def send(text: str, user_id: str | None = None) -> int:
     settings = get_settings()
     store = WeChatClawBotStore(settings.wechat_clawbot_state_dir)
     accounts = list(store.accounts())
@@ -133,19 +152,28 @@ async def send(text: str) -> int:
     )
     try:
         for account in accounts:
-            if not account.user_id:
-                print(
-                    f"账号 {account.account_id} 还没有私聊记录，"
-                    "无法主动发送；先给它发一条微信消息。"
-                )
+            contacts = store.contacts_for_account(account.account_id)
+            if not contacts and account.user_id:
+                # Read old account-level state during migration only.
+                contacts = [
+                    SimpleNamespace(
+                        user_id=account.user_id,
+                        context_token=account.context_token,
+                    )
+                ]
+            if user_id:
+                contacts = [item for item in contacts if item.user_id == user_id]
+            if not contacts:
+                print(f"账号 {account.account_id} 没有匹配的微信私聊联系人。")
                 continue
-            await client.send_text(
-                account,
-                to_user_id=account.user_id,
-                text=text,
-                context_token=account.context_token,
-            )
-            print(f"已发送到 {account.account_id}")
+            for contact in contacts:
+                await client.send_text(
+                    account,
+                    to_user_id=contact.user_id,
+                    text=text,
+                    context_token=contact.context_token,
+                )
+                print(f"已发送到 {account.account_id}/{contact.user_id}")
     finally:
         await client.close()
     return 0
@@ -188,6 +216,7 @@ def main() -> int:
     sub.add_parser("status")
     send_parser = sub.add_parser("send")
     send_parser.add_argument("text")
+    send_parser.add_argument("--user-id", help="只发送给指定的微信用户 ID")
     sub.add_parser("pause")
     sub.add_parser("resume")
     args = parser.parse_args()
@@ -197,7 +226,7 @@ def main() -> int:
     if args.command == "status":
         return asyncio.run(status())
     if args.command == "send":
-        return asyncio.run(send(args.text))
+        return asyncio.run(send(args.text, args.user_id))
     if args.command == "pause":
         return _pause(False)
     if args.command == "resume":

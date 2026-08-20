@@ -152,6 +152,9 @@ async def test_bridge_client_protocol() -> None:
                     "cursor": 4,
                 },
             )
+        if request.url.path == "/share-link":
+            assert json.loads(request.content) == {"callback_data": "ABCD-1234"}
+            return httpx.Response(200, json={"url_link": "https://qq.example/invite"})
         assert request.url.path == "/send"
         assert json.loads(request.content) == {
             "scope": "group",
@@ -177,6 +180,8 @@ async def test_bridge_client_protocol() -> None:
     batch = await client.events(3)
     assert batch.cursor == 4
     assert batch.events[0].text == "赔率"
+    share_url = await client.create_share_link("ABCD-1234")
+    assert share_url == "https://qq.example/invite"
     message_id = await client.send_text(
         scope="group",
         target_id="group-1",
@@ -268,6 +273,62 @@ async def test_service_prepare_notification_is_idempotent(tmp_path: Path) -> Non
         )
     assert count == 1
     await service.stop()
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_service_replays_events_when_bridge_cursor_resets(tmp_path: Path) -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    store = QQBotStore(tmp_path)
+    account = _account(tmp_path)
+    store.save_account(account)
+    store.save_cursor(account.app_id, 7)
+
+    class ResettingBridge(RecordingBridgeClient):
+        def __init__(self) -> None:
+            super().__init__()
+            self.calls: list[int] = []
+
+        async def events(self, cursor: int = 0) -> QQBridgeEventBatch:
+            self.calls.append(cursor)
+            if len(self.calls) == 1:
+                return QQBridgeEventBatch(cursor=2)
+            return QQBridgeEventBatch(
+                events=(
+                    QQInboundMessage(
+                        event_cursor=1,
+                        scope="c2c",
+                        target_id="new-user",
+                        sender_id="new-user",
+                        text="绑定 ABCD-1234",
+                    ),
+                ),
+                cursor=2,
+            )
+
+    client = ResettingBridge()
+    service = QQBotService(
+        client=client,
+        store=store,
+        session_factory=factory,
+        jobs=JobRepository(),
+    )
+    handled: list[QQInboundMessage] = []
+
+    async def handle_message(_session, message: QQInboundMessage) -> None:
+        handled.append(message)
+        service._stop.set()
+
+    service._handle_message = handle_message  # type: ignore[method-assign]
+    await service.run_inbound()
+    await service.stop()
+
+    assert client.calls == [7, 0]
+    assert [item.target_id for item in handled] == ["new-user"]
+    assert store.cursor(account.app_id) == 2
     await engine.dispose()
 
 
@@ -510,6 +571,46 @@ async def test_service_inbound_subscribes_and_replies(tmp_path: Path) -> None:
     assert "已订阅" in client.sent[1]["text"]
     await service.stop()
     await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_user_scoped_friend_add_consumes_share_callback_for_new_user(tmp_path: Path) -> None:
+    store = QQBotStore(tmp_path)
+    store.save_account(_account(tmp_path))
+    client = RecordingBridgeClient()
+    captured: dict = {}
+
+    class Center:
+        async def consume_pairing_code(self, **kwargs):
+            captured.update(kwargs)
+            return object()
+
+    service = UserScopedQQBotService(
+        client=client,
+        store=store,
+        session_factory=object(),
+        jobs=JobRepository(),
+        allowed_c2c_ids=("existing-user",),
+    )
+    service._notification_center = Center()
+
+    await service._handle_message(
+        object(),
+        QQInboundMessage(
+            event_type="FRIEND_ADD",
+            event_cursor=1,
+            scope="c2c",
+            target_id="new-user",
+            sender_id="new-user",
+            scene_param="ABCD-1234",
+        ),
+    )
+
+    assert captured["code"] == "ABCD-1234"
+    assert captured["destination"] == {"scope": "c2c", "target_id": "new-user"}
+    assert store.contact("c2c", "new-user") is not None
+    assert "已绑定" in client.sent[-1]["text"]
+    await service.stop()
 
 
 @pytest.mark.asyncio
