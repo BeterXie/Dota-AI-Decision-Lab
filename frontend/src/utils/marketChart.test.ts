@@ -1,5 +1,49 @@
 import { expect, test } from "vitest";
-import { MARKET_CHART_LEAD_SECONDS, marketChartZoomWindow } from "./marketChart";
+import { filterMarketChartOutliers, MARKET_CHART_LEAD_SECONDS, marketChartZoomWindow } from "./marketChart";
+
+function observation(oddsId: number, price: number, seconds: number) {
+  return { odds_id: oddsId, price, received_at: new Date(seconds * 1000).toISOString() };
+}
+
+test("filters a short-lived burst of isolated odds spikes", () => {
+  const rows = [
+    observation(7, 1.91, 0),
+    observation(7, 14.29, 2),
+    observation(7, 14.29, 3),
+    observation(7, 1.87, 10)
+  ];
+
+  expect(filterMarketChartOutliers(rows).map((row) => row.price)).toEqual([1.91, 1.87]);
+});
+
+test("keeps a sustained price change", () => {
+  const rows = [
+    observation(7, 1.91, 0),
+    observation(7, 14.29, 2),
+    observation(7, 14.29, 20),
+    observation(7, 14.29, 40),
+    observation(7, 14.29, 50)
+  ];
+
+  expect(filterMarketChartOutliers(rows)).toEqual(rows);
+});
+
+test("does not use another odds leg as a neighbor", () => {
+  const rows = [
+    observation(7, 1.91, 0),
+    observation(8, 14.29, 2),
+    observation(7, 1.87, 10),
+    observation(8, 14.1, 12)
+  ];
+
+  expect(filterMarketChartOutliers(rows)).toEqual(rows);
+});
+
+test("keeps spikes without both surrounding observations", () => {
+  const rows = [observation(7, 14.29, 0), observation(7, 1.87, 10)];
+
+  expect(filterMarketChartOutliers(rows)).toEqual(rows);
+});
 
 test("defaults the odds chart to a short lead before the scheduled match", () => {
   const scheduled = Date.parse("2026-08-15T02:00:00Z");

@@ -1,7 +1,7 @@
 import React from "react";
 import type { MapDetail, MapSummary } from "../api";
 import { useI18n } from "../i18n";
-import { marketChartZoomWindow } from "../utils/marketChart";
+import { filterMarketChartOutliers, marketChartZoomWindow } from "../utils/marketChart";
 import { formatOdds, getMatchDisplayPhase, marketStageDisplayLabel, primaryMarketPair } from "../utils/presentation";
 
 const IntelligenceChart = React.lazy(() => import("../Chart"));
@@ -25,7 +25,7 @@ export function CanonicalMarketCard({ match }: { match: MapSummary | MapDetail }
   const fairB = eligible
     ? match.current_market_view?.team_b?.fair_probability ?? pair?.teamB.fair_probability ?? null
     : null;
-  const timeline = "market_timeline" in match ? match.market_timeline : [];
+  const timeline = "market_timeline" in match ? filterMarketChartOutliers(match.market_timeline) : [];
   const dataA = pair ? timeline.filter((item) => item.odds_id === pair.teamA.odds_id).map((item) => [item.received_at, Number(item.price)]) : [];
   const dataB = pair ? timeline.filter((item) => item.odds_id === pair.teamB.odds_id).map((item) => [item.received_at, Number(item.price)]) : [];
   const timestamps = [...dataA, ...dataB].map((item) => Date.parse(String(item[0]))).filter(Number.isFinite);
