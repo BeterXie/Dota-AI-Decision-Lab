@@ -6,6 +6,11 @@ export interface PassOffer {
   scope_type?: "EVENT" | "SERIES";
   non_expiring?: boolean;
   entitlements?: string[];
+  price?: {
+    id: string;
+    amount: string;
+    currency_code: string;
+  };
   payment_methods?: {
     card: string;
     alipay: string;

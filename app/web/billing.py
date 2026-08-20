@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import asyncio
 from typing import Any
 from uuid import UUID
 
@@ -10,7 +11,9 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 from app.auth import AuthenticatedUser
 from app.billing.paddle import (
     PADDLE_PROVIDER,
+    PaddleApiClient,
     PaddleApiError,
+    PaddleCatalogPrice,
     PaddleWebhookError,
     PaddleWebhookSignatureError,
 )
@@ -49,32 +52,48 @@ def create_billing_router(
         price_id=settings.paddle_event_pass_price_id,
     )
     entitlements = EntitlementService(session_factory)
+    catalog_price_cache: dict[str, PaddleCatalogPrice] | None = None
 
     @router.get("/offers")
     async def billing_offers() -> dict[str, Any]:
+        nonlocal catalog_price_cache
+        if catalog_price_cache is None:
+            try:
+                catalog_price_cache = await _competition_pass_prices(
+                    settings,
+                    tuple(
+                        gateway
+                        for gateway in (series_gateway, event_gateway)
+                        if gateway is not None
+                    ),
+                )
+            except PaddleApiError as exc:
+                raise HTTPException(
+                    status_code=status.HTTP_502_BAD_GATEWAY,
+                    detail="payment pricing is temporarily unavailable",
+                ) from exc
+        catalog_prices = catalog_price_cache
         return {
             "provider": PADDLE_PROVIDER,
             "enabled": series_gateway is not None or event_gateway is not None,
             "environment": settings.paddle_environment,
             "series_pass": (
-                series_gateway.public_offer if series_gateway is not None else {"enabled": False}
+                _public_pass_offer(series_gateway, catalog_prices)
+                if series_gateway is not None
+                else {"enabled": False}
             ),
             "event_pass": (
-                event_gateway.public_offer if event_gateway is not None else {"enabled": False}
+                _public_pass_offer(event_gateway, catalog_prices)
+                if event_gateway is not None
+                else {"enabled": False}
             ),
             "referral": {
                 "enabled": referral_service.enabled,
                 "campaign_key": referral_service.campaign_key,
             },
             "local_payment_notes": {
-                "alipay": (
-                    "Available for eligible China checkouts; recurring support depends on "
-                    "Paddle approval and catalog currency."
-                ),
-                "wechat_pay": (
-                    "Available for eligible China one-time purchases; recurring subscriptions "
-                    "are not supported."
-                ),
+                "alipay": "Available for eligible China one-time checkouts.",
+                "wechat_pay": "Available for eligible China one-time checkouts.",
             },
             "crypto": {
                 "enabled": False,
@@ -272,6 +291,38 @@ def _pass_gateway(
         api_timeout_seconds=settings.paddle_timeout_seconds,
         webhook_tolerance_seconds=settings.paddle_webhook_tolerance_seconds,
     )
+
+
+async def _competition_pass_prices(
+    settings: Settings,
+    gateways: tuple[PaddleSeriesPassService | PaddleEventPassService, ...],
+) -> dict[str, PaddleCatalogPrice]:
+    if not gateways:
+        return {}
+    if settings.paddle_api_key is None:
+        raise PaddleApiError("Paddle API key is required to load catalog prices")
+    api = PaddleApiClient(
+        api_key=settings.paddle_api_key.get_secret_value(),
+        base_url=settings.paddle_api_base_url,
+        timeout_seconds=settings.paddle_timeout_seconds,
+    )
+    try:
+        prices = await asyncio.gather(*(api.get_price(gateway.price_id) for gateway in gateways))
+    finally:
+        await api.close()
+    for price in prices:
+        if price.status != "active" or price.recurring:
+            raise PaddleApiError("competition pass prices must be active one-time prices")
+    return {price.price_id: price for price in prices}
+
+
+def _public_pass_offer(
+    gateway: PaddleSeriesPassService | PaddleEventPassService,
+    prices: dict[str, PaddleCatalogPrice],
+) -> dict[str, Any]:
+    offer = gateway.public_offer
+    offer["price"] = prices[gateway.price_id].public_payload()
+    return offer
 
 
 def _promotion_service(

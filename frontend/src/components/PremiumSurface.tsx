@@ -47,7 +47,6 @@ export function PremiumSurface({
   if (surface === "billing") {
     return (
       <PremiumShellFrame surface={surface}>
-        <PremiumProductIntro surface={surface} />
         <Suspense fallback={<PremiumLoading label={locale === "zh-CN" ? "正在加载会员方案…" : "Loading access plans…"} />}>
           <BillingPage authenticated={signedIn} onLogin={onLogin} />
         </Suspense>

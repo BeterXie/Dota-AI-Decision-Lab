@@ -115,6 +115,10 @@ class PaddleCompetitionPassService:
             },
         }
 
+    @property
+    def price_id(self) -> str:
+        return self._price_id
+
     async def create_checkout(
         self,
         *,

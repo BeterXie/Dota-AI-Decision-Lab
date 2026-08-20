@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Any
+from urllib.parse import quote
 from uuid import UUID
 
 import httpx
@@ -94,6 +95,22 @@ class PaddleOffer:
 
 
 @dataclass(frozen=True, slots=True)
+class PaddleCatalogPrice:
+    price_id: str
+    amount: str
+    currency_code: str
+    status: str
+    recurring: bool
+
+    def public_payload(self) -> dict[str, str]:
+        return {
+            "id": self.price_id,
+            "amount": self.amount,
+            "currency_code": self.currency_code,
+        }
+
+
+@dataclass(frozen=True, slots=True)
 class PaddleCheckout:
     transaction_ref: str
     customer_ref: str
@@ -148,6 +165,32 @@ class PaddleApiClient:
         if not isinstance(customer_ref, str) or not customer_ref.startswith("ctm_"):
             raise PaddleApiError("Paddle customer response is missing a valid customer id")
         return customer_ref
+
+    async def get_price(self, price_id: str) -> PaddleCatalogPrice:
+        payload = await self._request("GET", f"/prices/{quote(price_id, safe='')}")
+        data = _response_data(payload)
+        response_price_id = data.get("id")
+        unit_price = data.get("unit_price")
+        amount = unit_price.get("amount") if isinstance(unit_price, dict) else None
+        currency_code = (
+            unit_price.get("currency_code") if isinstance(unit_price, dict) else None
+        )
+        status = data.get("status")
+        if response_price_id != price_id:
+            raise PaddleApiError("Paddle price response does not match the requested price")
+        if not isinstance(amount, str) or not amount.isdigit():
+            raise PaddleApiError("Paddle price response is missing a valid amount")
+        if not isinstance(currency_code, str) or len(currency_code) != 3:
+            raise PaddleApiError("Paddle price response is missing a valid currency")
+        if not isinstance(status, str):
+            raise PaddleApiError("Paddle price response is missing a valid status")
+        return PaddleCatalogPrice(
+            price_id=response_price_id,
+            amount=amount,
+            currency_code=currency_code.upper(),
+            status=status.lower(),
+            recurring=data.get("billing_cycle") is not None,
+        )
 
     async def create_checkout(
         self,
