@@ -151,7 +151,10 @@ async def test_same_experiment_checkpoint_waits_for_prior_persist_before_prepare
 
     handler = ApplicationJobHandlers(
         SimpleNamespace(
-            settings=SimpleNamespace(ai_min_game_time_seconds=600),
+            settings=SimpleNamespace(
+                ai_min_game_time_seconds=600,
+                ai_notification_max_latency_seconds=50.0,
+            ),
             session_factory=factory,
             snapshots=snapshots,
             ai=coordinator,

@@ -612,6 +612,9 @@ OpenAI、DeepSeek Flash 和 DeepSeek Pro 的 Responses 请求使用 `reasoning.e
 
 每次 DecisionSnapshot 的 AI 决策批次完成后，系统可向配置的邮件列表发送双语汇总通知。
 通知必须由项目自己的 Resend HTTP API Provider 和 Durable Worker 发送，不依赖外部邮件 Agent/CLI。
+只有 provider 请求延迟不超过 `AI_NOTIFICATION_MAX_LATENCY_SECONDS`（默认 50 秒）的记录
+可以参与邮件、微信和 QQ 通知的触发及正文。迟到或延迟未知的结果仍正常持久化并用于比赛页、
+AI 表现和复盘，但不得通知客户；历史“已通知买入侧”也只从满足该时限的成功决策推导。
 
 邮件触发遵循“下注换边才通知”规则，避免同一地图重复刷邮件：
 
@@ -622,8 +625,8 @@ NO_BUY / INSUFFICIENT_DATA → 静默
 已通知 BUY_A 后出现 BUY_B（或反向）→ 发送
 ```
 
-同一地图内已通知过的下注侧通过该地图更早 snapshot 的成功 AI decision 推导；当前批次
-引入新侧时，邮件内容仍冻结于当前 DecisionSnapshot 及其全部买入决策。
+同一地图内已通知过的下注侧通过该地图更早 snapshot 的准时成功 AI decision 推导；当前批次
+引入新侧时，邮件内容仍冻结于当前 DecisionSnapshot 及其全部准时买入决策。
 
 邮件内容冻结于同一个 DecisionSnapshot，至少包括：
 
