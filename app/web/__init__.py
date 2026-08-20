@@ -24,7 +24,7 @@ from app.web.api import create_app as create_api_app
 from app.web.auth import register_auth
 from app.web.billing import create_billing_router
 from app.web.feature_flags import RuntimeFeatureFlagMiddleware
-from app.web.notifications import create_notification_router
+from app.web.notifications import UserQrBindingService, create_notification_router
 from app.web.player_hero_recent import register_player_hero_recent_routes
 from app.web.premium import create_premium_router
 from app.web.promotions import create_promotion_router
@@ -57,6 +57,8 @@ def create_app(
     qq_pairing_link_factory: Callable[[str], Awaitable[str]] | None = None,
     qq_contact_url: str | None = None,
     wechat_contact_url: str | None = None,
+    qq_qr_binding_service: UserQrBindingService | None = None,
+    wechat_qr_binding_service: UserQrBindingService | None = None,
 ) -> FastAPI:
     runtime_settings = settings or get_settings()
     if auth_enabled is None:
@@ -137,6 +139,8 @@ def create_app(
             qq_pairing_link_factory=qq_pairing_link_factory,
             qq_contact_url=qq_contact_url,
             wechat_contact_url=wechat_contact_url,
+            qq_qr_binding_service=qq_qr_binding_service,
+            wechat_qr_binding_service=wechat_qr_binding_service,
         )
     )
     app.include_router(create_promotion_router(promotion_service))

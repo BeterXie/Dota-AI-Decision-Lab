@@ -53,6 +53,14 @@ class QQBotStore(LocalStateStore):
     def account_count(self) -> int:
         return len(self.accounts())
 
+    def accounts_for_owner(self, owner_user_id: str) -> list[QQBotAccount]:
+        value = owner_user_id.strip()
+        return [item for item in self.accounts() if item.owner_user_id == value]
+
+    def remove_accounts_for_owner(self, owner_user_id: str) -> None:
+        for account in self.accounts_for_owner(owner_user_id):
+            self.remove_account(account.app_id)
+
     def save_account(self, account: QQBotAccount) -> None:
         rows = [item.model_dump(mode="json") for item in self.accounts()]
         for index, item in enumerate(rows):

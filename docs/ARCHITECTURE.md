@@ -655,10 +655,12 @@ QR 登录确认后的 `bot_token`、服务端 `baseurl` 与长轮询游标只持
 决策推送与邮件共用同一个“下注换边才通知”触发点，经 SEND_WECHAT_DECISION durable job 投递；
 入站只处理 direct chat（官方通道当前不承诺群聊自动发言）；
 入站命令只允许读取/开关操作：当前比赛、为什么买、暂停通知、恢复通知；
-管理员只通过 tools/wechat_clawbot.py login 扫码一次，QR 登录的 ilink_user_id 不作为收件人；
-每个 direct-chat sender 以 (account_id, user_id) 独立保存 context_token，普通用户必须用
-Notification Center 一次性配对码完成自己的绑定；同一个 bot account 可服务多个用户；
-未绑定 bot account 时 readiness 上报 ACTION_REQUIRED，并提示运行 tools/wechat_clawbot.py login。
+Notification Center 为每个已认证用户创建独立 QR 登录会话；扫码确认返回的
+bot_token/baseurl/ilink_user_id 只写入本地 state，并以 owner_user_id 标记归属；
+每个用户的通知绑定目标是自己扫码得到的 (account_id, ilink_user_id)，不再依赖共享
+管理员账号或公开联系人入口；每个用户最多保留一个 active WeChat 账号；
+tools/wechat_clawbot.py login 仅保留给运维诊断和旧共享账号；无任何账号时 readiness 上报
+ACTION_REQUIRED 并提示在 Notification Center 扫码。
 ```
 
 ### 5.1B QQ Bot Direct Channel
@@ -667,17 +669,18 @@ Notification Center 一次性配对码完成自己的绑定；同一个 bot acco
 `@tencent-connect/qqbot-nodejs` SDK。Python runtime 监督一个本地 Node bridge
 （`tools/qq_bot_bridge.mjs`），bridge 连接 QQ 开放平台 WebSocket Gateway，并通过 loopback
 HTTP 提供 `/health`、`/events`、`/send`；Python service 长轮询入站事件、查询项目数据库并
-渲染回复。QR 绑定使用 harness 的 `@tencent-connect/qqbot-connector`
-（`python -m tools.qq_bot login`），AppID/AppSecret 只持久化在本地 state 目录
+渲染回复。QR 绑定使用 harness 的 `@tencent-connect/qqbot-connector`，AppID/AppSecret 只持久化在本地 state 目录
 （默认 `.runtime/qq-bot`，gitignored），不得写入日志、数据库或邮件。
 
 约束：
 
 ```text
 决策推送与邮件共用同一个“下注换边才通知”触发点，经 SEND_QQ_DECISION durable job 投递；
-管理员只通过 tools/qq_bot login 扫码一次；每个 QQ 用户在自己的 C2C 会话中通过
-官方 share link/FRIEND_ADD callback 或一次性“绑定 <code>”完成 Notification Center 绑定；
-同一个 QQ Bot 可服务多个 C2C 用户，群聊仍通过“订阅通知”订阅、“退订通知”退订；
+Notification Center 为每个已认证用户创建独立 QQ QR 登录会话；官方 connector 返回的
+AppID/AppSecret/userOpenid 只写入本地 state，并以 owner_user_id 标记归属；
+每个用户的通知绑定目标是自己扫码得到的 (account_id, c2c:userOpenid)，每个用户最多保留
+一个 active QQ 账号；旧 shared-bot share link/“绑定 <code>”仅作为迁移路径；群聊仍通过
+“订阅通知”订阅、“退订通知”退订；
 QQ_BOT_DECISION_TARGETS 中的 c2c:<openid> / group:<group_openid> 始终作为显式推送目标；
 群聊默认只在 @机器人 时响应（QQ_BOT_GROUP_REQUIRE_MENTION=true）；
 入站命令只允许读取/开关操作：比赛、赔率、为什么买、暂停通知、恢复通知、订阅通知、退订通知；

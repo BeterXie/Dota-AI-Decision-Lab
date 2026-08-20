@@ -164,11 +164,11 @@ class QQBotService:
             if not accounts:
                 await self._update_health(
                     "ACTION_REQUIRED",
-                    message="run: python -m tools.qq_bot login",
+                    message="scan a QQ QR code from Notification Center",
                 )
                 await self._sleep(15)
                 continue
-            for account in accounts:
+            for account_index, account in enumerate(accounts):
                 if self._stop.is_set():
                     break
                 try:
@@ -186,14 +186,19 @@ class QQBotService:
                         )
                         cursor = 0
                         batch = await self._client.events(cursor)
+                    account_events = _events_for_account(
+                        batch.events,
+                        account_id=account.app_id,
+                        primary=account_index == 0,
+                    )
                     async with self._session_factory() as session, session.begin():
-                        for message in batch.events:
+                        for message in account_events:
                             await self._handle_message(session, message)
                     if batch.cursor >= cursor:
                         self._store.save_cursor(account.app_id, batch.cursor)
                     await self._update_health(
                         "READY",
-                        messages=len(batch.events),
+                        messages=len(account_events),
                         account_id=account.app_id,
                         target_count=len(self._decision_targets()),
                     )
@@ -295,6 +300,7 @@ class QQBotService:
             scope=message.scope,
             target_id=message.target_id,
             text=reply,
+            account_id=message.account_id,
             msg_id=message.message_id,
         )
         if message.sender_name and contact.label is None:
@@ -338,3 +344,18 @@ class QQBotService:
             await asyncio.wait_for(self._stop.wait(), timeout=seconds)
         except TimeoutError:
             pass
+
+
+def _events_for_account(
+    events: Sequence[QQInboundMessage],
+    *,
+    account_id: str,
+    primary: bool,
+) -> tuple[QQInboundMessage, ...]:
+    """Keep legacy account-less events on the first configured bot only."""
+
+    return tuple(
+        item
+        for item in events
+        if item.account_id == account_id or (item.account_id is None and primary)
+    )

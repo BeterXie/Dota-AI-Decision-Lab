@@ -52,6 +52,7 @@ class QQBotBridgeRunner:
         self._script = (script or DEFAULT_BRIDGE_SCRIPT).resolve()
         self._node_bin = node_bin or shutil.which("node")
         self._sdk_index = sdk_index or resolve_qq_sdk_index(settings)
+        self._connector_index = resolve_qq_connector_index(settings)
         self._bridge_token = store.bridge_token()
         self._stop = asyncio.Event()
         self._process: asyncio.subprocess.Process | None = None
@@ -80,15 +81,13 @@ class QQBotBridgeRunner:
             if not accounts:
                 await self._update_health(
                     "ACTION_REQUIRED",
-                    message="run: python -m tools.qq_bot login",
+                    message="scan a QQ QR code from Notification Center",
                 )
-                await self._sleep(15)
-                continue
-            env = self._bridge_env(accounts[0].app_id)
+            env = self._bridge_env(accounts[0].app_id if accounts else "")
             await self._update_health(
                 "DEGRADED",
                 message="QQ bridge starting",
-                account_id=accounts[0].app_id,
+                account_id=accounts[0].app_id if accounts else None,
             )
             try:
                 await self._run_process(env)
@@ -168,9 +167,13 @@ class QQBotBridgeRunner:
                     return
                 try:
                     health = await client.health()
-                    if health.gateway_connected:
+                    # The bridge HTTP control plane is usable before any user
+                    # has scanned a QR code. Treat that as startup success so
+                    # Notification Center can create the first account.
+                    if health.status in {"ACTION_REQUIRED", "READY", "DEGRADED"}:
                         await self._update_health(
-                            "READY",
+                            health.status,
+                            message=health.message,
                             account_count=health.account_count,
                             buffered_events=health.buffered_events,
                         )
@@ -217,6 +220,9 @@ class QQBotBridgeRunner:
             {
                 "QQ_BOT_STATE_DIR": str(self._store.root.resolve()),
                 "QQ_BOT_SDK_INDEX": str(self._sdk_index),
+                "QQ_BOT_CONNECTOR_INDEX": (
+                    str(self._connector_index) if self._connector_index.is_file() else ""
+                ),
                 "QQ_BOT_BRIDGE_HOST": self._settings.qq_bot_bridge_host,
                 "QQ_BOT_BRIDGE_PORT": str(self._settings.qq_bot_bridge_port),
                 "QQ_BOT_BRIDGE_TOKEN": self._bridge_token,
@@ -282,6 +288,8 @@ def resolve_qq_sdk_index(settings: Settings) -> Path:
 def resolve_qq_connector_index(settings: Settings) -> Path:
     if settings.qq_bot_sdk_root:
         root = Path(settings.qq_bot_sdk_root).expanduser()
+        if root.is_file():
+            return root.resolve()
         if root.is_dir():
             candidates = (
                 root / "@tencent-connect" / "qqbot-connector" / "dist" / "esm" / "index.js",
@@ -309,6 +317,13 @@ def resolve_qq_connector_index(settings: Settings) -> Path:
         / "index.js",
         PROJECT_ROOT
         / "qqbot_bridge"
+        / "node_modules"
+        / "@tencent-connect"
+        / "qqbot-connector"
+        / "dist"
+        / "esm"
+        / "index.js",
+        PROJECT_ROOT
         / "node_modules"
         / "@tencent-connect"
         / "qqbot-connector"

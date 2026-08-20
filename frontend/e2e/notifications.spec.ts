@@ -50,6 +50,25 @@ async function mockNotificationApi(page: Page, { entitled }: { entitled: boolean
         command: "绑定 ABCD-1234",
         expires_at: "2026-08-17T00:10:00Z"
       };
+    } else if (path === "/api/notifications/qr/qq/start") {
+      notificationRequests += 1;
+      payload = {
+        channel: "QQ",
+        session_id: "qr-session",
+        status: "WAITING",
+        qrcode_url: "https://q.qq.com/qqbot/openclaw/connect.html?task_id=task",
+        created_at: now,
+        expires_at: "2026-08-17T00:05:00Z"
+      };
+    } else if (path.startsWith("/api/notifications/qr/qq/")) {
+      payload = {
+        channel: "QQ",
+        session_id: "qr-session",
+        status: "WAITING",
+        qrcode_url: "https://q.qq.com/qqbot/openclaw/connect.html?task_id=task",
+        created_at: now,
+        expires_at: "2026-08-17T00:05:00Z"
+      };
     }
     await route.fulfill({
       status: payload === null ? 404 : 200,
@@ -73,7 +92,7 @@ test("keeps Notification Center locked for signed-in users without realtime enti
   expect(notificationRequests()).toBe(0);
 });
 
-test("lets an entitled user manage channels and generate a verified QQ pairing command", async ({ page }) => {
+test("lets an entitled user bind a private QQ account by QR code", async ({ page }) => {
   await mockNotificationApi(page, { entitled: true });
   await page.goto("/notifications?e2e=pro-notifications");
 
@@ -86,8 +105,8 @@ test("lets an entitled user manage channels and generate a verified QQ pairing c
   const qqCard = page
     .locator("article")
     .filter({ has: page.getByRole("heading", { name: "QQ Bot" }) });
-  await qqCard.getByRole("button", { name: "Generate pairing code" }).click();
-  await expect(qqCard.getByText("绑定 ABCD-1234")).toBeVisible();
+  await qqCard.getByRole("button", { name: "Scan to bind your account" }).click();
+  await expect(qqCard.getByAltText("Scan to bind account")).toBeVisible();
 
   const noOverflow = await page.evaluate(
     () => document.documentElement.scrollWidth === document.documentElement.clientWidth

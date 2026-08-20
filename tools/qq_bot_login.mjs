@@ -52,6 +52,7 @@ for (const credential of credentials) {
   const account = {
     app_id: String(credential.appId || "").trim(),
     app_secret: String(credential.appSecret || ""),
+    user_openid: String(credential.userOpenid || "").trim() || null,
     created_at: new Date().toISOString(),
   };
   if (!account.app_id || !account.app_secret) {

@@ -27,6 +27,7 @@ if (!sdkIndex) {
 }
 const sdk = await import(pathToFileURL(sdkIndex).href);
 const { QQBot, messageFilter, contentSanitizer, mentionGate, accessPolicy } = sdk;
+const connectorIndex = process.env.QQ_BOT_CONNECTOR_INDEX || "";
 
 const host = process.env.QQ_BOT_BRIDGE_HOST || "127.0.0.1";
 const loopbackHosts = new Set(["127.0.0.1", "localhost", "::1"]);
@@ -45,15 +46,15 @@ const requireMention = process.env.QQ_BOT_GROUP_REQUIRE_MENTION !== "0";
 const allowedC2C = splitList(process.env.QQ_BOT_ALLOWED_C2C);
 const allowedGroups = splitList(process.env.QQ_BOT_ALLOWED_GROUPS);
 
-let bot = null;
-let botAbort = null;
-let botStartPromise = null;
+const bots = new Map();
+let bot = null; // preferred/first bot, retained for legacy share-link callers
 let gatewayConnected = false;
 let status = "stopped";
 let statusMessage = null;
 let accountCount = 0;
 
 const events = [];
+const qrSessions = new Map();
 // The event buffer is intentionally in-memory, but the cursor must survive a
 // bridge restart. Python persists the last processed cursor per account; use
 // the highest stored value so new events remain strictly after that cursor.
@@ -140,7 +141,7 @@ function safeTimestamp(raw) {
   return Number.isNaN(date.getTime()) ? null : date.toISOString();
 }
 
-function enqueueMessage(msg) {
+function enqueueMessage(accountId, msg) {
   const scope = msg.kind === "c2c" ? "c2c" : "group";
   const mentions = Array.isArray(msg.mentions)
     ? msg.mentions
@@ -152,6 +153,7 @@ function enqueueMessage(msg) {
     ? msg.mentions.some((mention) => mention && (mention.is_you === true || mention.bot === true))
     : false;
   const event = {
+    account_id: accountId,
     event_type: "MESSAGE",
     event_cursor: ++eventCursor,
     scope,
@@ -173,7 +175,7 @@ function enqueueMessage(msg) {
   });
 }
 
-function enqueueFriendAdd(raw) {
+function enqueueFriendAdd(accountId, raw) {
   const openid = firstString(
     raw?.openid,
     raw?.open_id,
@@ -191,6 +193,7 @@ function enqueueFriendAdd(raw) {
     raw?.callbackData,
   );
   const event = {
+    account_id: accountId,
     event_type: "FRIEND_ADD",
     event_cursor: ++eventCursor,
     scope: "c2c",
@@ -227,6 +230,8 @@ function firstString(...values) {
 
 function buildBot(account) {
   const controller = new AbortController();
+  const accountId = account.app_id;
+  const sessionFile = path.join(stateDir, `gateway-session-${safeFilePart(accountId)}.json`);
   const instance = new QQBot({
     appId: account.app_id,
     appSecret: account.app_secret,
@@ -236,9 +241,8 @@ function buildBot(account) {
     sessionPersistence: {
       load: () => {
         try {
-          const file = path.join(stateDir, "gateway-session.json");
-          if (!fs.existsSync(file)) return null;
-          return JSON.parse(fs.readFileSync(file, "utf8"));
+          if (!fs.existsSync(sessionFile)) return null;
+          return JSON.parse(fs.readFileSync(sessionFile, "utf8"));
         } catch {
           return null;
         }
@@ -246,17 +250,16 @@ function buildBot(account) {
       save: (session) => {
         try {
           fs.mkdirSync(stateDir, { recursive: true });
-          const file = path.join(stateDir, "gateway-session.json");
-          const temp = `${file}.tmp`;
+          const temp = `${sessionFile}.tmp`;
           fs.writeFileSync(temp, JSON.stringify(session));
-          fs.renameSync(temp, file);
+          fs.renameSync(temp, sessionFile);
         } catch (error) {
           log("warn", "session_save_failed", { error: String(error) });
         }
       },
       clear: () => {
         try {
-          fs.rmSync(path.join(stateDir, "gateway-session.json"), { force: true });
+          fs.rmSync(sessionFile, { force: true });
         } catch {
           // Session cleanup is best-effort.
         }
@@ -265,28 +268,32 @@ function buildBot(account) {
   });
 
   instance.on("ready", (data) => {
-    gatewayConnected = true;
-    setStatus("READY");
+    const state = bots.get(accountId);
+    if (state) state.connected = true;
+    refreshGatewayStatus();
     log("info", "gateway_ready", { sessionId: data?.session_id || null });
   });
   instance.on("resumed", () => {
-    gatewayConnected = true;
-    setStatus("READY");
+    const state = bots.get(accountId);
+    if (state) state.connected = true;
+    refreshGatewayStatus();
   });
   instance.on("error", (error) => {
-    setStatus("DEGRADED", String(error?.message || error));
+    const state = bots.get(accountId);
+    if (state) state.connected = false;
+    refreshGatewayStatus(String(error?.message || error));
   });
   instance.on("message", (_ctx, msg) => {
-    try {
-      enqueueMessage(msg);
+      try {
+        enqueueMessage(accountId, msg);
     } catch (error) {
       log("error", "message_buffer_failed", { error: String(error) });
     }
   });
   instance.on("rawEvent", (ctx) => {
     if (ctx?.eventType !== "FRIEND_ADD") return;
-    try {
-      enqueueFriendAdd(ctx.data || ctx.payload || ctx);
+      try {
+        enqueueFriendAdd(accountId, ctx.data || ctx.payload || ctx);
     } catch (error) {
       log("error", "friend_add_buffer_failed", { error: String(error) });
     }
@@ -312,49 +319,82 @@ function buildBot(account) {
   instance.use(mentionGate({ requireMentionInGroup: requireMention }));
 
   setStatus("STARTING");
-  botStartPromise = instance
+  const state = {
+    account,
+    instance,
+    controller,
+    connected: false,
+    startPromise: null,
+  };
+  state.startPromise = instance
     .start(controller.signal)
     .then(() => {
-      gatewayConnected = false;
-      setStatus("STOPPED");
+      state.connected = false;
+      refreshGatewayStatus();
     })
     .catch((error) => {
-      gatewayConnected = false;
-      setStatus("DEGRADED", String(error?.message || error));
-      log("error", "bot_start_failed", { error: String(error?.stack || error) });
+      state.connected = false;
+      refreshGatewayStatus(String(error?.message || error));
+      log("error", "bot_start_failed", {
+        accountId,
+        error: String(error?.stack || error),
+      });
     });
-  bot = instance;
-  botAbort = controller;
-  log("info", "bot_started", { appId: account.app_id });
+  bots.set(accountId, state);
+  if (!bot || accountId === preferredAccountId) bot = instance;
+  log("info", "bot_started", { appId: accountId });
 }
 
 async function stopBot() {
-  const current = bot;
+  const states = [...bots.values()];
+  bots.clear();
   bot = null;
-  if (!current) return;
-  try {
-    botAbort?.abort();
-    current.stop();
-    await botStartPromise;
-  } catch {
-    // A stopped bridge must not propagate shutdown races.
-  } finally {
-    gatewayConnected = false;
-    botAbort = null;
-    botStartPromise = null;
+  await Promise.all(states.map(async (state) => {
+    try {
+      state.controller.abort();
+      state.instance.stop();
+      await state.startPromise;
+    } catch {
+      // A stopped bridge must not propagate shutdown races.
+    }
+  }));
+  gatewayConnected = false;
+  status = "STOPPED";
+}
+
+function refreshGatewayStatus(errorMessage = null) {
+  gatewayConnected = [...bots.values()].some((state) => state.connected);
+  if (gatewayConnected) {
+    setStatus("READY");
+  } else if (bots.size) {
+    setStatus("DEGRADED", errorMessage || "no QQ account is connected");
+  } else {
+    setStatus("ACTION_REQUIRED", "scan a QQ QR code to bind an account");
   }
 }
 
 async function startFromAccounts() {
   const accounts = await readAccounts();
   if (!accounts.length) {
-    setStatus("ACTION_REQUIRED", "run: python -m tools.qq_bot login");
+    await stopBot();
+    setStatus("ACTION_REQUIRED", "scan a QQ QR code to bind an account");
     return;
   }
-  const account =
-    accounts.find((item) => item.app_id === preferredAccountId) || accounts[0];
   await stopBot();
-  if (!bot) buildBot(account);
+  for (const account of accounts) buildBot(account);
+}
+
+function safeFilePart(value) {
+  return String(value).replace(/[^A-Za-z0-9_.-]/g, "_").slice(0, 120) || "account";
+}
+
+function selectedBot(accountId = "") {
+  // An explicit account id is an isolation boundary for user-owned
+  // notifications. Never silently route a stale binding through another bot.
+  if (accountId) return bots.get(accountId) || null;
+  const state = (preferredAccountId && bots.get(preferredAccountId)) || bots.values().next().value;
+  if (!state) return null;
+  return state;
 }
 
 function sendJson(res, code, body) {
@@ -379,17 +419,20 @@ async function readJsonBody(req, limit = 1024 * 1024) {
 }
 
 async function sendMessage(body) {
-  if (!bot || !gatewayConnected) {
+  const state = selectedBot(typeof body.account_id === "string" ? body.account_id : "");
+  if (!state || !state.connected) {
     const error = new Error("QQ bridge is not connected to the QQ gateway");
     error.statusCode = 503;
     throw error;
   }
-  const target = {
-    scope: body.scope === "group" ? "group" : "c2c",
-    targetId: body.target_id,
-  };
+  if (body.scope !== "c2c" && body.scope !== "group") {
+    const error = new Error("scope must be c2c or group");
+    error.statusCode = 400;
+    throw error;
+  }
+  const target = { scope: body.scope, targetId: body.target_id };
   if (body.msg_id) target.msgId = body.msg_id;
-  const response = await bot.sendText(target, body.text);
+  const response = await state.instance.sendText(target, body.text);
   return {
     message_id: response?.id || null,
     timestamp: response?.timestamp || null,
@@ -401,7 +444,7 @@ async function idempotentSend(body) {
   if (!body.idempotency_key) return sendMessage(body);
   const digest = crypto
     .createHash("sha256")
-    .update(body.idempotency_key)
+    .update(`${body.account_id || ""}\u0000${body.scope || ""}\u0000${body.target_id || ""}\u0000${body.idempotency_key}`)
     .digest("hex")
     .slice(0, 48);
   const file = path.join(outboxDir, `${digest}.json`);
@@ -419,7 +462,8 @@ async function idempotentSend(body) {
 }
 
 async function createShareLink(body) {
-  if (!bot || !gatewayConnected) {
+  const state = selectedBot(typeof body.account_id === "string" ? body.account_id : "");
+  if (!state || !state.connected) {
     const error = new Error("QQ bridge is not connected to the QQ gateway");
     error.statusCode = 503;
     throw error;
@@ -430,7 +474,7 @@ async function createShareLink(body) {
     error.statusCode = 400;
     throw error;
   }
-  const response = await bot.api.post("/v2/generate_url_link", {
+  const response = await state.instance.api.post("/v2/generate_url_link", {
     callback_data: callbackData,
   });
   if (typeof response?.retcode === "number" && response.retcode !== 0) {
@@ -446,6 +490,111 @@ async function createShareLink(body) {
     throw new Error("QQ API share-link response is missing the generated URL");
   }
   return { url_link: urlLink };
+}
+
+async function ensureConnector() {
+  if (!connectorIndex) {
+    const error = new Error("QQ QR connector is not installed");
+    error.statusCode = 503;
+    throw error;
+  }
+  if (!fs.existsSync(connectorIndex)) {
+    const error = new Error(`QQ QR connector entry not found: ${connectorIndex}`);
+    error.statusCode = 503;
+    throw error;
+  }
+  return import(pathToFileURL(connectorIndex).href);
+}
+
+async function startQrBinding() {
+  const connector = await ensureConnector();
+  const sessionId = crypto.randomBytes(18).toString("base64url");
+  const session = {
+    session_id: sessionId,
+    status: "WAITING",
+    qrcode_url: null,
+    credentials: null,
+    message: null,
+    created_at: new Date().toISOString(),
+    expires_at: new Date(Date.now() + 5 * 60 * 1000).toISOString(),
+    stop: null,
+  };
+  const stop = connector.startQrConnect(
+    {
+      onQrDisplayed: (url) => {
+        session.qrcode_url = url;
+        session.status = "WAITING";
+      },
+      onQrExpired: () => {
+        session.status = "WAITING";
+        session.message = "二维码已刷新";
+      },
+      onSuccess: (credentials) => {
+        const credential = Array.isArray(credentials) ? credentials[0] : null;
+        if (!credential?.appId || !credential?.appSecret) {
+          session.status = "FAILED";
+          session.message = "QQ 扫码未返回完整账号凭据";
+        } else {
+          session.status = "COMPLETED";
+          session.credentials = {
+            app_id: String(credential.appId),
+            app_secret: String(credential.appSecret),
+            user_openid: firstString(credential.userOpenid, credential.user_open_id) || null,
+          };
+          session.message = "QQ 账号扫码成功";
+        }
+        session.stop?.();
+      },
+      onFailure: (error) => {
+        session.status = "FAILED";
+        session.message = String(error?.message || error || "QQ 扫码失败");
+      },
+    },
+    { displayQrCodeToConsole: false, source: "Dota AI Decision Lab" },
+  );
+  session.stop = stop;
+  qrSessions.set(sessionId, session);
+  return qrPayload(session, true);
+}
+
+function qrPayload(session, includeCredentials = false) {
+  return {
+    session_id: session.session_id,
+    status: session.status,
+    qrcode_url: session.qrcode_url,
+    created_at: session.created_at,
+    expires_at: session.expires_at,
+    message: session.message,
+    ...(includeCredentials && session.credentials ? { credentials: session.credentials } : {}),
+  };
+}
+
+function qrStatus(sessionId) {
+  const session = qrSessions.get(sessionId);
+  if (!session) {
+    const error = new Error("QQ QR session not found");
+    error.statusCode = 404;
+    throw error;
+  }
+  if (Date.parse(session.expires_at) <= Date.now() && !["COMPLETED", "FAILED"].includes(session.status)) {
+    session.status = "EXPIRED";
+    session.message = "二维码已过期，请重新生成";
+    session.stop?.();
+  }
+  return qrPayload(session, true);
+}
+
+function cancelQrBinding(sessionId) {
+  const session = qrSessions.get(sessionId);
+  if (!session) {
+    const error = new Error("QQ QR session not found");
+    error.statusCode = 404;
+    throw error;
+  }
+  session.status = "CANCELLED";
+  session.message = "已取消扫码绑定";
+  session.stop?.();
+  return qrPayload(session, false);
 }
 
 const server = http.createServer(async (req, res) => {
@@ -478,6 +627,10 @@ const server = http.createServer(async (req, res) => {
         sendJson(res, 400, { error: "scope, target_id and non-empty text are required" });
         return;
       }
+      if (body.account_id !== undefined && body.account_id !== null && typeof body.account_id !== "string") {
+        sendJson(res, 400, { error: "account_id must be a string when provided" });
+        return;
+      }
       const result = await idempotentSend(body);
       sendJson(res, 200, result);
       return;
@@ -486,6 +639,20 @@ const server = http.createServer(async (req, res) => {
       const body = await readJsonBody(req);
       const result = await createShareLink(body);
       sendJson(res, 200, result);
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/qr/start") {
+      sendJson(res, 200, await startQrBinding());
+      return;
+    }
+    if (req.method === "GET" && url.pathname === "/qr/status") {
+      const sessionId = url.searchParams.get("session_id") || "";
+      sendJson(res, 200, qrStatus(sessionId));
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/qr/cancel") {
+      const body = await readJsonBody(req);
+      sendJson(res, 200, cancelQrBinding(String(body.session_id || "")));
       return;
     }
     sendJson(res, 404, { error: "not found" });
