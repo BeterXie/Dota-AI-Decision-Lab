@@ -95,9 +95,7 @@ def test_draft_labels_use_structured_identity_fields_not_live_metrics() -> None:
 def test_draft_labels_use_pick_metadata_when_full_stats_hero_is_missing() -> None:
     payload = {
         "db": {
-            "first_team": {
-                "picks": [{"hero_id": 35, "hero": {"steam_id": 35, "title": "Sniper"}}]
-            }
+            "first_team": {"picks": [{"hero_id": 35, "hero": {"steam_id": 35, "title": "Sniper"}}]}
         },
         "live_league_data": {
             "players": [{"account_id": 210053851, "name": "lorenof", "hero_id": 35}]
