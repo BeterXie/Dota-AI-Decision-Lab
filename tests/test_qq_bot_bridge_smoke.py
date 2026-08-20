@@ -46,7 +46,8 @@ export class QQBot {
     const id = 'msg-' + (++this.counter);
     this.sent.push({ target, text, id });
     if (process.env.FAKE_SENT_PATH) {
-      fs.appendFileSync(process.env.FAKE_SENT_PATH, JSON.stringify({ appId: this.opts.appId, target, text, id }) + '\\n');
+      const record = JSON.stringify({ appId: this.opts.appId, target, text, id });
+      fs.appendFileSync(process.env.FAKE_SENT_PATH, record + '\\n');
     }
     return { id, timestamp: Date.now() };
   }
