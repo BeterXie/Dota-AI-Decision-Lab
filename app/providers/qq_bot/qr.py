@@ -7,6 +7,7 @@ from dataclasses import dataclass, field
 from datetime import UTC, datetime, timedelta
 from uuid import UUID
 
+import structlog
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.notifications.center import (
@@ -25,6 +26,7 @@ class QQQrBindingError(RuntimeError):
 
 
 QR_SESSION_TTL_SECONDS = 300
+logger = structlog.get_logger()
 
 
 @dataclass
@@ -61,10 +63,14 @@ class QQUserQrBindingService:
                 self._sessions.pop(previous_id, None)
                 try:
                     await self._client.cancel_qr_binding(previous_id)
-                except Exception:
+                except Exception as exc:
                     # The bridge may already have expired or lost the old
                     # session. It is no longer reachable from this user.
-                    pass
+                    logger.debug(
+                        "qq_qr_previous_session_cleanup_failed",
+                        session_id=previous_id,
+                        error_type=type(exc).__name__,
+                    )
             payload = await self._client.start_qr_binding()
             session_id = payload.get("session_id")
             if not isinstance(session_id, str) or not session_id:
@@ -150,8 +156,12 @@ class QQUserQrBindingService:
         for session_id in session_ids:
             try:
                 await self._client.cancel_qr_binding(session_id)
-            except Exception:
-                pass
+            except Exception as exc:
+                logger.debug(
+                    "qq_qr_session_cleanup_failed",
+                    session_id=session_id,
+                    error_type=type(exc).__name__,
+                )
 
     async def _owned_session(self, owner_user_id: UUID, session_id: str) -> _QrSession:
         await self._purge()

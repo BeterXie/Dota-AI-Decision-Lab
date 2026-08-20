@@ -2,6 +2,7 @@ from collections.abc import Awaitable, Callable
 from typing import Protocol
 from uuid import UUID
 
+import structlog
 from fastapi import APIRouter, HTTPException, Request, status
 from pydantic import BaseModel
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
@@ -16,6 +17,7 @@ from app.notifications.center import (
 from app.notifications.secure_center import NotificationCenterService
 
 QQPairingLinkFactory = Callable[[str], Awaitable[str]]
+logger = structlog.get_logger()
 
 
 class UserQrBindingService(Protocol):
@@ -188,11 +190,16 @@ def create_notification_router(
             if callable(revoke):
                 try:
                     await revoke(user.id, destination)
-                except Exception:
+                except Exception as exc:
                     # The binding is already disabled in the durable ledger. A
                     # transient provider-state cleanup failure must not resurrect
                     # delivery; the next account refresh can remove the token.
-                    pass
+                    logger.warning(
+                        "notification_provider_binding_cleanup_failed",
+                        channel=channel,
+                        binding_id=str(binding_id),
+                        error_type=type(exc).__name__,
+                    )
         return await center.overview(user.id)
 
     return router
