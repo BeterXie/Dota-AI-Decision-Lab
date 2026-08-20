@@ -172,9 +172,7 @@ class PaddleApiClient:
         response_price_id = data.get("id")
         unit_price = data.get("unit_price")
         amount = unit_price.get("amount") if isinstance(unit_price, dict) else None
-        currency_code = (
-            unit_price.get("currency_code") if isinstance(unit_price, dict) else None
-        )
+        currency_code = unit_price.get("currency_code") if isinstance(unit_price, dict) else None
         status = data.get("status")
         if response_price_id != price_id:
             raise PaddleApiError("Paddle price response does not match the requested price")

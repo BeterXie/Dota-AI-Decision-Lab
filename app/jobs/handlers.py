@@ -583,8 +583,7 @@ class ApplicationJobHandlers:
         timely_records = [
             record
             for record in current_records
-            if record.latency_seconds is not None
-            and record.latency_seconds <= max_latency_seconds
+            if record.latency_seconds is not None and record.latency_seconds <= max_latency_seconds
         ]
         buy_decisions = [
             record

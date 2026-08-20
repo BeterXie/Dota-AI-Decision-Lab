@@ -1112,8 +1112,7 @@ async def test_reconciliation_recovers_fresh_dltv_identity_conflict_once() -> No
         original = await session.get(DurableJobRecord, failed_job_id)
         recovery = await session.scalar(
             select(DurableJobRecord).where(
-                DurableJobRecord.dedupe_key
-                == f"reconcile-dltv-identity-v1:{failed_job_id}"
+                DurableJobRecord.dedupe_key == f"reconcile-dltv-identity-v1:{failed_job_id}"
             )
         )
         assert original is not None

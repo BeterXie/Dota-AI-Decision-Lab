@@ -120,9 +120,7 @@ class ReconciliationService:
                     .where(
                         DurableJobRecord.job_type == JobType.BOOTSTRAP_DLTV_MATCH.value,
                         DurableJobRecord.status == JobStatus.FAILED_TERMINAL.value,
-                        ~DurableJobRecord.dedupe_key.like(
-                            "reconcile-dltv-identity-v1:%"
-                        ),
+                        ~DurableJobRecord.dedupe_key.like("reconcile-dltv-identity-v1:%"),
                         DurableJobRecord.last_error.contains(
                             "IdentityAmbiguousError: PROVIDER_EVENT_IDENTITY_CONFLICT"
                         ),
@@ -165,9 +163,7 @@ class ReconciliationService:
         if not recoverable_jobs:
             return 0
 
-        recovery_keys = {
-            job.id: f"reconcile-dltv-identity-v1:{job.id}" for job in recoverable_jobs
-        }
+        recovery_keys = {job.id: f"reconcile-dltv-identity-v1:{job.id}" for job in recoverable_jobs}
         existing_keys = set(
             (
                 await session.scalars(
