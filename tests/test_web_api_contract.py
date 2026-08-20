@@ -796,6 +796,7 @@ async def test_map_api_exposes_partial_lineup_and_readiness_counts() -> None:
     assert payload["draft"]["slots"][0]["hero_id"] is None
     assert payload["draft"]["slots"][1]["account_id"] == 418942836
     assert payload["draft"]["slots"][1]["hero_id"] == 145
+    assert payload["draft"]["slots"][1]["hero_name"] == "Kez"
     assert payload["live"]["first_blood"] == "radiant"
     assert payload["live_timeline"][0]["first_blood"] == "radiant"
     await engine.dispose()

@@ -14,6 +14,7 @@ from prometheus_client import CONTENT_TYPE_LATEST, generate_latest
 from sqlalchemy import and_, func, or_, select, tuple_
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
+from app.ai.dota_heroes import DOTA_HERO_NAMES
 from app.history.scoring import sample_confidence
 from app.market.current import evaluate_current_market_pair, map_market_stages
 from app.market.fair_probability import remove_vig
@@ -1431,10 +1432,22 @@ async def _draft_slot_payloads(
                 else None
             ),
             "hero_id": slot.hero_id,
-            "hero_name": hero_by_id[slot.hero_id].name if slot.hero_id in hero_by_id else None,
+            "hero_name": _display_hero_name(slot.hero_id, hero_by_id),
         }
         for slot in slots
     ]
+
+
+def _display_hero_name(
+    hero_id: int | None,
+    hero_by_id: dict[int, CanonicalHero],
+) -> str | None:
+    if hero_id is None:
+        return None
+    hero = hero_by_id.get(hero_id)
+    if hero is not None and hero.name:
+        return hero.name
+    return DOTA_HERO_NAMES.get(hero_id)
 
 
 async def _pending_series_payload(

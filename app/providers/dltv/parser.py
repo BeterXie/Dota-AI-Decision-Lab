@@ -148,6 +148,11 @@ def parse_draft(payload: dict[str, Any]) -> DraftValidation:
 def parse_draft_labels(payload: dict[str, Any]) -> tuple[dict[int, str], dict[int, str]]:
     player_names: dict[int, str] = {}
     hero_names: dict[int, str] = {}
+    database = payload.get("db")
+    if isinstance(database, dict):
+        for team_key in ("first_team", "second_team"):
+            _collect_pick_hero_names(database.get(team_key), hero_names)
+
     live_league_data = payload.get("live_league_data")
     if isinstance(live_league_data, dict):
         raw_players = live_league_data.get("players")
@@ -158,6 +163,10 @@ def parse_draft_labels(payload: dict[str, Any]) -> tuple[dict[int, str], dict[in
             name = item.get("name")
             if account_id is not None and isinstance(name, str) and name.strip():
                 player_names[account_id] = name.strip()
+        scoreboard = live_league_data.get("scoreboard")
+        if isinstance(scoreboard, dict):
+            for side in ("radiant", "dire"):
+                _collect_pick_hero_names(scoreboard.get(side), hero_names)
 
     full_stats = payload.get("full_stats")
     if isinstance(full_stats, dict):
@@ -187,6 +196,22 @@ def parse_draft_labels(payload: dict[str, Any]) -> tuple[dict[int, str], dict[in
                     ):
                         hero_names[hero_id] = name.strip()
     return player_names, hero_names
+
+
+def _collect_pick_hero_names(team: object, hero_names: dict[int, str]) -> None:
+    if not isinstance(team, dict):
+        return
+    picks = team.get("picks")
+    for item in picks if isinstance(picks, list) else []:
+        if not isinstance(item, dict):
+            continue
+        hero = item.get("hero")
+        if not isinstance(hero, dict):
+            continue
+        hero_id = _optional_int(hero.get("steam_id"))
+        name = hero.get("title")
+        if hero_id is not None and hero_id > 0 and isinstance(name, str) and name.strip():
+            hero_names[hero_id] = name.strip()
 
 
 def parse_fast_patch(
