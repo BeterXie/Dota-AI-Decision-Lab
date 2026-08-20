@@ -111,7 +111,9 @@ The account UI uses:
 
 - `GET /api/notifications`: bindings, preferences, and recent delivery ledger.
 - `POST /api/notifications/bindings/email`: bind the current account's verified login email.
-- `POST /api/notifications/pairing/{channel}`: create a one-time QQ or WeChat pairing command.
+- `POST /api/notifications/qr/{channel}/start`: start a per-user QQ or WeChat QR session.
+- `POST /api/notifications/qr/{channel}/{session_id}`: poll and confirm that QR session.
+- `DELETE /api/notifications/qr/{channel}/{session_id}`: cancel that QR session.
 - `PUT /api/notifications/preferences/{channel}`: enable/disable AI decision delivery for that channel.
 - `DELETE /api/notifications/bindings/{binding_id}`: disable one owned destination.
 
@@ -125,32 +127,26 @@ Email is not an arbitrary address entered in a form. The user explicitly binds t
 
 ### QQ binding
 
-The QQ bot installation is infrastructure-scoped: an administrator scans the QQ login QR once
-and keeps the shared bot online. It must be configured and `QQ_BOT_ENABLED=true` for QQ delivery;
-the administrator QR is never shown as an end-user binding step. In Notification Center, each
-user selects **Generate pairing code** and receives a command like:
-
-```text
-绑定 ABCD-1234
-```
-
-QQ users should open the generated official share link (or the configured
-`QQ_BOT_CONTACT_URL` fallback) and start their own C2C chat. The official `FRIEND_ADD` callback
-can carry the short code automatically; the manual command remains the recovery path. The bot
-consumes the one-time code and records that user's real C2C conversation as a verified binding.
-The same QQ destination cannot be claimed by a second account while already bound.
+The QQ bridge is infrastructure, but account ownership is per user. Notification Center starts a connector QR
+session; the user scans with phone QQ, and the connector returns a dedicated AppID/AppSecret plus
+that user's `userOpenid`. Those credentials stay in the local QQ state directory, while the
+Notification Center binding stores only the account ID and C2C target. The same user can have only
+one active QR-owned QQ account per channel. The older shared-bot share-link/`绑定 <code>` flow is
+kept only for legacy installations.
 
 After pairing, `订阅通知` and `退订通知` toggle the preference for the bound QQ destination. Ordinary bot query commands continue to use the existing QQ command behavior.
 
 ### WeChat binding
 
-The WeChat ClawBot installation is also infrastructure-scoped: an administrator scans its login
-QR once and keeps one shared bot account online. It must be configured and
-`WECHAT_CLAWBOT_ENABLED=true` for WeChat delivery. Each user starts a separate direct chat via
-the configured `WECHAT_CLAWBOT_CONTACT_URL` (when provided), generates a one-time code in
-Notification Center, and sends `绑定 <code>` to the bot. The bot binds the actual bot account
-plus that sender's user id and context token to the authenticated application account. A QR
-login's `ilink_user_id` is not treated as a notification recipient.
+The primary flow is user-owned QR binding. An authenticated user starts a QR session in
+Notification Center and scans it with their own WeChat account. After Tencent confirms the login,
+the returned `bot_token`, `ilink_bot_id`, and `ilink_user_id` are persisted only in the local
+WeChat state directory, with the site user's ID stored as non-secret ownership metadata. A
+verified Notification Center binding is created for that account and notifications target the
+scanned `ilink_user_id`. No shared administrator account or public contact link is required.
+
+The CLI `tools/wechat_clawbot.py login` path remains available for operator diagnostics and legacy
+shared accounts; it is not the normal user onboarding path.
 
 After pairing, `订阅通知` and `退订通知` toggle the WeChat preference. Ordinary bot query commands continue to use the existing WeChat command behavior.
 

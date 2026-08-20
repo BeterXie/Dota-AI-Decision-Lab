@@ -79,6 +79,7 @@ from app.providers.qq_bot import (
     QQBotService,
     QQBotStore,
     QQBridgeClient,
+    QQUserQrBindingService,
 )
 from app.providers.qq_bot.models import QQBotAccount, parse_qq_target_entries
 from app.providers.raybet.http import RayBetHttpClient, RayBetHttpPool
@@ -90,6 +91,7 @@ from app.providers.wechat_clawbot import (
     WeChatClawBotClient,
     WeChatClawBotService,
     WeChatClawBotStore,
+    WeChatUserQrBindingService,
 )
 from app.repositories.raw import RawEventRepository
 from app.runtime.health import HealthRegistry
@@ -224,15 +226,25 @@ async def run() -> None:
         session_factory=session_factory,
         jobs=jobs,
     )
+    wechat_store = (
+        WeChatClawBotStore(settings.wechat_clawbot_state_dir)
+        if settings.wechat_clawbot_enabled
+        else None
+    )
+    wechat_client = (
+        WeChatClawBotClient(
+            base_url=settings.wechat_clawbot_base_url,
+            bot_agent=settings.wechat_clawbot_bot_agent,
+            timeout_seconds=settings.wechat_clawbot_timeout_seconds,
+            long_poll_timeout_seconds=settings.wechat_clawbot_long_poll_timeout_seconds,
+        )
+        if settings.wechat_clawbot_enabled
+        else None
+    )
     wechat_clawbot = (
         WeChatClawBotService(
-            client=WeChatClawBotClient(
-                base_url=settings.wechat_clawbot_base_url,
-                bot_agent=settings.wechat_clawbot_bot_agent,
-                timeout_seconds=settings.wechat_clawbot_timeout_seconds,
-                long_poll_timeout_seconds=settings.wechat_clawbot_long_poll_timeout_seconds,
-            ),
-            store=WeChatClawBotStore(settings.wechat_clawbot_state_dir),
+            client=wechat_client,
+            store=wechat_store,
             session_factory=session_factory,
             jobs=jobs,
             health=health,
@@ -241,7 +253,26 @@ async def run() -> None:
             market_max_pair_skew_seconds=settings.market_max_pair_skew_seconds,
             max_decision_age_seconds=settings.wechat_clawbot_decision_max_age_seconds,
         )
+        if wechat_client is not None and wechat_store is not None
+        else None
+    )
+    wechat_qr_client = (
+        WeChatClawBotClient(
+            base_url=settings.wechat_clawbot_base_url,
+            bot_agent=settings.wechat_clawbot_bot_agent,
+            timeout_seconds=settings.wechat_clawbot_timeout_seconds,
+            long_poll_timeout_seconds=settings.wechat_clawbot_long_poll_timeout_seconds,
+        )
         if settings.wechat_clawbot_enabled
+        else None
+    )
+    wechat_qr_binding = (
+        WeChatUserQrBindingService(
+            client=wechat_qr_client,
+            store=wechat_store,
+            session_factory=session_factory,
+        )
+        if wechat_qr_client is not None and wechat_store is not None
         else None
     )
     qq_store = QQBotStore(settings.qq_bot_state_dir) if settings.qq_bot_enabled else None
@@ -267,6 +298,23 @@ async def run() -> None:
             max_decision_age_seconds=settings.qq_bot_decision_max_age_seconds,
         )
         if settings.qq_bot_enabled
+        else None
+    )
+    qq_qr_client = (
+        QQBridgeClient(
+            base_url=f"http://{settings.qq_bot_bridge_host}:{settings.qq_bot_bridge_port}",
+            timeout_seconds=settings.qq_bot_bridge_timeout_seconds,
+        )
+        if settings.qq_bot_enabled and qq_store is not None
+        else None
+    )
+    qq_qr_binding = (
+        QQUserQrBindingService(
+            client=qq_qr_client,
+            store=qq_store,
+            session_factory=session_factory,
+        )
+        if qq_qr_client is not None and qq_store is not None
         else None
     )
     qq_bridge_runner = (
@@ -695,6 +743,8 @@ async def run() -> None:
         qq_pairing_link_factory=(qq_bot.create_share_link if qq_bot is not None else None),
         qq_contact_url=settings.qq_bot_contact_url,
         wechat_contact_url=settings.wechat_clawbot_contact_url,
+        qq_qr_binding_service=qq_qr_binding,
+        wechat_qr_binding_service=wechat_qr_binding,
     )
     workers.append(
         WebServerWorker(
@@ -723,8 +773,14 @@ async def run() -> None:
             await email_notifications.close()
         if wechat_clawbot is not None:
             await wechat_clawbot.stop()
+        if wechat_qr_binding is not None:
+            await wechat_qr_binding.close()
+        if wechat_qr_client is not None:
+            await wechat_qr_client.close()
         if qq_bot is not None:
             await qq_bot.stop()
+        if qq_qr_client is not None:
+            await qq_qr_client.close()
         await ai.close()
         await opendota.close()
         if stratz_history is not None:
@@ -980,7 +1036,7 @@ async def _initialize_dependency_health(
         await health.dependency(
             "WECHAT",
             "ACTION_REQUIRED",
-            message="run: python -m tools.wechat_clawbot login",
+            message="scan a WeChat QR code from Notification Center",
         )
     else:
         await health.dependency("WECHAT", "UNKNOWN")
@@ -990,7 +1046,7 @@ async def _initialize_dependency_health(
         await health.dependency(
             "QQ",
             "ACTION_REQUIRED",
-            message="run: python -m tools.qq_bot login",
+            message="scan a QQ QR code from Notification Center",
         )
     else:
         await health.dependency("QQ", "UNKNOWN")

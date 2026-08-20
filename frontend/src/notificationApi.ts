@@ -44,6 +44,28 @@ export interface PairingCode {
     | string;
 }
 
+export interface QrBindingSession {
+  channel: "QQ" | "WECHAT";
+  session_id: string;
+  status:
+    | "WAITING"
+    | "SCANNED"
+    | "NEED_VERIFY_CODE"
+    | "BOUND"
+    | "COMPLETED"
+    | "FAILED"
+    | "EXPIRED"
+    | "CANCELLED"
+    | string;
+  qrcode_url?: string | null;
+  created_at: string;
+  expires_at: string;
+  message?: string | null;
+  account_id?: string | null;
+  user_id?: string | null;
+  binding_id?: string | null;
+}
+
 export async function fetchNotificationCenter(): Promise<NotificationCenterState> {
   return request<NotificationCenterState>("/api/notifications");
 }
@@ -58,6 +80,37 @@ export async function createPairingCode(channel: "QQ" | "WECHAT"): Promise<Pairi
   return request<PairingCode>(`/api/notifications/pairing/${channel.toLowerCase()}`, {
     method: "POST"
   });
+}
+
+export async function startQrBinding(channel: "QQ" | "WECHAT"): Promise<QrBindingSession> {
+  return request<QrBindingSession>(`/api/notifications/qr/${channel.toLowerCase()}/start`, {
+    method: "POST"
+  });
+}
+
+export async function pollQrBinding(
+  channel: "QQ" | "WECHAT",
+  sessionId: string,
+  verifyCode?: string
+): Promise<QrBindingSession> {
+  return request<QrBindingSession>(
+    `/api/notifications/qr/${channel.toLowerCase()}/${encodeURIComponent(sessionId)}`,
+    {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(verifyCode ? { verify_code: verifyCode } : {})
+    }
+  );
+}
+
+export async function cancelQrBinding(
+  channel: "QQ" | "WECHAT",
+  sessionId: string
+): Promise<QrBindingSession> {
+  return request<QrBindingSession>(
+    `/api/notifications/qr/${channel.toLowerCase()}/${encodeURIComponent(sessionId)}`,
+    { method: "DELETE" }
+  );
 }
 
 export async function setNotificationPreference(

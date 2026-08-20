@@ -15,6 +15,11 @@ class QQBotAccount(BaseModel):
 
     app_id: str
     app_secret: str
+    # Returned by the official QR connector.  New user-owned accounts use it
+    # as their C2C notification target; legacy shared accounts leave it empty.
+    user_openid: str | None = None
+    owner_user_id: str | None = None
+    account_mode: str = "SHARED"
     created_at: datetime
 
 
@@ -36,6 +41,9 @@ class QQContact(BaseModel):
 class QQInboundMessage(BaseModel):
     model_config = ConfigDict(frozen=True)
 
+    # The bridge may host several user-owned bots.  Legacy event fixtures omit
+    # this field and continue to route through the first configured account.
+    account_id: str | None = None
     event_type: Literal["MESSAGE", "FRIEND_ADD"] = "MESSAGE"
     event_cursor: int
     scope: QQScope

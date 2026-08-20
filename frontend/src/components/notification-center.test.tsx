@@ -5,6 +5,12 @@ import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { I18nProvider } from "../i18n";
 import { NotificationCenterPage } from "./NotificationCenterPage";
 
+vi.mock("qrcode", () => ({
+  default: {
+    toDataURL: vi.fn(async () => "data:image/png;base64,qr-preview")
+  }
+}));
+
 const now = "2026-08-17T00:00:00Z";
 const center = {
   required_entitlement: "realtime_notifications",
@@ -87,6 +93,48 @@ test("renders verified account destinations and creates a short-lived QQ pairing
   );
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/notifications/pairing/qq",
+    expect.objectContaining({ method: "POST", credentials: "same-origin" })
+  );
+});
+
+test("renders a QR image for a user-owned QQ binding session", async () => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    const path = new URL(String(input), "http://localhost").pathname;
+    if (path === "/api/notifications") {
+      return new Response(JSON.stringify(center), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+    if (path === "/api/notifications/qr/qq/start") {
+      return new Response(JSON.stringify({
+        channel: "QQ",
+        session_id: "qr-session",
+        status: "WAITING",
+        qrcode_url: "https://q.qq.com/qqbot/openclaw/connect.html?task_id=task",
+        created_at: now,
+        expires_at: "2026-08-17T00:05:00Z"
+      }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" }
+      });
+    }
+    return new Response(JSON.stringify({ detail: "not found" }), {
+      status: 404,
+      headers: { "Content-Type": "application/json" }
+    });
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  renderPage();
+  await screen.findByRole("heading", { name: "Notification Center" });
+  const qqCard = screen.getByRole("heading", { name: "QQ Bot" }).closest("article");
+  expect(qqCard).not.toBeNull();
+  fireEvent.click(within(qqCard!).getByRole("button", { name: "Scan to bind your account" }));
+  const image = await within(qqCard!).findByAltText("Scan to bind account");
+  expect(image).toHaveAttribute("src", "data:image/png;base64,qr-preview");
+  expect(fetchMock).toHaveBeenCalledWith(
+    "/api/notifications/qr/qq/start",
     expect.objectContaining({ method: "POST", credentials: "same-origin" })
   );
 });

@@ -4,6 +4,7 @@ from app.notifications.center import (
     CHANNEL_QQ,
     NotificationBindingConflict,
     NotificationPairingError,
+    qq_account_destination_key,
     qq_destination_key,
 )
 from app.notifications.pairing_limiter import PairingAttemptLimiter
@@ -89,25 +90,29 @@ class UserScopedQQBotService(LegacyQQBotService):
         text = render_decision_notification(snapshot, decisions, channel_label="QQ")
         sent = 0
         failures: list[Exception] = []
-        delivery_target_keys: set[tuple[str, str]] = set()
+        delivery_target_keys: set[tuple[str | None, str, str]] = set()
         for delivery_id in delivery_ids:
             target = await self._notification_center.start_delivery(delivery_id)
             if target is None:
                 continue
             scope = target.destination.get("scope")
             target_id = target.destination.get("target_id")
+            account_id = target.destination.get("account_id")
             if scope not in {"c2c", "group"} or not isinstance(target_id, str) or not target_id:
                 await self._notification_center.mark_expired(
                     delivery_id,
                     "QQ notification binding is no longer backed by a valid target",
                 )
                 continue
-            delivery_target_keys.add((scope, target_id))
+            delivery_target_keys.add(
+                (account_id if isinstance(account_id, str) else None, scope, target_id)
+            )
             try:
                 provider_message_id = await self._client.send_text(
                     scope=scope,
                     target_id=target_id,
                     text=text,
+                    account_id=account_id if isinstance(account_id, str) else None,
                     idempotency_key=target.idempotency_key,
                 )
             except Exception as exc:
@@ -118,7 +123,7 @@ class UserScopedQQBotService(LegacyQQBotService):
             sent += 1
         decision_batch_key = ",".join(sorted(str(item.id) for item in decisions))
         for target in direct_targets:
-            if target.key in delivery_target_keys:
+            if (None, target.scope, target.target_id) in delivery_target_keys:
                 continue
             try:
                 await self._client.send_text(
@@ -168,7 +173,11 @@ class UserScopedQQBotService(LegacyQQBotService):
         if pairing_code is None and not self._message_allowed(message):
             return
         normalized = message.text.strip().casefold()
-        destination_key = qq_destination_key(message.scope, message.target_id)
+        destination_key = (
+            qq_account_destination_key(message.account_id, message.scope, message.target_id)
+            if message.account_id
+            else qq_destination_key(message.scope, message.target_id)
+        )
         preference_command = (
             normalized in _SUBSCRIBE_COMMANDS
             or normalized in _UNSUBSCRIBE_COMMANDS
@@ -194,6 +203,7 @@ class UserScopedQQBotService(LegacyQQBotService):
                     "⚠️ AI 决策查询、账号绑定和暂停/恢复通知仅支持已绑定的 QQ 私聊。"
                     "群聊请使用「订阅通知」或「退订通知」。"
                 ),
+                account_id=message.account_id,
                 msg_id=message.message_id,
             )
             return
@@ -208,7 +218,15 @@ class UserScopedQQBotService(LegacyQQBotService):
                         channel=CHANNEL_QQ,
                         code=pairing_code,
                         destination_key=destination_key,
-                        destination={"scope": "c2c", "target_id": message.target_id},
+                        destination={
+                            "scope": "c2c",
+                            "target_id": message.target_id,
+                            **(
+                                {"account_id": message.account_id}
+                                if message.account_id
+                                else {}
+                            ),
+                        },
                         label=message.sender_name or contact.label,
                     )
                     reply = (
@@ -223,6 +241,7 @@ class UserScopedQQBotService(LegacyQQBotService):
                 scope="c2c",
                 target_id=message.target_id,
                 text=reply,
+                account_id=message.account_id,
                 msg_id=message.message_id,
             )
             return
@@ -233,8 +252,9 @@ class UserScopedQQBotService(LegacyQQBotService):
                 target_id=message.target_id,
                 text=(
                     "👋 已添加 Dota AI Decision Lab。请在网页 Notification Center "
-                    "生成 QQ 配对码后，再发送「绑定 <配对码>」完成通知绑定。"
+                    "直接扫码绑定自己的 QQ 账号；旧共享机器人仅支持迁移配对码。"
                 ),
+                account_id=message.account_id,
             )
             return
 
@@ -247,12 +267,13 @@ class UserScopedQQBotService(LegacyQQBotService):
             reply = (
                 "✅ 已开启 AI 决策 QQ 通知。"
                 if updated
-                else "请先在网页 Notification Center 生成配对码，再私聊发送「绑定 <配对码>」。"
+                else "请先在网页 Notification Center 扫码绑定自己的 QQ 账号。"
             )
             await self._client.send_text(
                 scope="c2c",
                 target_id=message.target_id,
                 text=reply,
+                account_id=message.account_id,
                 msg_id=message.message_id,
             )
             return
@@ -267,6 +288,7 @@ class UserScopedQQBotService(LegacyQQBotService):
                 scope="c2c",
                 target_id=message.target_id,
                 text=reply,
+                account_id=message.account_id,
                 msg_id=message.message_id,
             )
             return
@@ -278,7 +300,7 @@ class UserScopedQQBotService(LegacyQQBotService):
             if user_id is None:
                 reply = (
                     "🔒 AI 决策查询需要先绑定登录账号。请在网页 Notification Center "
-                    "生成配对码，再私聊发送「绑定 <配对码>」。"
+                    "扫码绑定自己的 QQ 账号。"
                 )
             elif not await self._entitlements.has_entitlement(
                 user_id,
@@ -299,6 +321,7 @@ class UserScopedQQBotService(LegacyQQBotService):
                 scope="c2c",
                 target_id=message.target_id,
                 text=reply,
+                account_id=message.account_id,
                 msg_id=message.message_id,
             )
             return
@@ -307,6 +330,20 @@ class UserScopedQQBotService(LegacyQQBotService):
     def _notifications_enabled(self) -> bool:
         getter = getattr(self._store, "decision_notifications_enabled", None)
         return bool(getter()) if callable(getter) else True
+
+    def _message_allowed(self, message: QQInboundMessage) -> bool:
+        if message.account_id:
+            account = next(
+                (item for item in self._store.accounts() if item.app_id == message.account_id),
+                None,
+            )
+            if (
+                account is not None
+                and account.account_mode == "USER"
+                and account.user_openid == message.sender_id
+            ):
+                return True
+        return super()._message_allowed(message)
 
 
 def _pairing_code_from_text(text: str) -> str | None:

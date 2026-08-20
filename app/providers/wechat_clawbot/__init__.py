@@ -6,9 +6,15 @@ Runtime delivery is user-scoped through verified Notification Center bindings.
 """
 
 from app.providers.wechat_clawbot.client import WeChatClawBotClient
+from app.providers.wechat_clawbot.qr import WeChatUserQrBindingService
 from app.providers.wechat_clawbot.storage import WeChatClawBotStore
 from app.providers.wechat_clawbot.user_service import (
     UserScopedWeChatClawBotService as WeChatClawBotService,
 )
 
-__all__ = ["WeChatClawBotClient", "WeChatClawBotService", "WeChatClawBotStore"]
+__all__ = [
+    "WeChatClawBotClient",
+    "WeChatClawBotService",
+    "WeChatClawBotStore",
+    "WeChatUserQrBindingService",
+]

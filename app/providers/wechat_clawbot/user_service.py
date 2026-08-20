@@ -169,7 +169,7 @@ class UserScopedWeChatClawBotService(LegacyWeChatClawBotService):
             if bound_user_id is None:
                 reply = (
                     "🔒 当前微信会话尚未绑定登录账号。请在网页 Notification Center "
-                    "生成配对码，再发送「绑定 <配对码>」。"
+                    "直接扫码绑定自己的微信账号。"
                 )
             elif normalized in {"订阅通知", "订阅决策", "订阅"} or is_notification_resume_command(
                 message.text
@@ -182,7 +182,7 @@ class UserScopedWeChatClawBotService(LegacyWeChatClawBotService):
                 reply = (
                     "✅ 已开启 AI 决策微信通知。"
                     if updated
-                    else "请先在网页 Notification Center 生成配对码，再发送「绑定 <配对码>」。"
+                    else "请先在网页 Notification Center 扫码绑定自己的微信账号。"
                 )
             elif normalized in {"退订通知", "退订", "取消订阅"} or is_notification_pause_command(
                 message.text

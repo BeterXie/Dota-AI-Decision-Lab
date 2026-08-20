@@ -27,6 +27,11 @@ class WeChatAccount(BaseModel):
     account_id: str
     token: str
     base_url: str = WECHAT_BASE_URL
+    # ``owner_user_id`` is the authenticated Dota Lab account that completed
+    # this QR login.  It is local metadata only; the bearer token remains in
+    # the private state directory.
+    owner_user_id: str | None = None
+    account_mode: str = "SHARED"
     user_id: str | None = None
     context_token: str | None = None
     created_at: datetime

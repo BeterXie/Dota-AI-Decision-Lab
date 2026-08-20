@@ -60,7 +60,7 @@ class WeChatClawBotClient:
             verify=create_system_ssl_context(),
             timeout=httpx.Timeout(timeout_seconds),
         )
-        self._started_accounts: set[str] = set()
+        self._started_accounts: dict[str, tuple[str, str]] = {}
 
     async def close(self) -> None:
         if self._owns_client:
@@ -68,6 +68,10 @@ class WeChatClawBotClient:
 
     def base_url(self) -> str:
         return self._base_url
+
+    @property
+    def long_poll_timeout_seconds(self) -> float:
+        return self._long_poll_timeout_seconds
 
     async def start_qr_login(self) -> WeChatQrStart:
         raw = await self._post(
@@ -147,10 +151,11 @@ class WeChatClawBotClient:
             )
 
     async def ensure_started(self, account: WeChatAccount) -> None:
-        if account.account_id in self._started_accounts:
+        fingerprint = (account.token, account.base_url)
+        if self._started_accounts.get(account.account_id) == fingerprint:
             return
         await self.notify_start(account)
-        self._started_accounts.add(account.account_id)
+        self._started_accounts[account.account_id] = fingerprint
 
     async def get_updates(
         self,

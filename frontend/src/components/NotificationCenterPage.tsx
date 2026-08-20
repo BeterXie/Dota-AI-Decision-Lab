@@ -1,17 +1,22 @@
-import React, { useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import QRCode from "qrcode";
 import { useI18n } from "../i18n";
 import { UiIcon } from "./VisualIdentity";
 import {
   bindVerifiedEmail,
+  cancelQrBinding,
   createPairingCode,
   disableNotificationBinding,
   fetchNotificationCenter,
+  pollQrBinding,
   setNotificationPreference,
+  startQrBinding,
   type NotificationBinding,
   type NotificationCenterState,
   type NotificationChannel,
-  type PairingCode
+  type PairingCode,
+  type QrBindingSession
 } from "../notificationApi";
 import "./notification-center.css";
 
@@ -22,7 +27,12 @@ export function NotificationCenterPage({ userEmail }: { userEmail: string | null
   const { locale } = useI18n();
   const queryClient = useQueryClient();
   const [pairing, setPairing] = useState<Partial<Record<"QQ" | "WECHAT", PairingCode>>>({});
+  const [qrBinding, setQrBinding] = useState<Partial<Record<"QQ" | "WECHAT", QrBindingSession>>>({});
+  const [qrErrors, setQrErrors] = useState<Partial<Record<"QQ" | "WECHAT", string>>>({});
+  const [verifyCodes, setVerifyCodes] = useState<Partial<Record<"QQ" | "WECHAT", string>>>({});
   const [copiedChannel, setCopiedChannel] = useState<"QQ" | "WECHAT" | null>(null);
+  const qrTimers = useRef(new Map<string, number>());
+  const qrPolling = useRef(new Set<string>());
   const center = useQuery({
     queryKey: centerKey,
     queryFn: fetchNotificationCenter,
@@ -45,6 +55,99 @@ export function NotificationCenterPage({ userEmail }: { userEmail: string | null
     mutationFn: (channel: "QQ" | "WECHAT") => createPairingCode(channel),
     onSuccess: (data) => setPairing((current) => ({ ...current, [data.channel]: data }))
   });
+
+  const scheduleQrPoll = (session: QrBindingSession) => {
+    if (["BOUND", "FAILED", "EXPIRED", "CANCELLED", "NEED_VERIFY_CODE"].includes(session.status)) return;
+    const key = `${session.channel}:${session.session_id}`;
+    if (qrTimers.current.has(key) || qrPolling.current.has(key)) return;
+    const timer = window.setTimeout(async () => {
+      qrTimers.current.delete(key);
+      qrPolling.current.add(key);
+      try {
+        const next = await pollQrBinding(session.channel, session.session_id);
+        setQrBinding((current) => ({ ...current, [next.channel]: next }));
+        setQrErrors((current) => ({ ...current, [next.channel]: undefined }));
+        if (next.status === "BOUND") {
+          await center.refetch();
+        } else {
+          scheduleQrPoll(next);
+        }
+      } catch (error) {
+        setQrErrors((current) => ({
+          ...current,
+          [session.channel]: error instanceof Error ? error.message : String(error)
+        }));
+      } finally {
+        qrPolling.current.delete(key);
+      }
+    }, session.status === "SCANNED" ? 800 : 1600);
+    qrTimers.current.set(key, timer);
+  };
+
+  useEffect(() => () => {
+    qrTimers.current.forEach((timer) => window.clearTimeout(timer));
+    qrTimers.current.clear();
+    qrPolling.current.clear();
+  }, []);
+
+  const beginQrBinding = async (channel: "QQ" | "WECHAT") => {
+    [...qrTimers.current.keys()]
+      .filter((key) => key.startsWith(`${channel}:`))
+      .forEach((key) => {
+        const timer = qrTimers.current.get(key);
+        if (timer !== undefined) window.clearTimeout(timer);
+        qrTimers.current.delete(key);
+      });
+    setQrErrors((current) => ({ ...current, [channel]: undefined }));
+    try {
+      const session = await startQrBinding(channel);
+      setQrBinding((current) => ({ ...current, [channel]: session }));
+      scheduleQrPoll(session);
+    } catch (error) {
+      setQrErrors((current) => ({
+        ...current,
+        [channel]: error instanceof Error ? error.message : String(error)
+      }));
+    }
+  };
+
+  const submitVerifyCode = async (channel: "QQ" | "WECHAT") => {
+    const session = qrBinding[channel];
+    if (!session) return;
+    try {
+      const next = await pollQrBinding(channel, session.session_id, verifyCodes[channel]);
+      setQrBinding((current) => ({ ...current, [channel]: next }));
+      setVerifyCodes((current) => ({ ...current, [channel]: "" }));
+      if (next.status === "BOUND") await center.refetch();
+      else scheduleQrPoll(next);
+    } catch (error) {
+      setQrErrors((current) => ({
+        ...current,
+        [channel]: error instanceof Error ? error.message : String(error)
+      }));
+    }
+  };
+
+  const stopQrBinding = async (channel: "QQ" | "WECHAT") => {
+    const session = qrBinding[channel];
+    if (!session) return;
+    [...qrTimers.current.keys()]
+      .filter((key) => key.startsWith(`${channel}:`))
+      .forEach((key) => {
+        const timer = qrTimers.current.get(key);
+        if (timer !== undefined) window.clearTimeout(timer);
+        qrTimers.current.delete(key);
+      });
+    try {
+      const next = await cancelQrBinding(channel, session.session_id);
+      setQrBinding((current) => ({ ...current, [channel]: next }));
+    } catch (error) {
+      setQrErrors((current) => ({
+        ...current,
+        [channel]: error instanceof Error ? error.message : String(error)
+      }));
+    }
+  };
 
   const copyCommand = async (value: PairingCode) => {
     try {
@@ -100,11 +203,18 @@ export function NotificationCenterPage({ userEmail }: { userEmail: string | null
             state={state}
             userHasEmail={Boolean(userEmail)}
             pairing={channel === "EMAIL" ? undefined : pairing[channel]}
+            qrBinding={channel === "EMAIL" ? undefined : qrBinding[channel]}
             copied={channel === "EMAIL" ? false : copiedChannel === channel}
             busy={bindEmail.isPending || preference.isPending || remove.isPending || pair.isPending}
             error={pair.error instanceof Error && pair.variables === channel ? pair.error.message : null}
+            qrError={channel === "EMAIL" ? null : qrErrors[channel] || null}
             onBindEmail={() => bindEmail.mutate()}
             onPair={(value) => { pair.reset(); pair.mutate(value); }}
+            onStartQr={beginQrBinding}
+            onSubmitVerify={submitVerifyCode}
+            onCancelQr={stopQrBinding}
+            verifyCode={channel === "EMAIL" ? "" : verifyCodes[channel] || ""}
+            onVerifyCodeChange={(value) => channel !== "EMAIL" && setVerifyCodes((current) => ({ ...current, [channel]: value }))}
             onCopy={copyCommand}
             onPreference={(value, enabled) => preference.mutate({ channel: value, enabled })}
             onRemove={(bindingId) => remove.mutate(bindingId)}
@@ -146,11 +256,18 @@ function ChannelCard({
   state,
   userHasEmail,
   pairing,
+  qrBinding,
   copied,
   busy,
   error,
+  qrError,
   onBindEmail,
   onPair,
+  onStartQr,
+  onSubmitVerify,
+  onCancelQr,
+  verifyCode,
+  onVerifyCodeChange,
   onCopy,
   onPreference,
   onRemove
@@ -159,11 +276,18 @@ function ChannelCard({
   state: NotificationCenterState;
   userHasEmail: boolean;
   pairing: PairingCode | undefined;
+  qrBinding: QrBindingSession | undefined;
   copied: boolean;
   busy: boolean;
   error: string | null;
+  qrError: string | null;
   onBindEmail: () => void;
   onPair: (channel: "QQ" | "WECHAT") => void;
+  onStartQr: (channel: "QQ" | "WECHAT") => void;
+  onSubmitVerify: (channel: "QQ" | "WECHAT") => void;
+  onCancelQr: (channel: "QQ" | "WECHAT") => void;
+  verifyCode: string;
+  onVerifyCodeChange: (value: string) => void;
   onCopy: (pairing: PairingCode) => void;
   onPreference: (channel: NotificationChannel, enabled: boolean) => void;
   onRemove: (bindingId: string) => void;
@@ -220,6 +344,27 @@ function ChannelCard({
         </button>
       ) : (
         <div className="notification-pairing">
+          <button
+            className="notification-primary"
+            type="button"
+            disabled={busy || Boolean(qrBinding && !["FAILED", "EXPIRED", "CANCELLED", "BOUND"].includes(qrBinding.status))}
+            onClick={() => onStartQr(channel)}
+          >
+            {locale === "zh-CN" ? "扫码绑定独立账号" : "Scan to bind your account"}
+          </button>
+          {qrBinding ? (
+            <QrBindingPanel
+              session={qrBinding}
+              verifyCode={verifyCode}
+              onVerifyCodeChange={onVerifyCodeChange}
+              onSubmitVerify={() => onSubmitVerify(channel)}
+              onCancel={() => onCancelQr(channel)}
+              locale={locale}
+            />
+          ) : null}
+          {qrError ? <p className="notification-inline-error" role="alert">{qrError}</p> : null}
+          <details className="notification-manual-fallback">
+             <summary>{locale === "zh-CN" ? "旧共享机器人迁移（新用户请勿使用）" : "Migrate a legacy shared bot (new users should scan)"}</summary>
           <button className="notification-primary" type="button" disabled={busy} onClick={() => onPair(channel)}>
             {locale === "zh-CN" ? "生成配对码" : "Generate pairing code"}
           </button>
@@ -255,18 +400,19 @@ function ChannelCard({
               <small>
                 {channel === "QQ" && pairing.share_url
                   ? locale === "zh-CN" ? "打开官方入口后，机器人会把配对码带入好友申请；无需管理员再次扫码。" : "The official invite carries this code into the friend request; the admin does not scan again."
-                  : locale === "zh-CN" ? "在对应机器人私聊中发送这条命令；确认后刷新本页即可看到连接。" : "Send this command in a direct chat with the matching bot, then refresh after confirmation."}
+                   : locale === "zh-CN" ? "仅迁移旧共享机器人：在对应机器人私聊中发送命令。新用户请关闭此项并使用上方扫码。" : "Legacy migration only: send this command to the existing shared bot. New users should use the QR flow above."}
               </small>
               {!pairing.share_url && !pairing.contact_url ? (
                 <small className="notification-pairing-missing-entry">
                   {locale === "zh-CN"
-                    ? "当前未配置公开机器人入口；请先打开管理员提供的 QQ/微信机器人私聊。"
-                    : "No public bot entry is configured; open the direct-chat entry supplied by the administrator first."}
+                     ? "旧共享机器人入口未配置；新用户无需添加机器人，直接使用上方扫码。"
+                     : "No legacy shared-bot entry is configured; new users do not need to add a bot and should use the QR flow above."}
                 </small>
               ) : null}
             </div>
           ) : null}
           {error ? <p className="notification-inline-error" role="alert">{error}</p> : null}
+          </details>
         </div>
       )}
     </article>
@@ -292,6 +438,111 @@ function BindingRow({
       <button type="button" disabled={busy} onClick={() => onRemove(binding.id)}>
         {locale === "zh-CN" ? "解除" : "Remove"}
       </button>
+    </div>
+  );
+}
+
+function QrBindingPanel({
+  session,
+  verifyCode,
+  onVerifyCodeChange,
+  onSubmitVerify,
+  onCancel,
+  locale
+}: {
+  session: QrBindingSession;
+  verifyCode: string;
+  onVerifyCodeChange: (value: string) => void;
+  onSubmitVerify: () => void;
+  onCancel: () => void;
+  locale: string;
+}) {
+  const active = !["BOUND", "FAILED", "EXPIRED", "CANCELLED"].includes(session.status);
+  return (
+    <div className={`notification-qr-panel qr-${session.status.toLowerCase()}`} role="status">
+      {session.qrcode_url && active ? (
+        <QrCodeImage
+          value={session.qrcode_url}
+          alt={locale === "zh-CN" ? "扫码绑定账号" : "Scan to bind account"}
+          locale={locale}
+        />
+      ) : null}
+      <div className="notification-qr-copy">
+        <strong>
+          {session.status === "BOUND"
+            ? locale === "zh-CN" ? "账号已绑定" : "Account bound"
+            : session.status === "NEED_VERIFY_CODE"
+              ? locale === "zh-CN" ? "需要验证码" : "Verification code required"
+              : session.status === "FAILED" || session.status === "EXPIRED"
+                ? locale === "zh-CN" ? "扫码未完成" : "QR binding did not complete"
+                : locale === "zh-CN" ? "请用自己的手机扫码" : "Scan with your own phone"}
+        </strong>
+        <span>{session.message || (locale === "zh-CN" ? "二维码有效期 5 分钟" : "QR code expires in 5 minutes")}</span>
+        <time dateTime={session.expires_at}>{formatPairingExpiry(session.expires_at, locale)}</time>
+        {session.status === "NEED_VERIFY_CODE" ? (
+          <div className="notification-qr-verify">
+            <input
+              value={verifyCode}
+              onChange={(event) => onVerifyCodeChange(event.target.value)}
+              placeholder={locale === "zh-CN" ? "输入验证码" : "Verification code"}
+              inputMode="numeric"
+            />
+            <button type="button" onClick={onSubmitVerify} disabled={!verifyCode.trim()}>
+              {locale === "zh-CN" ? "确认" : "Confirm"}
+            </button>
+          </div>
+        ) : null}
+        {active ? (
+          <button type="button" className="notification-copy-button" onClick={onCancel}>
+            {locale === "zh-CN" ? "取消扫码" : "Cancel"}
+          </button>
+        ) : null}
+      </div>
+    </div>
+  );
+}
+
+function QrCodeImage({
+  value,
+  alt,
+  locale
+}: {
+  value: string;
+  alt: string;
+  locale: string;
+}) {
+  const [source, setSource] = useState<string | null>(null);
+  const isImageUrl = value.startsWith("data:image/") || value.startsWith("blob:") ||
+    /\.(?:png|jpe?g|webp)(?:[?#].*)?$/i.test(value);
+
+  useEffect(() => {
+    let cancelled = false;
+    if (isImageUrl) {
+      setSource(value);
+      return () => {
+        cancelled = true;
+      };
+    }
+    setSource(null);
+    void QRCode.toDataURL(value, {
+      width: 280,
+      margin: 2,
+      errorCorrectionLevel: "M"
+    }).then((dataUrl) => {
+      if (!cancelled) setSource(dataUrl);
+    }).catch(() => {
+      if (!cancelled) setSource(null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [isImageUrl, value]);
+
+  return source ? (
+    <img className="notification-qr-image" src={source} alt={alt} />
+  ) : (
+    <div className="notification-qr-placeholder" role="img" aria-label={alt}>
+      {locale === "zh-CN" ? "正在生成二维码…" : "Generating QR code…"}
     </div>
   );
 }
@@ -325,12 +576,12 @@ function channelDescription(
   }
   if (channel === "QQ") {
     return locale === "zh-CN"
-      ? "每个 QQ 用户单独配对；官方入口会打开同一个机器人，不会把管理员登录态分享给你。"
-      : "Pair your own QQ chat. The official entry opens the shared bot without exposing the administrator session.";
+      ? "每个账号独立扫码绑定 QQ Bot，通知直接发送到你扫码的 QQ 账号。"
+      : "Bind your own QQ Bot by QR code; alerts go directly to the account you scan.";
   }
   return locale === "zh-CN"
-    ? "每个微信私聊单独配对；管理员只负责让机器人在线，不会替普通用户绑定。"
-    : "Pair your own WeChat chat. The administrator only keeps the shared bot online; your chat remains your destination.";
+    ? "每个账号独立扫码绑定微信 ClawBot，通知直接发送到你扫码的微信账号。"
+    : "Bind your own WeChat ClawBot by QR code; alerts go directly to the account you scan.";
 }
 
 function formatPairingExpiry(value: string, locale: string): string {

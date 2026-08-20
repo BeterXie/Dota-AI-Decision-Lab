@@ -21,7 +21,7 @@ from app.providers.qq_bot.models import (
     QQInboundMessage,
     parse_qq_target_entries,
 )
-from app.providers.qq_bot.service import QQBotService
+from app.providers.qq_bot.service import QQBotService, _events_for_account
 from app.providers.qq_bot.storage import QQBotStore
 from app.providers.qq_bot.user_service import UserScopedQQBotService
 from app.snapshots.repository import SnapshotRepository
@@ -46,6 +46,28 @@ def _contact(scope: str, target_id: str, *, subscribed: bool = True) -> QQContac
     )
 
 
+def test_accountless_legacy_events_are_processed_by_only_the_primary_account() -> None:
+    def inbound(account_id: str | None, cursor: int) -> QQInboundMessage:
+        return QQInboundMessage(
+            account_id=account_id,
+            event_cursor=cursor,
+            scope="c2c",
+            target_id="target",
+            sender_id="sender",
+            text="比赛",
+        )
+
+    events = (
+        inbound(None, 1),
+        inbound("account-a", 2),
+        inbound("account-b", 3),
+    )
+    primary = _events_for_account(events, account_id="account-a", primary=True)
+    secondary = _events_for_account(events, account_id="account-b", primary=False)
+    assert [item.event_cursor for item in primary] == [1, 2]
+    assert [item.event_cursor for item in secondary] == [3]
+
+
 class RecordingBridgeClient:
     def __init__(self) -> None:
         self.sent: list[dict] = []
@@ -57,6 +79,7 @@ class RecordingBridgeClient:
         scope: str,
         target_id: str,
         text: str,
+        account_id: str | None = None,
         msg_id: str | None = None,
         idempotency_key: str | None = None,
     ) -> str:
@@ -65,6 +88,7 @@ class RecordingBridgeClient:
                 "scope": scope,
                 "target_id": target_id,
                 "text": text,
+                "account_id": account_id,
                 "msg_id": msg_id,
                 "idempotency_key": idempotency_key,
             }

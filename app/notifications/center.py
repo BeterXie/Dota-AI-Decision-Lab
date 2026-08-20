@@ -209,6 +209,65 @@ class NotificationCenterService:
             )
             return binding
 
+    async def bind_user_account(
+        self,
+        *,
+        user_id: UUID,
+        channel: str,
+        destination_key: str,
+        destination: dict[str, Any],
+        label: str | None = None,
+        verified_at: datetime | None = None,
+    ) -> NotificationBindingRecord:
+        """Bind a provider account directly after an authenticated QR login.
+
+        QR login is the proof for the provider account, so no chat-side pairing
+        command is needed. A user owns at most one active account per channel;
+        replacing it disables the previous binding before the new one is made
+        active. Provider bearer credentials never enter the database.
+        """
+
+        normalized_channel = normalize_channel(channel)
+        if normalized_channel not in PAIRABLE_CHANNELS:
+            raise ValueError("direct account binding is only supported for QQ and WeChat")
+        if destination.get("account_mode") != "USER":
+            raise ValueError("direct account binding requires a user-owned provider account")
+        now = verified_at or datetime.now(UTC)
+        async with self._session_factory() as session, session.begin():
+            active_bindings = list(
+                (
+                    await session.scalars(
+                        select(NotificationBindingRecord)
+                        .where(
+                            NotificationBindingRecord.user_id == user_id,
+                            NotificationBindingRecord.channel == normalized_channel,
+                            NotificationBindingRecord.status == "ACTIVE",
+                        )
+                        .with_for_update()
+                    )
+                ).all()
+            )
+            for existing in active_bindings:
+                if existing.destination_key != destination_key:
+                    existing.status = "DISABLED"
+                    existing.updated_at = now
+            binding = await self._upsert_verified_binding(
+                session,
+                user_id=user_id,
+                channel=normalized_channel,
+                destination_key=destination_key,
+                destination=destination,
+                label=label,
+                verified_at=now,
+            )
+            await self._ensure_preference(
+                session,
+                user_id,
+                normalized_channel,
+                enabled=True,
+            )
+            return binding
+
     async def set_preference(self, user_id: UUID, channel: str, *, enabled: bool) -> None:
         normalized_channel = normalize_channel(channel)
         async with self._session_factory() as session, session.begin():
@@ -265,6 +324,24 @@ class NotificationCenterService:
             binding.status = "DISABLED"
             binding.updated_at = datetime.now(UTC)
             return True
+
+    async def binding_destination(
+        self,
+        user_id: UUID,
+        binding_id: UUID,
+    ) -> tuple[str, dict[str, Any]] | None:
+        async with self._session_factory() as session:
+            binding = await session.scalar(
+                select(NotificationBindingRecord)
+                .where(
+                    NotificationBindingRecord.id == binding_id,
+                    NotificationBindingRecord.user_id == user_id,
+                )
+                .limit(1)
+            )
+            if binding is None:
+                return None
+            return binding.channel, dict(binding.destination)
 
     async def eligible_bindings(
         self,
@@ -628,6 +705,10 @@ def decision_batch_key(decision_ids: list[UUID]) -> str:
 
 def qq_destination_key(scope: str, target_id: str) -> str:
     return f"{scope.strip().lower()}:{target_id.strip()}"
+
+
+def qq_account_destination_key(account_id: str, scope: str, target_id: str) -> str:
+    return f"{account_id.strip()}:{qq_destination_key(scope, target_id)}"
 
 
 def wechat_destination_key(account_id: str, user_id: str) -> str:

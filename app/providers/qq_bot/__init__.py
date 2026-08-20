@@ -9,7 +9,14 @@ Center; the legacy service remains importable for focused transport tests.
 
 from app.providers.qq_bot.bridge_client import QQBridgeClient
 from app.providers.qq_bot.bridge_runner import QQBotBridgeRunner
+from app.providers.qq_bot.qr import QQUserQrBindingService
 from app.providers.qq_bot.storage import QQBotStore
 from app.providers.qq_bot.user_service import UserScopedQQBotService as QQBotService
 
-__all__ = ["QQBotService", "QQBotStore", "QQBridgeClient", "QQBotBridgeRunner"]
+__all__ = [
+    "QQBotService",
+    "QQBotStore",
+    "QQBridgeClient",
+    "QQBotBridgeRunner",
+    "QQUserQrBindingService",
+]

@@ -134,7 +134,7 @@ class Settings(BaseSettings):
     wechat_clawbot_base_url: str = "https://ilinkai.weixin.qq.com"
     wechat_clawbot_state_dir: str = ".runtime/wechat-clawbot"
     wechat_clawbot_bot_agent: str = "Dota-AI-Decision-Lab/0.1.0"
-    # Public contact/deep link shared with users so they can start a direct chat.
+    # Legacy public contact/deep link for migrating an existing shared account.
     wechat_clawbot_contact_url: str | None = None
     wechat_clawbot_timeout_seconds: float = Field(default=15.0, gt=0)
     wechat_clawbot_long_poll_timeout_seconds: float = Field(default=40.0, gt=0)
@@ -143,16 +143,15 @@ class Settings(BaseSettings):
     wechat_clawbot_decision_max_age_seconds: float = Field(default=600.0, gt=0)
 
     # Official QQ Bot channel. The gateway/bridge process uses the
-    # harness-installed ``@tencent-connect/qqbot-nodejs`` SDK; run
-    # ``python -m tools.qq_bot login`` once to bind a QQ robot by QR code.
+    # harness-installed ``@tencent-connect/qqbot-nodejs`` SDK; authenticated
+    # users bind their own bot from Notification Center by QR code.
     qq_bot_enabled: bool = False
-    # Optional pre-bound credentials. Normally use the QR login CLI;
-    # these env overrides are for non-interactive installs.
+    # Optional legacy operator credentials for diagnostics/non-interactive
+    # installs. They do not create a user Notification Center binding.
     qq_bot_app_id: SecretStr | None = None
     qq_bot_app_secret: SecretStr | None = None
     qq_bot_state_dir: str = ".runtime/qq-bot"
-    # Optional fallback contact link. When the bridge is online, the runtime
-    # creates an official per-user QQ share link with the pairing code embedded.
+    # Optional legacy contact link for migrating an existing shared account.
     qq_bot_contact_url: str | None = None
     # Blank means auto-detect the harness profile node_modules first, then the
     # project-local ``qqbot_bridge/node_modules`` install.

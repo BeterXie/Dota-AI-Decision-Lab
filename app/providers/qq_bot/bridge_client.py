@@ -74,12 +74,30 @@ class QQBridgeClient:
             raise QQBridgeError("QQ bridge share-link response is missing url_link")
         return share_url
 
+    async def start_qr_binding(self) -> dict:
+        return await self._request("POST", "/qr/start")
+
+    async def poll_qr_binding(self, session_id: str) -> dict:
+        value = session_id.strip()
+        if not value:
+            raise ValueError("QQ QR session id is required")
+        return await self._request("GET", "/qr/status", params={"session_id": value})
+
+    async def cancel_qr_binding(self, session_id: str) -> dict:
+        value = session_id.strip()
+        if not value:
+            raise ValueError("QQ QR session id is required")
+        return await self._request(
+            "POST", "/qr/cancel", body={"session_id": value}
+        )
+
     async def send_text(
         self,
         *,
         scope: str,
         target_id: str,
         text: str,
+        account_id: str | None = None,
         msg_id: str | None = None,
         idempotency_key: str | None = None,
     ) -> str:
@@ -92,6 +110,8 @@ class QQBridgeClient:
         }
         if msg_id:
             body["msg_id"] = msg_id
+        if account_id:
+            body["account_id"] = account_id
         if idempotency_key:
             body["idempotency_key"] = idempotency_key
         raw = await self._request("POST", "/send", body=body)

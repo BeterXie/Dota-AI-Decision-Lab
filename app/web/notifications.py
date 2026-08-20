@@ -1,4 +1,5 @@
 from collections.abc import Awaitable, Callable
+from typing import Protocol
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -17,6 +18,26 @@ from app.notifications.secure_center import NotificationCenterService
 QQPairingLinkFactory = Callable[[str], Awaitable[str]]
 
 
+class UserQrBindingService(Protocol):
+    async def start(self, owner_user_id: UUID) -> dict: ...
+
+    async def poll(
+        self,
+        owner_user_id: UUID,
+        session_id: str,
+        *,
+        verify_code: str | None = None,
+    ) -> dict: ...
+
+    async def cancel(self, owner_user_id: UUID, session_id: str) -> dict: ...
+
+    async def revoke(self, owner_user_id: UUID, destination: dict) -> None: ...
+
+
+class QrVerifyPayload(BaseModel):
+    verify_code: str | None = None
+
+
 class NotificationPreferencePayload(BaseModel):
     enabled: bool
 
@@ -27,6 +48,8 @@ def create_notification_router(
     qq_pairing_link_factory: QQPairingLinkFactory | None = None,
     qq_contact_url: str | None = None,
     wechat_contact_url: str | None = None,
+    qq_qr_binding_service: UserQrBindingService | None = None,
+    wechat_qr_binding_service: UserQrBindingService | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/notifications", tags=["notifications"])
     center = NotificationCenterService(session_factory)
@@ -91,6 +114,51 @@ def create_notification_router(
             "pairing_mode": pairing_mode,
         }
 
+    @router.post("/qr/{channel}/start")
+    async def start_qr_binding(channel: str, request: Request) -> dict:
+        user = await _request_user(request, entitlements)
+        service = _qr_service(channel, qq_qr_binding_service, wechat_qr_binding_service)
+        if service is None:
+            raise HTTPException(status_code=503, detail="QR account binding is not configured")
+        try:
+            return await service.start(user.id)
+        except Exception as exc:
+            raise HTTPException(
+                status_code=502,
+                detail=f"unable to start QR binding: {exc}",
+            ) from exc
+
+    @router.post("/qr/{channel}/{session_id}")
+    async def poll_qr_binding(
+        channel: str,
+        session_id: str,
+        request: Request,
+        payload: QrVerifyPayload | None = None,
+    ) -> dict:
+        user = await _request_user(request, entitlements)
+        service = _qr_service(channel, qq_qr_binding_service, wechat_qr_binding_service)
+        if service is None:
+            raise HTTPException(status_code=503, detail="QR account binding is not configured")
+        try:
+            return await service.poll(
+                user.id,
+                session_id,
+                verify_code=payload.verify_code if payload else None,
+            )
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    @router.delete("/qr/{channel}/{session_id}")
+    async def cancel_qr_binding(channel: str, session_id: str, request: Request) -> dict:
+        user = await _request_user(request, entitlements)
+        service = _qr_service(channel, qq_qr_binding_service, wechat_qr_binding_service)
+        if service is None:
+            raise HTTPException(status_code=503, detail="QR account binding is not configured")
+        try:
+            return await service.cancel(user.id, session_id)
+        except (ValueError, RuntimeError) as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
     @router.put("/preferences/{channel}")
     async def update_preference(
         channel: str,
@@ -108,11 +176,45 @@ def create_notification_router(
     @router.delete("/bindings/{binding_id}")
     async def disable_binding(binding_id: UUID, request: Request) -> dict:
         user = await _request_user(request, entitlements)
+        binding_info = await center.binding_destination(user.id, binding_id)
+        if binding_info is None:
+            raise HTTPException(status_code=404, detail="notification binding not found")
+        channel, destination = binding_info
         if not await center.disable_binding(user.id, binding_id):
             raise HTTPException(status_code=404, detail="notification binding not found")
+        if channel in PAIRABLE_CHANNELS:
+            service = _qr_service(channel, qq_qr_binding_service, wechat_qr_binding_service)
+            revoke = getattr(service, "revoke", None)
+            if callable(revoke):
+                try:
+                    await revoke(user.id, destination)
+                except Exception:
+                    # The binding is already disabled in the durable ledger. A
+                    # transient provider-state cleanup failure must not resurrect
+                    # delivery; the next account refresh can remove the token.
+                    pass
         return await center.overview(user.id)
 
     return router
+
+
+def _qr_service(
+    channel: str,
+    qq_service: UserQrBindingService | None,
+    wechat_service: UserQrBindingService | None,
+) -> UserQrBindingService | None:
+    try:
+        normalized = normalize_channel(channel)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if normalized == "QQ":
+        return qq_service
+    if normalized == "WECHAT":
+        return wechat_service
+    raise HTTPException(
+        status_code=422,
+        detail="QR account binding is only available for QQ and WeChat",
+    )
 
 
 async def _request_user(
