@@ -22,11 +22,30 @@ export function matchIdFromPath(pathname: string): string | null {
 }
 
 export function findMatchByRoute(matches: MapSummary[], routeId: string): MapSummary | null {
-  return (
+  const exactMatch =
     matches.find((match) => match.canonical_map_id === routeId) ??
-    matches.find((match) => match.id === routeId) ??
-    null
-  );
+    matches.find((match) => match.id === routeId);
+  if (exactMatch) return exactMatch;
+
+  const seriesMatches = matches.filter((match) => match.series_id === routeId);
+  if (!seriesMatches.length) return null;
+  return [...seriesMatches].sort(compareSeriesRouteMatches)[0];
+}
+
+const phasePriority: Record<MapSummary["phase"], number> = {
+  LIVE: 0,
+  AWAITING_RESULT: 1,
+  PREMATCH: 2,
+  UNKNOWN: 3,
+  POSTMATCH: 4
+};
+
+function compareSeriesRouteMatches(left: MapSummary, right: MapSummary): number {
+  const phaseDifference = phasePriority[left.phase] - phasePriority[right.phase];
+  if (phaseDifference !== 0) return phaseDifference;
+  const leftMap = left.map_number ?? 0;
+  const rightMap = right.map_number ?? 0;
+  return left.phase === "POSTMATCH" ? rightMap - leftMap : leftMap - rightMap;
 }
 
 export function aiAccessScope(

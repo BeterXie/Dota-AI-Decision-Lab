@@ -28,6 +28,7 @@
 .match-phase-badge i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .match-phase-badge.is-live { color: #54dca8; border-color: rgba(49, 214, 139, 0.24); background: rgba(49, 214, 139, 0.07); }
 .match-phase-badge.is-upcoming { color: #72cbe6; }
+.match-phase-badge.is-tracked { color: #a8b5c0; }
 .match-phase-badge.is-settling { color: #e8b95f; }
 
 .match-versus { display: grid; grid-template-columns: minmax(0, 1fr) 230px minmax(0, 1fr); align-items: center; gap: 25px; margin-top: 21px; }
@@ -65,6 +66,7 @@
 .match-series-summary { min-width: 0; display: grid; align-content: center; gap: 4px; padding: 4px 8px; }
 .match-series-summary span { color: #6f8599; font-size: 9px; font-weight: 750; }
 .match-series-summary strong { overflow: hidden; color: #cad6de; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.match-series-next-state { align-self: center; padding: 9px 11px; border: 1px solid rgba(84, 207, 210, 0.16); border-radius: 8px; color: #6fd4c0; background: rgba(50, 166, 174, 0.08); font-size: 9px; font-weight: 720; }
 .match-series-navigator nav { min-width: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(120px, 1fr)); gap: 7px; }
 .match-series-navigator nav a { min-width: 0; display: grid; gap: 3px; padding: 9px 11px; border: 1px solid rgba(142, 166, 188, 0.1); border-radius: 8px; background: rgba(16, 29, 42, 0.72); text-decoration: none; }
 .match-series-navigator nav a:hover { border-color: rgba(84, 198, 204, 0.28); background: rgba(22, 40, 53, 0.86); }

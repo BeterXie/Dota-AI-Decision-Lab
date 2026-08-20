@@ -1,6 +1,11 @@
 import { describe, expect, test } from "vitest";
 import type { MarketObservation } from "../api";
-import { marketStageDisplayLabel, primaryMarketPair, targetProbability } from "./presentation";
+import {
+  marketStageDisplayLabel,
+  matchPhaseBadgePresentation,
+  primaryMarketPair,
+  targetProbability
+} from "./presentation";
 
 const marketLeg = (overrides: Partial<MarketObservation>): MarketObservation => ({
   odds_id: 1,
@@ -15,6 +20,24 @@ const marketLeg = (overrides: Partial<MarketObservation>): MarketObservation => 
   received_at: "2026-08-15T05:00:00Z",
   age_seconds: 1,
   ...overrides
+});
+
+describe("matchPhaseBadgePresentation", () => {
+  test("keeps an unknown phase distinct from a confirmed prematch", () => {
+    expect(matchPhaseBadgePresentation("UNKNOWN", "zh-CN")).toEqual({
+      key: "tracked",
+      text: "状态确认中"
+    });
+    expect(matchPhaseBadgePresentation("PREMATCH", "zh-CN")).toEqual({
+      key: "upcoming",
+      text: "未开始"
+    });
+    expect(matchPhaseBadgePresentation("UNKNOWN", "en").text).toBe("Status pending");
+    expect(matchPhaseBadgePresentation("POSTMATCH", "zh-CN", true)).toEqual({
+      key: "live",
+      text: "系列赛进行中"
+    });
+  });
 });
 
 describe("marketStageDisplayLabel", () => {

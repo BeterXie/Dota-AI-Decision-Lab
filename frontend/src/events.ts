@@ -30,6 +30,25 @@ export interface EventSeriesSummary {
   mapCount: number;
 }
 
+export function isSeriesComplete(
+  match: Pick<MapSummary, "best_of" | "series_score">
+): boolean {
+  const bestOf = match.best_of;
+  const score = match.series_score;
+  if (bestOf == null || bestOf < 1 || score == null) return false;
+  const winsNeeded = Math.floor(bestOf / 2) + 1;
+  return Math.max(score.team_a, score.team_b) >= winsNeeded || score.team_a + score.team_b >= bestOf;
+}
+
+export function isSeriesOngoing(
+  match: Pick<MapSummary, "best_of" | "series_score" | "phase">
+): boolean {
+  if (isSeriesComplete(match)) return false;
+  if (match.phase === "LIVE") return true;
+  if (match.best_of == null) return false;
+  return (match.series_score?.team_a ?? 0) + (match.series_score?.team_b ?? 0) > 0;
+}
+
 export function buildEventSummaries(matches: MapSummary[]): EventSummary[] {
   const grouped = new Map<string, MapSummary[]>();
   for (const match of matches) {
@@ -155,19 +174,35 @@ function buildSeriesSummary(seriesId: string, matches: MapSummary[]): EventSerie
 }
 
 function eventStatus(matches: MapSummary[]): EventStatus {
-  if (matches.some((match) => match.phase === "LIVE")) return "LIVE";
-  const hasUpcoming = matches.some((match) => match.phase === "PREMATCH" || match.phase === "UNKNOWN");
-  const hasStarted = matches.some((match) => match.phase === "POSTMATCH" || match.phase === "AWAITING_RESULT");
+  const bySeries = new Map<string, MapSummary[]>();
+  for (const match of matches) {
+    const key = match.series_id || match.id;
+    bySeries.set(key, [...(bySeries.get(key) ?? []), match]);
+  }
+  const phases = [...bySeries.values()].map(seriesPhase);
+  if (phases.some((phase) => phase === "LIVE")) return "LIVE";
+  const hasUpcoming = phases.some((phase) => phase === "PREMATCH" || phase === "UNKNOWN");
+  const hasStarted = phases.some((phase) => phase === "POSTMATCH" || phase === "AWAITING_RESULT");
   if (hasUpcoming && hasStarted) return "LIVE";
   if (hasUpcoming) return "UPCOMING";
-  if (matches.some((match) => match.phase === "AWAITING_RESULT")) return "SETTLING";
+  if (phases.some((phase) => phase === "AWAITING_RESULT")) return "SETTLING";
   return "COMPLETED";
 }
 
 function seriesPhase(matches: MapSummary[]): MapSummary["phase"] {
+  const scoreRecord = latestScoreRecord(matches);
+  const aggregate = scoreRecord
+    ? {
+        best_of: scoreRecord.best_of,
+        series_score: scoreRecord.series_score,
+        phase: "POSTMATCH" as const
+      }
+    : null;
+  if (aggregate && isSeriesComplete(aggregate)) return "POSTMATCH";
   if (matches.some((match) => match.phase === "LIVE")) return "LIVE";
-  if (matches.some((match) => match.phase === "PREMATCH" || match.phase === "UNKNOWN")) return "PREMATCH";
   if (matches.some((match) => match.phase === "AWAITING_RESULT")) return "AWAITING_RESULT";
+  if (aggregate && isSeriesOngoing(aggregate)) return "LIVE";
+  if (matches.some((match) => match.phase === "PREMATCH" || match.phase === "UNKNOWN")) return "PREMATCH";
   return "POSTMATCH";
 }
 
@@ -182,6 +217,12 @@ function pickRepresentative(matches: MapSummary[], phase: MapSummary["phase"]): 
 
 function scoreTotal(match: MapSummary): number {
   return (match.series_score?.team_a ?? 0) + (match.series_score?.team_b ?? 0);
+}
+
+function latestScoreRecord(matches: MapSummary[]): MapSummary | null {
+  return [...matches]
+    .filter((match) => match.series_score)
+    .sort((left, right) => scoreTotal(right) - scoreTotal(left))[0] ?? null;
 }
 
 function compareEvents(left: EventSummary, right: EventSummary): number {
