@@ -12,7 +12,6 @@ from app.draft.role_assignment import DraftRoleAssignmentService
 from app.events.outbox import EventRepository
 from app.identity.resolver import IdentityResolver, ResolvedMap
 from app.models import (
-    CanonicalHero,
     CanonicalPlayer,
     DltvLiveObservationRecord,
     DraftSlotRecord,
@@ -294,11 +293,11 @@ class DltvBootstrapCoordinator:
                 if player is not None and player_name is not None:
                     player.name = player_name
             if slot.hero_id is not None:
-                await self._identities.resolve_dltv_hero(session, slot.hero_id)
-                hero = await session.get(CanonicalHero, slot.hero_id)
-                hero_name = hero_names.get(slot.hero_id)
-                if hero is not None and hero_name is not None:
-                    hero.name = hero_name
+                await self._identities.resolve_dltv_hero(
+                    session,
+                    slot.hero_id,
+                    name=hero_names.get(slot.hero_id),
+                )
             session.add(
                 DraftSlotRecord(
                     draft_snapshot_id=snapshot.id,

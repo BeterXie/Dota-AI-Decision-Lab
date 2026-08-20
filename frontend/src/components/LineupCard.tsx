@@ -78,13 +78,13 @@ export const LineupCard: React.FC<LineupCardProps> = ({ match }) => {
       side: "radiant" as const,
       position: slot.position,
       playerName: slot.player_name || t("playerUnknown"),
-      heroName: slot.hero_name || t("heroUnknown"),
+      heroName: displayHeroName(slot.hero_id, slot.hero_name, locale, t("heroUnknown")),
       heroPicked: slot.hero_id != null,
       playerResolved: slot.canonical_player_id != null,
       heroRecent: heroRecentBySlot.get(slotKey("radiant", slot.position)) ?? null,
       heroRecentState,
     }));
-  }, [apiSlots, heroRecentBySlot, heroRecentState, t]);
+  }, [apiSlots, heroRecentBySlot, heroRecentState, locale, t]);
 
   const direSlots: HeroSlotData[] = React.useMemo(() => {
     if (!apiSlots || apiSlots.length === 0) return [];
@@ -92,13 +92,13 @@ export const LineupCard: React.FC<LineupCardProps> = ({ match }) => {
       side: "dire" as const,
       position: slot.position,
       playerName: slot.player_name || t("playerUnknown"),
-      heroName: slot.hero_name || t("heroUnknown"),
+      heroName: displayHeroName(slot.hero_id, slot.hero_name, locale, t("heroUnknown")),
       heroPicked: slot.hero_id != null,
       playerResolved: slot.canonical_player_id != null,
       heroRecent: heroRecentBySlot.get(slotKey("dire", slot.position)) ?? null,
       heroRecentState,
     }));
-  }, [apiSlots, heroRecentBySlot, heroRecentState, t]);
+  }, [apiSlots, heroRecentBySlot, heroRecentState, locale, t]);
 
   return (
     <div className="lineup-card">
@@ -165,6 +165,17 @@ function HeroSide({ side, teamName, slots, locale, onSelect }: { side: "radiant"
 
 function slotKey(side: "radiant" | "dire", position: number): string {
   return `${side}:${position}`;
+}
+
+function displayHeroName(
+  heroId: number | null,
+  heroName: string | null,
+  locale: string,
+  notPickedLabel: string,
+): string {
+  if (heroName) return heroName;
+  if (heroId === null) return notPickedLabel;
+  return locale === "zh-CN" ? `英雄 #${heroId}` : `Hero #${heroId}`;
 }
 
 export function heroRecentLabel(

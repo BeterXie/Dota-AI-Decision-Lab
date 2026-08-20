@@ -173,6 +173,38 @@ test("unknown heroes are labelled hero-not-picked instead of data unavailable", 
   expect(screen.queryByText("近期数据不可用")).not.toBeInTheDocument();
 });
 
+test("a picked hero with a missing label is not shown as unpicked", async () => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn().mockResolvedValue(recentResponse(null)),
+  );
+  const missingLabel = {
+    ...match,
+    draft: {
+      observed_at: "2026-08-15T01:00:00Z",
+      slots: [
+        {
+          side: "radiant",
+          position: 2,
+          canonical_player_id: "player-1",
+          player_name: "lorenof",
+          hero_id: 35,
+          hero_name: null,
+        },
+      ],
+    },
+  } as MapDetail;
+
+  render(
+    <I18nProvider>
+      <LineupCard match={missingLabel} />
+    </I18nProvider>,
+  );
+
+  expect(await screen.findByText("英雄 #35")).toBeInTheDocument();
+  expect(screen.queryByText("英雄尚未选择")).not.toBeInTheDocument();
+});
+
 test("refetches hero recent data when the draft completes on a live match", async () => {
   vi.stubGlobal(
     "fetch",

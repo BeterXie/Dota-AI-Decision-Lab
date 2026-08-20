@@ -5,6 +5,7 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import and_, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.ai.dota_heroes import DOTA_HERO_NAMES
 from app.domain.identity import ProviderMatch
 from app.identity.aliases import equivalent_team_aliases, normalize_alias
 from app.models import (
@@ -244,28 +245,40 @@ class IdentityResolver:
         )
         return player.id
 
-    async def resolve_dltv_hero(self, session: AsyncSession, hero_id: int) -> int:
+    async def resolve_dltv_hero(
+        self,
+        session: AsyncSession,
+        hero_id: int,
+        *,
+        name: str | None = None,
+    ) -> int:
         mapping = await session.scalar(
             select(ProviderHeroMapping).where(
                 ProviderHeroMapping.provider == "dltv",
                 ProviderHeroMapping.provider_hero_id == str(hero_id),
             )
         )
-        if mapping is not None:
-            return mapping.canonical_hero_id
-        hero = await session.get(CanonicalHero, hero_id)
+        canonical_hero_id = mapping.canonical_hero_id if mapping is not None else hero_id
+        hero = await session.get(CanonicalHero, canonical_hero_id)
+        provider_name = name.strip() if isinstance(name, str) and name.strip() else None
+        resolved_name = provider_name or DOTA_HERO_NAMES.get(canonical_hero_id)
         if hero is None:
-            hero = CanonicalHero(hero_id=hero_id)
+            hero = CanonicalHero(hero_id=canonical_hero_id, name=resolved_name)
             session.add(hero)
             await session.flush()
-        session.add(
-            ProviderHeroMapping(
-                provider="dltv",
-                provider_hero_id=str(hero_id),
-                canonical_hero_id=hero_id,
+        elif provider_name is not None:
+            hero.name = provider_name
+        elif hero.name is None and resolved_name is not None:
+            hero.name = resolved_name
+        if mapping is None:
+            session.add(
+                ProviderHeroMapping(
+                    provider="dltv",
+                    provider_hero_id=str(hero_id),
+                    canonical_hero_id=canonical_hero_id,
+                )
             )
-        )
-        return hero_id
+        return canonical_hero_id
 
     async def _resolve_team(
         self,

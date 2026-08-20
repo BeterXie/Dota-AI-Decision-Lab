@@ -92,6 +92,34 @@ def test_draft_labels_use_structured_identity_fields_not_live_metrics() -> None:
     assert hero_names == {1: "Anti-Mage"}
 
 
+def test_draft_labels_use_pick_metadata_when_full_stats_hero_is_missing() -> None:
+    payload = {
+        "db": {
+            "first_team": {
+                "picks": [{"hero_id": 35, "hero": {"steam_id": 35, "title": "Sniper"}}]
+            }
+        },
+        "live_league_data": {
+            "players": [{"account_id": 210053851, "name": "lorenof", "hero_id": 35}]
+        },
+        "full_stats": {
+            "dire": {
+                "players": [
+                    {
+                        "player": {"steam_id": 210053851, "title": "lorenof"},
+                        "hero": None,
+                    }
+                ]
+            }
+        },
+    }
+
+    player_names, hero_names = parse_draft_labels(payload)
+
+    assert player_names == {210053851: "lorenof"}
+    assert hero_names == {35: "Sniper"}
+
+
 def test_fast_state_sparse_merge_and_duplicate_timestamps() -> None:
     payload = _fixture()
     received_at = datetime(2026, 8, 12, 12, 0, tzinfo=UTC)
