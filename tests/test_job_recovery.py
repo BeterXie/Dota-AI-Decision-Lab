@@ -1048,6 +1048,84 @@ async def test_reconciliation_sweep_skips_checkpoints_missed_beyond_grace() -> N
 
 
 @pytest.mark.asyncio
+async def test_reconciliation_recovers_fresh_dltv_identity_conflict_once() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    jobs = JobRepository()
+    now = datetime(2026, 8, 20, 3, 0, tzinfo=UTC)
+    payload = {"valve_match_id": 8955197224, "dltv_series_id": 427689}
+
+    async with factory() as session, session.begin():
+        failed_job_id = await jobs.enqueue(
+            session,
+            job_type=JobType.BOOTSTRAP_DLTV_MATCH,
+            dedupe_key="dltv-match:8955197224",
+            payload=payload,
+            max_attempts=1,
+            not_before=now,
+        )
+    async with factory() as session, session.begin():
+        claimed = (
+            await jobs.claim(
+                session,
+                worker_id="dltv-worker",
+                now=now,
+                job_types=(JobType.BOOTSTRAP_DLTV_MATCH,),
+            )
+        )[0]
+        await jobs.fail(
+            session,
+            job_id=claimed.id,
+            worker_id="dltv-worker",
+            error="IdentityAmbiguousError: PROVIDER_EVENT_IDENTITY_CONFLICT",
+            failed_at=now,
+        )
+        session.add(
+            ProviderRawEvent(
+                provider="dltv",
+                event_type="DLTV_FAST_SOCKET",
+                provider_key="__nd2_match_8955197224",
+                payload={"game_time": 120},
+                received_at=now - timedelta(seconds=10),
+                payload_hash="fresh-live-frame",
+                parser_version="fixture",
+            )
+        )
+
+    reconciliation = ReconciliationService(
+        jobs,
+        EventRepository(),
+        lease_seconds=120,
+        ai_experiments=(),
+        future_odds_horizons=(),
+    )
+    async with factory() as session, session.begin():
+        first = await reconciliation.run(session, now=now)
+        assert first.dltv_identity_recovery_jobs == 1
+    async with factory() as session, session.begin():
+        second = await reconciliation.run(session, now=now)
+        assert second.dltv_identity_recovery_jobs == 0
+
+    async with factory() as session:
+        original = await session.get(DurableJobRecord, failed_job_id)
+        recovery = await session.scalar(
+            select(DurableJobRecord).where(
+                DurableJobRecord.dedupe_key
+                == f"reconcile-dltv-identity-v1:{failed_job_id}"
+            )
+        )
+        assert original is not None
+        assert original.status == JobStatus.FAILED_TERMINAL.value
+        assert original.attempt_count == 1
+        assert recovery is not None
+        assert recovery.status == JobStatus.PENDING.value
+        assert recovery.payload == payload
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
 async def test_terminal_job_can_be_explicitly_reopened_without_erasing_attempt_history() -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:

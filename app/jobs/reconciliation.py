@@ -30,6 +30,7 @@ from app.models import (
     MapResultRecord,
     OddsObservationRecord,
     ProviderMatchMapping,
+    ProviderRawEvent,
     ProviderTeamMapping,
 )
 from app.runtime_config import active_ai_experiments
@@ -48,6 +49,7 @@ class ReconciliationResult:
     evaluation_jobs: int
     checkpoint_sweep_jobs: int = 0
     map_started_events: int = 0
+    dltv_identity_recovery_jobs: int = 0
 
 
 class ReconciliationService:
@@ -79,6 +81,9 @@ class ReconciliationService:
         reclaimed = await self._jobs.reclaim_expired(
             session, lease_seconds=self._lease_seconds, now=now
         )
+        dltv_identity_recovery_jobs = await self._reconcile_dltv_identity_conflicts(
+            session, now=now
+        )
         map_started_events = await self._reconcile_map_started_events(session)
         checkpoint_sweep_jobs = await self._reconcile_live_checkpoints(session, now=now)
         draft_jobs = await self._reconcile_drafts(session)
@@ -99,7 +104,96 @@ class ReconciliationService:
             evaluation_jobs=evaluation_jobs,
             checkpoint_sweep_jobs=checkpoint_sweep_jobs,
             map_started_events=map_started_events,
+            dltv_identity_recovery_jobs=dltv_identity_recovery_jobs,
         )
+
+    async def _reconcile_dltv_identity_conflicts(
+        self,
+        session: AsyncSession,
+        *,
+        now: datetime,
+    ) -> int:
+        failed_jobs = list(
+            (
+                await session.scalars(
+                    select(DurableJobRecord)
+                    .where(
+                        DurableJobRecord.job_type == JobType.BOOTSTRAP_DLTV_MATCH.value,
+                        DurableJobRecord.status == JobStatus.FAILED_TERMINAL.value,
+                        ~DurableJobRecord.dedupe_key.like(
+                            "reconcile-dltv-identity-v1:%"
+                        ),
+                        DurableJobRecord.last_error.contains(
+                            "IdentityAmbiguousError: PROVIDER_EVENT_IDENTITY_CONFLICT"
+                        ),
+                        DurableJobRecord.completed_at >= now - timedelta(hours=24),
+                    )
+                    .order_by(DurableJobRecord.completed_at.desc())
+                    .limit(100)
+                )
+            ).all()
+        )
+        jobs_by_provider_key: dict[str, DurableJobRecord] = {}
+        for job in failed_jobs:
+            valve_match_id = job.payload.get("valve_match_id")
+            if isinstance(valve_match_id, int) and valve_match_id > 0:
+                jobs_by_provider_key.setdefault(f"__nd2_match_{valve_match_id}", job)
+        if not jobs_by_provider_key:
+            return 0
+
+        fresh_provider_keys = set(
+            (
+                await session.scalars(
+                    select(ProviderRawEvent.provider_key)
+                    .where(
+                        ProviderRawEvent.provider == "dltv",
+                        ProviderRawEvent.event_type == "DLTV_FAST_SOCKET",
+                        ProviderRawEvent.provider_key.in_(tuple(jobs_by_provider_key)),
+                        ProviderRawEvent.received_at
+                        >= now - timedelta(seconds=self._live_state_max_age_seconds),
+                    )
+                    .distinct()
+                    .limit(100)
+                )
+            ).all()
+        )
+        recoverable_jobs = [
+            jobs_by_provider_key[provider_key]
+            for provider_key in fresh_provider_keys
+            if provider_key is not None
+        ]
+        if not recoverable_jobs:
+            return 0
+
+        recovery_keys = {
+            job.id: f"reconcile-dltv-identity-v1:{job.id}" for job in recoverable_jobs
+        }
+        existing_keys = set(
+            (
+                await session.scalars(
+                    select(DurableJobRecord.dedupe_key).where(
+                        DurableJobRecord.job_type == JobType.BOOTSTRAP_DLTV_MATCH.value,
+                        DurableJobRecord.dedupe_key.in_(recovery_keys.values()),
+                    )
+                )
+            ).all()
+        )
+
+        created = 0
+        for job in recoverable_jobs:
+            dedupe_key = recovery_keys[job.id]
+            if dedupe_key in existing_keys:
+                continue
+            await self._jobs.enqueue(
+                session,
+                job_type=JobType.BOOTSTRAP_DLTV_MATCH,
+                dedupe_key=dedupe_key,
+                payload=dict(job.payload),
+                priority=job.priority,
+                not_before=now,
+            )
+            created += 1
+        return created
 
     async def _reconcile_map_started_events(self, session: AsyncSession) -> int:
         canonical_map_text = func.replace(
