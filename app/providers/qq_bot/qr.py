@@ -180,8 +180,7 @@ class QQUserQrBindingService:
         app_secret = raw.get("app_secret")
         user_openid = raw.get("user_openid")
         if not all(
-            isinstance(item, str) and item.strip()
-            for item in (app_id, app_secret, user_openid)
+            isinstance(item, str) and item.strip() for item in (app_id, app_secret, user_openid)
         ):
             raise QQQrBindingError("QQ 扫码未返回可用的用户标识")
         app_id = app_id.strip()

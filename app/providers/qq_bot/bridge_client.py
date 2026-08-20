@@ -87,9 +87,7 @@ class QQBridgeClient:
         value = session_id.strip()
         if not value:
             raise ValueError("QQ QR session id is required")
-        return await self._request(
-            "POST", "/qr/cancel", body={"session_id": value}
-        )
+        return await self._request("POST", "/qr/cancel", body={"session_id": value})
 
     async def send_text(
         self,

@@ -221,11 +221,7 @@ class UserScopedQQBotService(LegacyQQBotService):
                         destination={
                             "scope": "c2c",
                             "target_id": message.target_id,
-                            **(
-                                {"account_id": message.account_id}
-                                if message.account_id
-                                else {}
-                            ),
+                            **({"account_id": message.account_id} if message.account_id else {}),
                         },
                         label=message.sender_name or contact.label,
                     )
