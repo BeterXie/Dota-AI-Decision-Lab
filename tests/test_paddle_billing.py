@@ -9,6 +9,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.auth.models import UserAccountRecord
 from app.billing.models import BillingCheckoutRecord, BillingSubscriptionRecord
 from app.billing.paddle import (
+    PaddleApiClient,
     PaddleBillingGateway,
     PaddleCheckoutConflict,
     PaddleOffer,
@@ -22,6 +23,48 @@ from app.entitlements import PREMIUM_ENTITLEMENTS, EntitlementService
 _WEBHOOK_SECRET = "pdl_ntfset_test_secret_that_is_long_enough"
 _PRICE_30D = "pri_test_pro_30d"
 _PRICE_MONTHLY = "pri_test_pro_monthly"
+
+
+@pytest.mark.asyncio
+async def test_catalog_price_reads_paddle_amount_currency_and_billing_type() -> None:
+    async def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/prices/pri_catalog"
+        return httpx.Response(
+            200,
+            json={
+                "data": {
+                    "id": "pri_catalog",
+                    "status": "active",
+                    "billing_cycle": None,
+                    "unit_price": {"amount": "499", "currency_code": "cny"},
+                }
+            },
+        )
+
+    client = httpx.AsyncClient(
+        transport=httpx.MockTransport(handler),
+        base_url="https://sandbox-api.paddle.com",
+    )
+    api = PaddleApiClient(
+        api_key="pdl_sdbx_apikey_test",
+        base_url="https://sandbox-api.paddle.com",
+        client=client,
+    )
+    try:
+        price = await api.get_price("pri_catalog")
+        assert price.price_id == "pri_catalog"
+        assert price.amount == "499"
+        assert price.currency_code == "CNY"
+        assert price.status == "active"
+        assert price.recurring is False
+        assert price.public_payload() == {
+            "id": "pri_catalog",
+            "amount": "499",
+            "currency_code": "CNY",
+        }
+    finally:
+        await client.aclose()
 
 
 def _offer_30d() -> PaddleOffer:
