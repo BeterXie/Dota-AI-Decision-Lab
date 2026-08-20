@@ -220,7 +220,10 @@ async def test_ai_handler_persists_each_provider_before_slowest_finishes() -> No
 
     handler = ApplicationJobHandlers(
         SimpleNamespace(
-            settings=SimpleNamespace(ai_min_game_time_seconds=600),
+            settings=SimpleNamespace(
+                ai_min_game_time_seconds=600,
+                ai_notification_max_latency_seconds=50.0,
+            ),
             session_factory=factory,
             snapshots=snapshots,
             ai=AiCoordinator([fast, slow], timeout_seconds=5),
@@ -314,7 +317,10 @@ async def test_legacy_ai_job_payload_still_runs_all_experiments() -> None:
 
     handler = ApplicationJobHandlers(
         SimpleNamespace(
-            settings=SimpleNamespace(ai_min_game_time_seconds=600),
+            settings=SimpleNamespace(
+                ai_min_game_time_seconds=600,
+                ai_notification_max_latency_seconds=50.0,
+            ),
             session_factory=factory,
             snapshots=snapshots,
             ai=AiCoordinator(providers, timeout_seconds=5),

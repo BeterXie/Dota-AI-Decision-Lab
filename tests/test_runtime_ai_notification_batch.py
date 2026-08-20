@@ -124,7 +124,10 @@ async def test_runtime_notification_waits_for_the_scheduled_provider_batch() -> 
     coordinator = RuntimeAiCoordinator([provider], timeout_seconds=1)
     handler = ApplicationJobHandlers(
         SimpleNamespace(
-            settings=SimpleNamespace(ai_min_game_time_seconds=600),
+            settings=SimpleNamespace(
+                ai_min_game_time_seconds=600,
+                ai_notification_max_latency_seconds=50.0,
+            ),
             session_factory=factory,
             snapshots=snapshots,
             ai=coordinator,

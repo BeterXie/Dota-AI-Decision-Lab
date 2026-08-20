@@ -2,6 +2,29 @@ import type { MapSummary, MarketObservation } from "../api";
 
 export type MatchDisplayPhase = "LIVE" | "UPCOMING" | "AWAITING_RESULT" | "POSTMATCH" | "TRACKED";
 
+export interface MatchPhaseBadgePresentation {
+  key: "live" | "upcoming" | "settling" | "completed" | "tracked";
+  text: string;
+}
+
+export function matchPhaseBadgePresentation(
+  phase: MapSummary["phase"],
+  locale: string,
+  seriesOngoing = false
+): MatchPhaseBadgePresentation {
+  const zh = locale === "zh-CN";
+  if (phase === "LIVE") return { key: "live", text: zh ? "进行中" : "Live" };
+  if (seriesOngoing && phase === "POSTMATCH") {
+    return { key: "live", text: zh ? "系列赛进行中" : "Series in progress" };
+  }
+  if (phase === "PREMATCH") return { key: "upcoming", text: zh ? "未开始" : "Upcoming" };
+  if (phase === "AWAITING_RESULT") {
+    return { key: "settling", text: zh ? "赛果确认中" : "Confirming result" };
+  }
+  if (phase === "POSTMATCH") return { key: "completed", text: zh ? "已结束" : "Final" };
+  return { key: "tracked", text: zh ? "状态确认中" : "Status pending" };
+}
+
 export function getMatchDisplayPhase(match: MapSummary): MatchDisplayPhase {
   if (match.phase === "LIVE") return "LIVE";
   if (match.phase === "PREMATCH") return "UPCOMING";

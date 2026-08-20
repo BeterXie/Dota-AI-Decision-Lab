@@ -6,7 +6,9 @@ import {
   eventHref,
   eventName,
   eventNameFromPath,
-  eventSlug
+  eventSlug,
+  isSeriesComplete,
+  isSeriesOngoing
 } from "./events";
 
 function match(overrides: Partial<MapSummary>): MapSummary {
@@ -83,6 +85,28 @@ describe("event aggregation", () => {
     expect(series[0].mapCount).toBe(2);
     expect(series[0].score).toEqual({ team_a: 2, team_b: 0 });
     expect(series[0].phase).toBe("POSTMATCH");
+  });
+
+  it("keeps a BO3 ongoing after the first confirmed map", () => {
+    const [event] = buildEventSummaries([
+      match({
+        id: "map-1",
+        phase: "POSTMATCH",
+        best_of: 3,
+        series_score: { team_a: 0, team_b: 1 }
+      })
+    ]);
+    const [series] = buildSeriesSummaries(event);
+
+    expect(isSeriesComplete(match({ best_of: 3, series_score: { team_a: 0, team_b: 1 } }))).toBe(false);
+    expect(isSeriesOngoing(match({ phase: "POSTMATCH", best_of: 3, series_score: { team_a: 0, team_b: 1 } }))).toBe(true);
+    expect(series.phase).toBe("LIVE");
+    expect(event.status).toBe("LIVE");
+  });
+
+  it("ends a BO3 only after a team reaches the required wins", () => {
+    expect(isSeriesComplete(match({ best_of: 3, series_score: { team_a: 2, team_b: 0 } }))).toBe(true);
+    expect(isSeriesOngoing(match({ phase: "POSTMATCH", best_of: 3, series_score: { team_a: 2, team_b: 0 } }))).toBe(false);
   });
 
   it("keeps a partial score in settling state when one map awaits confirmation", () => {

@@ -59,6 +59,24 @@ describe("match routing", () => {
     expect(matchHref(unresolved)).toBe("/matches/series-placeholder");
     expect(findMatchByRoute([unresolved], "series-placeholder")).toBe(unresolved);
   });
+
+  it("keeps a series URL valid after map identity resolves", () => {
+    const completedMap = {
+      ...match,
+      id: "map-1",
+      canonical_map_id: "map-1",
+      map_number: 1,
+      phase: "POSTMATCH" as const
+    };
+    const liveMap = {
+      ...match,
+      id: "map-2",
+      canonical_map_id: "map-2",
+      map_number: 2
+    };
+
+    expect(findMatchByRoute([completedMap, liveMap], "series-1")).toBe(liveMap);
+  });
 });
 
 describe("match AI access", () => {

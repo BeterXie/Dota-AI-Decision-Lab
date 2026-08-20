@@ -591,7 +591,10 @@ async def test_ai_handler_atomically_enqueues_one_email_batch() -> None:
         )
     handler = ApplicationJobHandlers(
         SimpleNamespace(
-            settings=SimpleNamespace(ai_min_game_time_seconds=600),
+            settings=SimpleNamespace(
+                ai_min_game_time_seconds=600,
+                ai_notification_max_latency_seconds=50.0,
+            ),
             session_factory=factory,
             snapshots=snapshots,
             ai=AiCoordinator([provider], timeout_seconds=1),
@@ -675,7 +678,10 @@ async def test_ai_handler_skips_email_when_no_buy_decision() -> None:
         )
     handler = ApplicationJobHandlers(
         SimpleNamespace(
-            settings=SimpleNamespace(ai_min_game_time_seconds=600),
+            settings=SimpleNamespace(
+                ai_min_game_time_seconds=600,
+                ai_notification_max_latency_seconds=50.0,
+            ),
             session_factory=factory,
             snapshots=snapshots,
             ai=AiCoordinator([provider], timeout_seconds=1),
@@ -787,7 +793,10 @@ async def test_ai_handler_emails_only_when_the_buy_side_changes() -> None:
     wechat_service = RecordingWeChatService()
     handler = ApplicationJobHandlers(
         SimpleNamespace(
-            settings=SimpleNamespace(ai_min_game_time_seconds=600),
+            settings=SimpleNamespace(
+                ai_min_game_time_seconds=600,
+                ai_notification_max_latency_seconds=50.0,
+            ),
             session_factory=factory,
             snapshots=snapshots,
             ai=AiCoordinator([provider], timeout_seconds=1),
@@ -876,7 +885,10 @@ async def test_ai_handler_does_not_call_providers_before_ten_minutes() -> None:
         )
     handler = ApplicationJobHandlers(
         SimpleNamespace(
-            settings=SimpleNamespace(ai_min_game_time_seconds=600),
+            settings=SimpleNamespace(
+                ai_min_game_time_seconds=600,
+                ai_notification_max_latency_seconds=50.0,
+            ),
             session_factory=factory,
             snapshots=snapshots,
             ai=AiCoordinator([provider], timeout_seconds=1),

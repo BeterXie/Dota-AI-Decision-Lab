@@ -579,9 +579,15 @@ class ApplicationJobHandlers:
         snapshot: DecisionSnapshot,
         current_records: list[AiDecisionRecord],
     ) -> None:
-        buy_decisions = [
+        max_latency_seconds = self._d.settings.ai_notification_max_latency_seconds
+        timely_records = [
             record
             for record in current_records
+            if record.latency_seconds is not None and record.latency_seconds <= max_latency_seconds
+        ]
+        buy_decisions = [
+            record
+            for record in timely_records
             if record.parse_status == "SUCCESS"
             and isinstance(record.normalized_response, dict)
             and record.normalized_response.get("action") in {"BUY_A", "BUY_B"}
@@ -592,7 +598,8 @@ class ApplicationJobHandlers:
             session,
             canonical_map_id=await _email_scope_map_id(session, snapshot),
             decision_at=snapshot.decision_at,
-            provider_models={(record.provider, record.model) for record in current_records},
+            provider_models={(record.provider, record.model) for record in timely_records},
+            max_latency_seconds=max_latency_seconds,
         )
         if not _new_buy_decisions(buy_decisions, prior_actions):
             return
@@ -600,19 +607,19 @@ class ApplicationJobHandlers:
             await self._d.email_notifications.prepare(
                 session,
                 snapshot=snapshot,
-                decisions=current_records,
+                decisions=timely_records,
             )
         if getattr(self._d, "wechat_clawbot", None) is not None:
             await self._d.wechat_clawbot.prepare_decision_notification(
                 session,
                 snapshot=snapshot,
-                decisions=current_records,
+                decisions=timely_records,
             )
         if getattr(self._d, "qq_bot", None) is not None:
             await self._d.qq_bot.prepare_decision_notification(
                 session,
                 snapshot=snapshot,
-                decisions=current_records,
+                decisions=timely_records,
             )
 
     async def send_decision_email(self, job: DurableJob) -> None:
@@ -1017,6 +1024,7 @@ async def _latest_prior_buy_actions(
     canonical_map_id: UUID | None,
     decision_at: datetime,
     provider_models: set[tuple[str, str]],
+    max_latency_seconds: float,
 ) -> dict[tuple[str, str], str]:
     if canonical_map_id is None or not provider_models:
         return {}
@@ -1033,6 +1041,8 @@ async def _latest_prior_buy_actions(
                 AiDecisionRecord.model.in_(models),
                 AiDecisionRecord.parse_status == "SUCCESS",
                 AiDecisionRecord.normalized_response.is_not(None),
+                AiDecisionRecord.latency_seconds.is_not(None),
+                AiDecisionRecord.latency_seconds <= max_latency_seconds,
             )
             .order_by(
                 DecisionSnapshotRecord.decision_at.desc(),

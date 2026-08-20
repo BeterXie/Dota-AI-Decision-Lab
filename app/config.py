@@ -74,6 +74,9 @@ class Settings(BaseSettings):
     # The key stays configured so it can be re-enabled without touching credentials.
     kimi_decisions_enabled: bool = False
     ai_timeout_seconds: float = 50.0
+    # Slow decisions remain part of the experiment record, but are too stale for
+    # real-time customer notifications.
+    ai_notification_max_latency_seconds: float = Field(default=50.0, gt=0)
     # Delayed DLTV broadcast data beyond this lag is excluded from the AI input
     # (the decision then uses only freeze-time consistent information).
     ai_max_live_data_lag_seconds: float = 120.0

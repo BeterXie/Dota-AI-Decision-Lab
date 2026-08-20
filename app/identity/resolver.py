@@ -379,7 +379,15 @@ class IdentityResolver:
         )
         if mapping is not None:
             if mapping.canonical_event_id != canonical_event_id:
-                raise IdentityAmbiguousError("PROVIDER_EVENT_IDENTITY_CONFLICT")
+                existing_is_authoritative = await self._event_is_liquipedia_backed(
+                    session, mapping.canonical_event_id
+                )
+                target_is_authoritative = await self._event_is_liquipedia_backed(
+                    session, canonical_event_id
+                )
+                if existing_is_authoritative or not target_is_authoritative:
+                    raise IdentityAmbiguousError("PROVIDER_EVENT_IDENTITY_CONFLICT")
+                mapping.canonical_event_id = canonical_event_id
             return
         session.add(
             ProviderEventMapping(
@@ -387,6 +395,23 @@ class IdentityResolver:
                 provider_event_id=provider_event_id,
                 canonical_event_id=canonical_event_id,
             )
+        )
+
+    async def _event_is_liquipedia_backed(
+        self,
+        session: AsyncSession,
+        canonical_event_id: UUID,
+    ) -> bool:
+        return (
+            await session.scalar(
+                select(ProviderEventMapping.id)
+                .where(
+                    ProviderEventMapping.provider == "liquipedia",
+                    ProviderEventMapping.canonical_event_id == canonical_event_id,
+                )
+                .limit(1)
+            )
+            is not None
         )
 
     def _set_match_mapping(

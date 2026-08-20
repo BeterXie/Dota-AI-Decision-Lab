@@ -20,6 +20,13 @@ stage. This does not create a grant and does not unlock realtime notifications o
 Price amounts and currencies are configured in the Paddle catalog and are never hardcoded in the
 application.
 
+`GET /api/billing/offers` reads the configured catalog price records and exposes each active
+one-time price as a lowest-unit amount plus ISO currency code. The frontend formats that payload
+for the current locale; checkout uses the same server-configured price id.
+
+The generic membership page only offers upcoming or live series and events for purchase. Completed
+competition scopes are omitted because their AI decision history is already public.
+
 ## Server-owned purchase mapping
 
 `competition_pass_purchases` is the trust bridge between an authenticated account and a Paddle

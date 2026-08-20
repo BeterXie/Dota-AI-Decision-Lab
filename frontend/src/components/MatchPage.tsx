@@ -9,7 +9,7 @@ import {
   type MapSummary
 } from "../api";
 import type { AuthSessionState } from "../authApi";
-import { eventHref, eventName } from "../events";
+import { eventHref, eventName, isSeriesOngoing } from "../events";
 import { aiAccessScope, findMatchByRoute, type AiAccessScope } from "../matches";
 import { useI18n } from "../i18n";
 import { CanonicalMarketCard } from "./CanonicalMarketCard";
@@ -19,6 +19,7 @@ import { PlayerDraftAdvantageCard } from "./PlayerDraftAdvantageCard";
 import { PlayerAiDecisionStrip } from "./PlayerAiDecisionStrip";
 import { TeamCrest, UiIcon } from "./VisualIdentity";
 import { resolveVerifiedMapSides } from "../utils/mapSides";
+import { matchPhaseBadgePresentation } from "../utils/presentation";
 
 interface MatchPageProps {
   matches: MapSummary[];
@@ -85,6 +86,7 @@ export const MatchPage: React.FC<MatchPageProps> = ({
   const teamA = match.team_a?.name || (locale === "zh-CN" ? "待定" : "TBD");
   const teamB = match.team_b?.name || (locale === "zh-CN" ? "待定" : "TBD");
   const event = eventName(match);
+  const seriesOngoing = isSeriesOngoing(match);
   const live = displayDetail?.live ?? match.live;
   const winnerTeamId = displayDetail?.result?.winner_team_id ?? null;
   const mapSides = resolveVerifiedMapSides(displayDetail ?? match);
@@ -102,7 +104,7 @@ export const MatchPage: React.FC<MatchPageProps> = ({
 
       <section className="product-container match-hero">
         <div className="match-hero-topline">
-          <PhaseBadge phase={match.phase} locale={locale} />
+          <PhaseBadge phase={match.phase} locale={locale} seriesOngoing={seriesOngoing} />
           <span>{match.round || (locale === "zh-CN" ? "比赛" : "Match")}</span>
           {match.best_of ? <span>BO{match.best_of}</span> : null}
           {match.map_number ? <span>{locale === "zh-CN" ? `第 ${match.map_number} 局` : `Map ${match.map_number}`}</span> : null}
@@ -119,7 +121,7 @@ export const MatchPage: React.FC<MatchPageProps> = ({
         </div>
       </section>
 
-      {canonicalMapId ? <SeriesNavigator match={match} activeMapId={canonicalMapId} locale={locale} /> : null}
+      {canonicalMapId ? <SeriesNavigator match={match} activeMapId={canonicalMapId} locale={locale} seriesOngoing={seriesOngoing} /> : null}
 
       {canonicalMapId ? (
         <section className="product-container match-live-section">
@@ -240,39 +242,47 @@ const MatchHeroScore: React.FC<{
   );
 };
 
-const SeriesNavigator: React.FC<{ match: MapSummary; activeMapId: string; locale: string }> = ({ match, activeMapId, locale }) => {
+const SeriesNavigator: React.FC<{ match: MapSummary; activeMapId: string; locale: string; seriesOngoing: boolean }> = ({ match, activeMapId, locale, seriesOngoing }) => {
   const maps = [...(match.series_maps ?? [])].sort((left, right) => (left.map_number ?? 99) - (right.map_number ?? 99));
-  if (maps.length <= 1) return null;
+  if (maps.length <= 1 && !seriesOngoing) return null;
   const teamA = match.team_a?.name || (locale === "zh-CN" ? "队伍 A" : "Team A");
   const teamB = match.team_b?.name || (locale === "zh-CN" ? "队伍 B" : "Team B");
+  const mapNumber = match.map_number ?? 1;
+  const continuationLabel = match.phase === "POSTMATCH"
+    ? (locale === "zh-CN" ? `第 ${mapNumber} 局已结束，系列赛继续进行` : `Map ${mapNumber} is complete; the series continues`)
+    : (locale === "zh-CN" ? "系列赛进行中" : "Series in progress");
   return (
     <section className="product-container match-series-navigator" aria-label={locale === "zh-CN" ? "系列赛地图" : "Series maps"}>
       <div className="match-series-summary">
         <span>{locale === "zh-CN" ? `BO${match.best_of ?? maps.length} 系列赛` : `BO${match.best_of ?? maps.length} series`}</span>
         <strong>{teamA} {scoreText(match)} {teamB}</strong>
       </div>
-      <nav>
-        {maps.map((map, index) => {
-          const winner = map.winner_team_id === match.team_a?.id
-            ? teamA
-            : map.winner_team_id === match.team_b?.id
-              ? teamB
-              : null;
-          const mapNumber = map.map_number ?? index + 1;
-          const active = map.canonical_map_id === activeMapId;
-          return (
-            <a
-              key={map.canonical_map_id}
-              className={active ? "is-active" : ""}
-              href={`/matches/${encodeURIComponent(map.canonical_map_id)}`}
-              aria-current={active ? "page" : undefined}
-            >
-              <span>{locale === "zh-CN" ? `第 ${mapNumber} 局` : `Map ${mapNumber}`}</span>
-              <small>{winner ? (locale === "zh-CN" ? `${winner} 胜` : `${winner} won`) : (locale === "zh-CN" ? "待确认" : "Pending")}</small>
-            </a>
-          );
-        })}
-      </nav>
+      {maps.length > 1 ? (
+        <nav>
+          {maps.map((map, index) => {
+            const winner = map.winner_team_id === match.team_a?.id
+              ? teamA
+              : map.winner_team_id === match.team_b?.id
+                ? teamB
+                : null;
+            const currentMapNumber = map.map_number ?? index + 1;
+            const active = map.canonical_map_id === activeMapId;
+            return (
+              <a
+                key={map.canonical_map_id}
+                className={active ? "is-active" : ""}
+                href={`/matches/${encodeURIComponent(map.canonical_map_id)}`}
+                aria-current={active ? "page" : undefined}
+              >
+                <span>{locale === "zh-CN" ? `第 ${currentMapNumber} 局` : `Map ${currentMapNumber}`}</span>
+                <small>{winner ? (locale === "zh-CN" ? `${winner} 胜` : `${winner} won`) : (locale === "zh-CN" ? "待确认" : "Pending")}</small>
+              </a>
+            );
+          })}
+        </nav>
+      ) : (
+        <div className="match-series-next-state">{continuationLabel}</div>
+      )}
     </section>
   );
 };
@@ -372,9 +382,8 @@ const PanelHeading: React.FC<{ kicker: string; title: string; aside?: string }> 
 
 const EmptyCardMessage: React.FC<{ text: string }> = ({ text }) => <div className="match-empty-message">{text}</div>;
 
-const PhaseBadge: React.FC<{ phase: MapSummary["phase"]; locale: string }> = ({ phase, locale }) => {
-  const key = phase === "LIVE" ? "live" : phase === "PREMATCH" || phase === "UNKNOWN" ? "upcoming" : phase === "AWAITING_RESULT" ? "settling" : "completed";
-  const text = phase === "LIVE" ? (locale === "zh-CN" ? "进行中" : "Live") : phase === "PREMATCH" || phase === "UNKNOWN" ? (locale === "zh-CN" ? "未开始" : "Upcoming") : phase === "AWAITING_RESULT" ? (locale === "zh-CN" ? "赛果确认中" : "Confirming result") : (locale === "zh-CN" ? "已结束" : "Final");
+const PhaseBadge: React.FC<{ phase: MapSummary["phase"]; locale: string; seriesOngoing: boolean }> = ({ phase, locale, seriesOngoing }) => {
+  const { key, text } = matchPhaseBadgePresentation(phase, locale, seriesOngoing);
   return <span className={`match-phase-badge is-${key}`}><i aria-hidden="true" />{text}</span>;
 };
 

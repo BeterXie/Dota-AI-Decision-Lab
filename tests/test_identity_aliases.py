@@ -8,7 +8,13 @@ from app.db import Base
 from app.domain.identity import ProviderMatch
 from app.identity.aliases import equivalent_team_aliases
 from app.identity.resolver import IdentityAmbiguousError, IdentityResolver
-from app.models import CanonicalEvent, CanonicalMap, CanonicalSeries, ProviderMatchMapping
+from app.models import (
+    CanonicalEvent,
+    CanonicalMap,
+    CanonicalSeries,
+    ProviderEventMapping,
+    ProviderMatchMapping,
+)
 from app.providers.dltv.models import DltvBootstrapIdentity
 from app.providers.liquipedia.models import LiquipediaSeriesObservation
 from app.providers.liquipedia.projection import LiquipediaCanonicalProjector
@@ -127,4 +133,144 @@ async def test_raybet_and_dltv_team_aliases_resolve_to_one_series() -> None:
     assert series is not None
     assert resolved.team_a_id == series.team_a_id
     assert resolved.team_b_id == series.team_b_id
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_dltv_placeholder_event_mapping_converges_to_liquipedia_event() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    started_at = datetime(2026, 8, 20, 2, 26, 52, tzinfo=UTC)
+
+    async with factory() as session, session.begin():
+        await LiquipediaCanonicalProjector().project_series(
+            session,
+            [
+                LiquipediaSeriesObservation(
+                    team_a_name="Iron Wing",
+                    team_a_page="Iron Wing",
+                    team_b_name="Team Spirit",
+                    team_b_page="Team Spirit",
+                    tournament_name="The International 2026",
+                    tournament_page="The International/2026",
+                    stage="Group Stage",
+                    best_of=3,
+                    scheduled_at=started_at,
+                    state="UPCOMING",
+                    provider_key="Match:TI2026-Iron-Wing-Spirit",
+                )
+            ],
+        )
+        series = await session.scalar(select(CanonicalSeries))
+        assert series is not None and series.event_id is not None
+        placeholder = CanonicalEvent(name="dltv:6384")
+        session.add(placeholder)
+        await session.flush()
+        session.add(
+            ProviderEventMapping(
+                provider="dltv",
+                provider_event_id="6384",
+                canonical_event_id=placeholder.id,
+            )
+        )
+
+        resolved = await IdentityResolver().resolve_dltv_bootstrap(
+            session,
+            DltvBootstrapIdentity(
+                valve_match_id=8955197224,
+                series_id=427689,
+                event_id=6384,
+                first_team_id=1001,
+                first_team_name="Iron Wing",
+                second_team_id=7119388,
+                second_team_name="Team Spirit",
+                started_at=started_at,
+                map_number=1,
+            ),
+        )
+        mapping = await session.scalar(
+            select(ProviderEventMapping).where(
+                ProviderEventMapping.provider == "dltv",
+                ProviderEventMapping.provider_event_id == "6384",
+            )
+        )
+
+    assert resolved.canonical_event_id == series.event_id
+    assert mapping is not None and mapping.canonical_event_id == series.event_id
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_dltv_event_mapping_does_not_replace_another_liquipedia_event() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    started_at = datetime(2026, 8, 20, 2, 26, 52, tzinfo=UTC)
+
+    async with factory() as session, session.begin():
+        await LiquipediaCanonicalProjector().project_series(
+            session,
+            [
+                LiquipediaSeriesObservation(
+                    team_a_name="Iron Wing",
+                    team_a_page="Iron Wing",
+                    team_b_name="Team Spirit",
+                    team_b_page="Team Spirit",
+                    tournament_name="The International 2026",
+                    tournament_page="The International/2026",
+                    stage="Group Stage",
+                    best_of=3,
+                    scheduled_at=started_at,
+                    state="UPCOMING",
+                    provider_key="Match:TI2026-Iron-Wing-Spirit",
+                )
+            ],
+        )
+        conflicting_event = CanonicalEvent(name="Another Liquipedia event")
+        session.add(conflicting_event)
+        await session.flush()
+        session.add_all(
+            (
+                ProviderEventMapping(
+                    provider="liquipedia",
+                    provider_event_id="Another/Event",
+                    canonical_event_id=conflicting_event.id,
+                ),
+                ProviderEventMapping(
+                    provider="dltv",
+                    provider_event_id="6384",
+                    canonical_event_id=conflicting_event.id,
+                ),
+            )
+        )
+        conflicting_event_id = conflicting_event.id
+
+    with pytest.raises(IdentityAmbiguousError, match="PROVIDER_EVENT_IDENTITY_CONFLICT"):
+        async with factory.begin() as session:
+            await IdentityResolver().resolve_dltv_bootstrap(
+                session,
+                DltvBootstrapIdentity(
+                    valve_match_id=8955197224,
+                    series_id=427689,
+                    event_id=6384,
+                    first_team_id=1001,
+                    first_team_name="Iron Wing",
+                    second_team_id=7119388,
+                    second_team_name="Team Spirit",
+                    started_at=started_at,
+                    map_number=1,
+                ),
+            )
+
+    async with factory() as session:
+        mapping = await session.scalar(
+            select(ProviderEventMapping).where(
+                ProviderEventMapping.provider == "dltv",
+                ProviderEventMapping.provider_event_id == "6384",
+            )
+        )
+        assert mapping is not None and mapping.canonical_event_id == conflicting_event_id
     await engine.dispose()
