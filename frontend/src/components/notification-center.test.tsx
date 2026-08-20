@@ -59,7 +59,8 @@ test("renders verified account destinations and creates a short-lived QQ pairing
           channel: "QQ",
           code: "ABCD-1234",
           command: "绑定 ABCD-1234",
-          expires_at: "2026-08-17T00:10:00Z"
+          expires_at: "2026-08-17T00:10:00Z",
+          share_url: "https://qq.example/invite"
         }),
         { status: 200, headers: { "Content-Type": "application/json" } }
       );
@@ -80,6 +81,10 @@ test("renders verified account destinations and creates a short-lived QQ pairing
   expect(qqCard).not.toBeNull();
   fireEvent.click(within(qqCard!).getByRole("button", { name: "Generate pairing code" }));
   expect(await within(qqCard!).findByText("绑定 ABCD-1234")).toBeInTheDocument();
+  expect(within(qqCard!).getByRole("link", { name: /Open QQ and add bot/i })).toHaveAttribute(
+    "href",
+    "https://qq.example/invite"
+  );
   expect(fetchMock).toHaveBeenCalledWith(
     "/api/notifications/pairing/qq",
     expect.objectContaining({ method: "POST", credentials: "same-origin" })

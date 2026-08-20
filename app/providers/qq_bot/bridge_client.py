@@ -60,6 +60,20 @@ class QQBridgeClient:
             cursor=cursor_value if isinstance(cursor_value, int) and cursor_value >= 0 else 0,
         )
 
+    async def create_share_link(self, callback_data: str) -> str:
+        value = callback_data.strip()
+        if not value or len(value) > 32:
+            raise ValueError("QQ share-link callback data must be 1-32 characters")
+        raw = await self._request(
+            "POST",
+            "/share-link",
+            body={"callback_data": value},
+        )
+        share_url = raw.get("url_link")
+        if not isinstance(share_url, str) or not share_url:
+            raise QQBridgeError("QQ bridge share-link response is missing url_link")
+        return share_url
+
     async def send_text(
         self,
         *,

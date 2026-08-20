@@ -36,12 +36,14 @@ class QQContact(BaseModel):
 class QQInboundMessage(BaseModel):
     model_config = ConfigDict(frozen=True)
 
+    event_type: Literal["MESSAGE", "FRIEND_ADD"] = "MESSAGE"
     event_cursor: int
     scope: QQScope
     target_id: str
     sender_id: str
-    message_id: str
-    text: str
+    message_id: str | None = None
+    text: str = ""
+    scene_param: str | None = None
     sender_name: str | None = None
     bot_mentioned: bool = False
     mentions: tuple[str, ...] = ()

@@ -1,3 +1,4 @@
+from collections.abc import Awaitable, Callable
 from uuid import UUID
 
 from fastapi import APIRouter, HTTPException, Request, status
@@ -13,6 +14,8 @@ from app.notifications.center import (
 )
 from app.notifications.secure_center import NotificationCenterService
 
+QQPairingLinkFactory = Callable[[str], Awaitable[str]]
+
 
 class NotificationPreferencePayload(BaseModel):
     enabled: bool
@@ -20,6 +23,10 @@ class NotificationPreferencePayload(BaseModel):
 
 def create_notification_router(
     session_factory: async_sessionmaker[AsyncSession],
+    *,
+    qq_pairing_link_factory: QQPairingLinkFactory | None = None,
+    qq_contact_url: str | None = None,
+    wechat_contact_url: str | None = None,
 ) -> APIRouter:
     router = APIRouter(prefix="/api/notifications", tags=["notifications"])
     center = NotificationCenterService(session_factory)
@@ -55,11 +62,33 @@ def create_notification_router(
                 status_code=422, detail="pairing is only supported for QQ and WeChat"
             )
         code, expires_at = await center.create_pairing_code(user.id, normalized)
+        share_url = None
+        contact_url = None
+        pairing_mode = "MANUAL_MESSAGE"
+        if normalized == "QQ":
+            contact_url = qq_contact_url
+            if qq_pairing_link_factory is not None:
+                try:
+                    share_url = await qq_pairing_link_factory(code)
+                    pairing_mode = "QQ_SHARE_LINK"
+                except Exception:
+                    # The code remains valid; the user can use the configured
+                    # fallback contact link or send it in an existing chat.
+                    share_url = None
+            if share_url is None and contact_url:
+                pairing_mode = "QQ_CONTACT_LINK"
+        else:
+            contact_url = wechat_contact_url
+            if contact_url:
+                pairing_mode = "WECHAT_CONTACT_LINK"
         return {
             "channel": normalized,
             "code": code,
             "command": f"绑定 {code}",
             "expires_at": expires_at,
+            "share_url": share_url,
+            "contact_url": contact_url,
+            "pairing_mode": pairing_mode,
         }
 
     @router.put("/preferences/{channel}")

@@ -692,6 +692,9 @@ async def run() -> None:
         live_market_max_age_seconds=settings.live_market_max_age_seconds,
         market_max_pair_skew_seconds=settings.market_max_pair_skew_seconds,
         ai_min_game_time_seconds=settings.ai_min_game_time_seconds,
+        qq_pairing_link_factory=(qq_bot.create_share_link if qq_bot is not None else None),
+        qq_contact_url=settings.qq_bot_contact_url,
+        wechat_contact_url=settings.wechat_clawbot_contact_url,
     )
     workers.append(
         WebServerWorker(

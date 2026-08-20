@@ -125,19 +125,32 @@ Email is not an arbitrary address entered in a form. The user explicitly binds t
 
 ### QQ binding
 
-The QQ bot installation must be configured and `QQ_BOT_ENABLED=true` for QQ delivery. In Notification Center, the user selects **Generate pairing code** and receives a command like:
+The QQ bot installation is infrastructure-scoped: an administrator scans the QQ login QR once
+and keeps the shared bot online. It must be configured and `QQ_BOT_ENABLED=true` for QQ delivery;
+the administrator QR is never shown as an end-user binding step. In Notification Center, each
+user selects **Generate pairing code** and receives a command like:
 
 ```text
 绑定 ABCD-1234
 ```
 
-The user sends that command to the QQ bot in the actual private chat or allowed group. The bot consumes the one-time code and records the real QQ conversation as a verified binding for that account. The same QQ destination cannot be claimed by a second account while already bound.
+QQ users should open the generated official share link (or the configured
+`QQ_BOT_CONTACT_URL` fallback) and start their own C2C chat. The official `FRIEND_ADD` callback
+can carry the short code automatically; the manual command remains the recovery path. The bot
+consumes the one-time code and records that user's real C2C conversation as a verified binding.
+The same QQ destination cannot be claimed by a second account while already bound.
 
 After pairing, `订阅通知` and `退订通知` toggle the preference for the bound QQ destination. Ordinary bot query commands continue to use the existing QQ command behavior.
 
 ### WeChat binding
 
-The WeChat ClawBot installation must be configured and `WECHAT_CLAWBOT_ENABLED=true` for WeChat delivery. WeChat uses the same proof-of-possession flow: generate a one-time code in Notification Center and send `绑定 <code>` to the configured WeChat bot. The bot binds the actual bot account plus sender user id to the authenticated application account.
+The WeChat ClawBot installation is also infrastructure-scoped: an administrator scans its login
+QR once and keeps one shared bot account online. It must be configured and
+`WECHAT_CLAWBOT_ENABLED=true` for WeChat delivery. Each user starts a separate direct chat via
+the configured `WECHAT_CLAWBOT_CONTACT_URL` (when provided), generates a one-time code in
+Notification Center, and sends `绑定 <code>` to the bot. The bot binds the actual bot account
+plus that sender's user id and context token to the authenticated application account. A QR
+login's `ilink_user_id` is not treated as a notification recipient.
 
 After pairing, `订阅通知` and `退订通知` toggle the WeChat preference. Ordinary bot query commands continue to use the existing WeChat command behavior.
 

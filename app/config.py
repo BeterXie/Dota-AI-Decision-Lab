@@ -134,6 +134,8 @@ class Settings(BaseSettings):
     wechat_clawbot_base_url: str = "https://ilinkai.weixin.qq.com"
     wechat_clawbot_state_dir: str = ".runtime/wechat-clawbot"
     wechat_clawbot_bot_agent: str = "Dota-AI-Decision-Lab/0.1.0"
+    # Public contact/deep link shared with users so they can start a direct chat.
+    wechat_clawbot_contact_url: str | None = None
     wechat_clawbot_timeout_seconds: float = Field(default=15.0, gt=0)
     wechat_clawbot_long_poll_timeout_seconds: float = Field(default=40.0, gt=0)
     # Decision alerts are live signals, not a backlog feed. Old snapshots are
@@ -149,6 +151,9 @@ class Settings(BaseSettings):
     qq_bot_app_id: SecretStr | None = None
     qq_bot_app_secret: SecretStr | None = None
     qq_bot_state_dir: str = ".runtime/qq-bot"
+    # Optional fallback contact link. When the bridge is online, the runtime
+    # creates an official per-user QQ share link with the pairing code embedded.
+    qq_bot_contact_url: str | None = None
     # Blank means auto-detect the harness profile node_modules first, then the
     # project-local ``qqbot_bridge/node_modules`` install.
     qq_bot_sdk_root: str = ""
@@ -163,8 +168,9 @@ class Settings(BaseSettings):
     qq_bot_decision_targets: str = ""
     # In groups only react when the bot is @mentioned.
     qq_bot_group_require_mention: bool = True
-    # Optional allowlists. Empty = any private chatter may query; groups still
-    # follow qq_bot_group_require_mention unless listed as allowed below.
+    # Optional allowlists. Empty = any private chatter may query; the bridge
+    # still lets one-time pairing commands reach Python for verification.
+    # Groups follow qq_bot_group_require_mention unless listed as allowed below.
     qq_bot_allowed_c2c: str = ""
     qq_bot_allowed_groups: str = ""
 

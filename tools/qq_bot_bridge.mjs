@@ -19,6 +19,7 @@ import { pathToFileURL } from "node:url";
 
 const stateDir = path.resolve(process.env.QQ_BOT_STATE_DIR || ".runtime/qq-bot");
 const accountsPath = path.join(stateDir, "accounts.json");
+const cursorDir = path.join(stateDir, "cursors");
 const sdkIndex = process.env.QQ_BOT_SDK_INDEX;
 if (!sdkIndex) {
   console.error("QQ_BOT_SDK_INDEX is required");
@@ -53,7 +54,29 @@ let statusMessage = null;
 let accountCount = 0;
 
 const events = [];
-let eventCursor = 0;
+// The event buffer is intentionally in-memory, but the cursor must survive a
+// bridge restart. Python persists the last processed cursor per account; use
+// the highest stored value so new events remain strictly after that cursor.
+function loadInitialEventCursor() {
+  let highest = 0;
+  try {
+    for (const entry of fs.readdirSync(cursorDir)) {
+      if (!entry.endsWith(".json")) continue;
+      try {
+        const raw = JSON.parse(fs.readFileSync(path.join(cursorDir, entry), "utf8"));
+        const value = raw?.event_cursor;
+        if (Number.isSafeInteger(value) && value >= 0) highest = Math.max(highest, value);
+      } catch {
+        // Ignore an incomplete cursor file while the Python store is rotating it.
+      }
+    }
+  } catch {
+    // The cursor directory is created by the Python store after first login.
+  }
+  return highest;
+}
+
+let eventCursor = loadInitialEventCursor();
 const MAX_EVENTS = 1000;
 
 function splitList(raw) {
@@ -129,6 +152,7 @@ function enqueueMessage(msg) {
     ? msg.mentions.some((mention) => mention && (mention.is_you === true || mention.bot === true))
     : false;
   const event = {
+    event_type: "MESSAGE",
     event_cursor: ++eventCursor,
     scope,
     target_id: scope === "c2c" ? msg.senderId : msg.groupOpenid,
@@ -147,6 +171,58 @@ function enqueueMessage(msg) {
     scope: event.scope,
     target_id: event.target_id,
   });
+}
+
+function enqueueFriendAdd(raw) {
+  const openid = firstString(
+    raw?.openid,
+    raw?.open_id,
+    raw?.user_openid,
+    raw?.userOpenid,
+    raw?.sender_id,
+    raw?.author?.openid,
+    raw?.author?.user_openid,
+  );
+  if (!openid) return;
+  const callbackData = firstString(
+    raw?.scene_param,
+    raw?.sceneParam,
+    raw?.callback_data,
+    raw?.callbackData,
+  );
+  const event = {
+    event_type: "FRIEND_ADD",
+    event_cursor: ++eventCursor,
+    scope: "c2c",
+    target_id: openid,
+    sender_id: openid,
+    message_id: null,
+    text: "",
+    scene_param: callbackData || null,
+    sender_name: firstString(raw?.author?.nick, raw?.author?.nickname, raw?.nickname) || null,
+    bot_mentioned: false,
+    mentions: [],
+    timestamp: safeTimestamp(
+      (() => {
+        const value = Number(raw?.timestamp || 0);
+        return value > 0 && value < 1_000_000_000_000 ? value * 1000 : value;
+      })(),
+    ),
+  };
+  events.push(event);
+  if (events.length > MAX_EVENTS) events.shift();
+  log("info", "qq_friend_added", {
+    cursor: event.event_cursor,
+    scene: raw?.scene || null,
+    has_callback_data: Boolean(callbackData),
+  });
+}
+
+function firstString(...values) {
+  for (const value of values) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return "";
 }
 
 function buildBot(account) {
@@ -207,9 +283,28 @@ function buildBot(account) {
       log("error", "message_buffer_failed", { error: String(error) });
     }
   });
+  instance.on("rawEvent", (ctx) => {
+    if (ctx?.eventType !== "FRIEND_ADD") return;
+    try {
+      enqueueFriendAdd(ctx.data || ctx.payload || ctx);
+    } catch (error) {
+      log("error", "friend_add_buffer_failed", { error: String(error) });
+    }
+  });
 
   const policy = {};
-  if (allowedC2C.length) policy.c2c = { mode: "allowlist", allow: allowedC2C };
+  if (allowedC2C.length) {
+    // Keep pairing commands visible to Python even when an operator has an
+    // allowlist. The application verifies the one-time code and then applies
+    // the allowlist to every other private-chat command; filtering here would
+    // make a new user unable to complete the binding handshake.
+    const pairingCommand = (ctx) => {
+      const content = ctx?.message?.content;
+      return typeof content === "string" &&
+        /^(绑定|绑定通知|bind|\/bind)\s+\S+/iu.test(content.trim());
+    };
+    policy.c2c = { mode: "allowlist", allow: [...allowedC2C, pairingCommand] };
+  }
   if (allowedGroups.length) policy.group = { mode: "allowlist", allow: allowedGroups };
   if (Object.keys(policy).length) instance.use(accessPolicy(policy));
   instance.use(messageFilter({ skipSelfEcho: true, dedup: { windowMs: 5000, maxSize: 1000 } }));
@@ -323,6 +418,36 @@ async function idempotentSend(body) {
   return result;
 }
 
+async function createShareLink(body) {
+  if (!bot || !gatewayConnected) {
+    const error = new Error("QQ bridge is not connected to the QQ gateway");
+    error.statusCode = 503;
+    throw error;
+  }
+  const callbackData = typeof body.callback_data === "string" ? body.callback_data.trim() : "";
+  if (!callbackData || callbackData.length > 32) {
+    const error = new Error("callback_data must be 1-32 characters");
+    error.statusCode = 400;
+    throw error;
+  }
+  const response = await bot.api.post("/v2/generate_url_link", {
+    callback_data: callbackData,
+  });
+  if (typeof response?.retcode === "number" && response.retcode !== 0) {
+    throw new Error(
+      `QQ API share-link request failed: retcode=${response.retcode} ` +
+      `message=${typeof response.msg === "string" ? response.msg : "(none)"}`,
+    );
+  }
+  // The current API wraps the link as data.url, while the published API
+  // contract documents url_link. Accept both official response shapes.
+  const urlLink = response?.data?.url || response?.url_link || response?.data?.url_link;
+  if (typeof urlLink !== "string" || !urlLink) {
+    throw new Error("QQ API share-link response is missing the generated URL");
+  }
+  return { url_link: urlLink };
+}
+
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url || "/", `http://${host}:${port}`);
   try {
@@ -354,6 +479,12 @@ const server = http.createServer(async (req, res) => {
         return;
       }
       const result = await idempotentSend(body);
+      sendJson(res, 200, result);
+      return;
+    }
+    if (req.method === "POST" && url.pathname === "/share-link") {
+      const body = await readJsonBody(req);
+      const result = await createShareLink(body);
       sendJson(res, 200, result);
       return;
     }
