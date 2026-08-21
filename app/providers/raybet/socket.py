@@ -16,9 +16,18 @@ class RayBetSocketConnection(Protocol):
 
 
 class RayBetSocketClient:
-    def __init__(self, url: str, origin: str) -> None:
+    def __init__(
+        self,
+        url: str,
+        origin: str,
+        *,
+        business_message_timeout_seconds: float = 120.0,
+    ) -> None:
+        if business_message_timeout_seconds <= 0:
+            raise ValueError("business_message_timeout_seconds must be positive")
         self._url = url
         self._origin = origin
+        self._business_message_timeout = business_message_timeout_seconds
         self._stop = asyncio.Event()
         self._curl_session: requests.AsyncSession | None = None
 
@@ -31,12 +40,24 @@ class RayBetSocketClient:
                     buffered = await self._handshake(websocket)
                     await on_state("CONNECTED", None)
                     backoff = 1.0
+                    message_deadline = (
+                        asyncio.get_running_loop().time() + self._business_message_timeout
+                    )
                     for message in buffered:
                         if self._stop.is_set():
                             break
                         await on_publish(message)
+                        message_deadline = (
+                            asyncio.get_running_loop().time() + self._business_message_timeout
+                        )
                     while not self._stop.is_set():
-                        raw = await websocket.recv()
+                        remaining = message_deadline - asyncio.get_running_loop().time()
+                        if remaining <= 0:
+                            raise TimeoutError(self._business_timeout_message())
+                        try:
+                            raw = await asyncio.wait_for(websocket.recv(), timeout=remaining)
+                        except TimeoutError as exc:
+                            raise TimeoutError(self._business_timeout_message()) from exc
                         if isinstance(raw, tuple):
                             raw = raw[0]
                         if isinstance(raw, bytes):
@@ -49,6 +70,9 @@ class RayBetSocketClient:
                         message = _match_publish(raw)
                         if message is not None:
                             await on_publish(message)
+                            message_deadline = (
+                                asyncio.get_running_loop().time() + self._business_message_timeout
+                            )
             except asyncio.CancelledError:
                 raise
             except Exception as exc:
@@ -58,6 +82,12 @@ class RayBetSocketClient:
                 except TimeoutError:
                     pass
                 backoff = min(backoff * 2, 30.0)
+
+    def _business_timeout_message(self) -> str:
+        return (
+            "RayBet match channel produced no business message for "
+            f"{self._business_message_timeout:g} seconds"
+        )
 
     async def stop(self) -> None:
         self._stop.set()
