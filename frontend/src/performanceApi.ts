@@ -4,6 +4,7 @@ export interface AiExperimentIdentity {
   prompt_version: string;
   decision_policy_version: string;
   ai_view_version: string;
+  execution_config_version: string;
 }
 
 export interface AiEventBreakdown {

@@ -13,7 +13,7 @@ from app.ai.base import (
     AI_VIEW_VERSION,
     DECISION_POLICY_VERSION,
     PROMPT_VERSION,
-    ai_experiment_key,
+    ai_decision_lane_key,
 )
 from app.auth.social import SocialAuthSettings
 from app.config import Settings, get_settings
@@ -280,7 +280,7 @@ async def active_runtime_ai_experiments(
             bootstrap=bootstrap,
         ):
             continue
-        experiments.append(ai_experiment_key(row.provider, row.model))
+        experiments.append(ai_decision_lane_key(row.provider, row.model))
     return _remember_active_experiments(tuple(experiments))
 
 

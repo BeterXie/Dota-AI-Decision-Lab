@@ -72,6 +72,7 @@ async def build_position_audit(
             "prompt_version": account.prompt_version,
             "decision_policy_version": account.decision_policy_version,
             "ai_view_version": account.ai_view_version,
+            "execution_config_version": account.execution_config_version,
         },
         "positions": [
             {
@@ -138,6 +139,7 @@ def annotate_context_experiments(report: dict[str, Any]) -> dict[str, Any]:
             str(identity.get("prompt_version")),
             str(identity.get("decision_policy_version")),
             str(metadata["reference_ai_view_version"]),
+            str(identity.get("execution_config_version")),
         )
         reference = rows_by_key.get(reference_key)
         if reference is None or reference is row:
@@ -147,7 +149,7 @@ def annotate_context_experiments(report: dict[str, Any]) -> dict[str, Any]:
     return report
 
 
-def _experiment_key(identity: dict[str, Any] | None) -> tuple[str, str, str, str, str]:
+def _experiment_key(identity: dict[str, Any] | None) -> tuple[str, str, str, str, str, str]:
     identity = identity or {}
     return (
         str(identity.get("provider")),
@@ -155,6 +157,7 @@ def _experiment_key(identity: dict[str, Any] | None) -> tuple[str, str, str, str
         str(identity.get("prompt_version")),
         str(identity.get("decision_policy_version")),
         str(identity.get("ai_view_version")),
+        str(identity.get("execution_config_version")),
     )
 
 

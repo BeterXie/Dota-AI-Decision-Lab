@@ -10,6 +10,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.decision import AiDecision
+from app.domain.experiment import AiExperimentKey
 from app.evaluation.leaderboard import TournamentLeaderboardService
 from app.models import (
     AiDecisionRecord,
@@ -20,7 +21,7 @@ from app.models import (
     MapResultRecord,
 )
 
-BENCHMARK_REPORT_VERSION = "ai-benchmark-v1"
+BENCHMARK_REPORT_VERSION = "ai-benchmark-v2"
 BASELINE_ID = "production-baseline-v1"
 BASELINE_FROZEN_AT_COMMIT = "81698ca175a75dfb08285c3725c98835f616a843"
 BASELINE_PROMPT_VERSION = "decision-analyst-v5.1-output"
@@ -28,8 +29,6 @@ BASELINE_DECISION_POLICY_VERSION = "shadow-tournament-portfolio-v3"
 BASELINE_AI_VIEW_VERSION = "ai-view-v6"
 CALIBRATION_POLICY_VERSION = "ece-equal-width-10-v1"
 CALIBRATION_BIN_COUNT = 10
-_RUNTIME_CONFIG_MARKER = "@cfg:"
-_LEGACY_EXECUTION_SIGNATURE = "LEGACY_UNFINGERPRINTED"
 
 BASELINE_MODELS_BY_PROVIDER: dict[str, str] = {
     "openai": "gpt-5.6-terra",
@@ -38,7 +37,7 @@ BASELINE_MODELS_BY_PROVIDER: dict[str, str] = {
     "deepseek": "deepseek-v4-pro",
 }
 
-ExperimentKey = tuple[str, str, str, str, str]
+ExperimentKey = AiExperimentKey
 
 
 @dataclass(slots=True)
@@ -180,7 +179,7 @@ class AiBaselineBenchmarkService:
         rows_by_key = {_identity_key_from_dict(row["experiment"]): row for row in experiments}
         for row in experiments:
             key = _identity_key_from_dict(row["experiment"])
-            baseline_key = _baseline_key_for_provider(key[0])
+            baseline_key = _baseline_key_for_provider(key[0], key[5])
             baseline = rows_by_key.get(baseline_key) if baseline_key is not None else None
             row["baseline_reference"] = (
                 baseline["experiment"] if baseline is not None and baseline is not row else None
@@ -219,9 +218,7 @@ class AiBaselineBenchmarkService:
                 "latency": "AI_PROVIDER_HTTP_LATENCY_SECONDS_ALL_ATTEMPTS",
                 "market_comparison": "VIG_REMOVED_TWO_WAY_PROBABILITY_AT_DECISION_SNAPSHOT",
                 "significance": "DESCRIPTIVE_ONLY_NO_STATISTICAL_SIGNIFICANCE_CLAIM",
-                "runtime_config_guard": (
-                    "MIXED_EXECUTION_FINGERPRINTS_DISABLE_METRIC_AND_BASELINE_COMPARISON"
-                ),
+                "experiment_identity": "INCLUDES_FROZEN_EXECUTION_CONFIG_VERSION",
             },
             "experiments": experiments,
         }
@@ -252,18 +249,15 @@ class AiBaselineBenchmarkService:
         )
         abstentions = sum(acc.action_counts[action] for action in ("NO_BUY", "INSUFFICIENT_DATA"))
         action_total = sum(acc.action_counts.values())
-        fingerprints = _runtime_config_fingerprints(acc.model_versions)
-        mixed_execution_config = len(fingerprints) > 1
-        comparison_eligible = not mixed_execution_config
-        portfolio_metrics = _portfolio_metrics(None if mixed_execution_config else portfolio)
+        portfolio_metrics = _portfolio_metrics(portfolio)
         return {
             "experiment": _identity_dict(key),
             "observed_model_versions": sorted(acc.model_versions),
             "execution_config": {
-                "runtime_fingerprints": fingerprints,
-                "mixed": mixed_execution_config,
-                "comparison_eligible": comparison_eligible,
-                "blocker": ("MIXED_RUNTIME_EXECUTION_CONFIG" if mixed_execution_config else None),
+                "version": key[5],
+                "mixed": False,
+                "comparison_eligible": True,
+                "blocker": None,
             },
             "baseline_role": "BASELINE" if _is_baseline_key(key) else "CHALLENGER",
             "samples": {
@@ -277,35 +271,23 @@ class AiBaselineBenchmarkService:
                 "market_comparison_maps": len(comparable),
             },
             "quality": {
-                "forecast_accuracy": accuracy if comparison_eligible else None,
-                "average_brier_score": _average(briers) if comparison_eligible else None,
-                "average_log_loss": _average(log_losses) if comparison_eligible else None,
-                "calibration_error": (
-                    _expected_calibration_error(probabilities, outcomes)
-                    if comparison_eligible
-                    else None
+                "forecast_accuracy": accuracy,
+                "average_brier_score": _average(briers),
+                "average_log_loss": _average(log_losses),
+                "calibration_error": _expected_calibration_error(probabilities, outcomes),
+                "average_clv": _average(list(acc.clv_by_map.values())),
+                "market_brier_improvement": _difference(
+                    _average(market_briers),
+                    _average(comparable_ai_briers),
                 ),
-                "average_clv": (
-                    _average(list(acc.clv_by_map.values())) if comparison_eligible else None
-                ),
-                "market_brier_improvement": (
-                    _difference(
-                        _average(market_briers),
-                        _average(comparable_ai_briers),
-                    )
-                    if comparison_eligible
-                    else None
-                ),
-                "abstention_rate": (
-                    abstentions / action_total if action_total and comparison_eligible else None
-                ),
+                "abstention_rate": (abstentions / action_total if action_total else None),
                 "action_counts": dict(sorted(acc.action_counts.items())),
                 "parse_status_counts": dict(sorted(acc.parse_statuses.items())),
             },
             "latency": {
                 "sample_count": len(acc.latencies),
-                "average_seconds": _average(acc.latencies) if comparison_eligible else None,
-                "p95_seconds": (_percentile(acc.latencies, 0.95) if comparison_eligible else None),
+                "average_seconds": _average(acc.latencies),
+                "p95_seconds": _percentile(acc.latencies, 0.95),
             },
             "portfolio": portfolio_metrics,
             "baseline_reference": None,
@@ -332,6 +314,7 @@ def _identity_key(record: AiDecisionRecord) -> ExperimentKey:
         record.prompt_version,
         record.decision_policy_version,
         record.ai_view_version,
+        record.execution_config_version,
     )
 
 
@@ -342,6 +325,7 @@ def _identity_key_from_dict(identity: dict[str, Any]) -> ExperimentKey:
         str(identity["prompt_version"]),
         str(identity["decision_policy_version"]),
         str(identity["ai_view_version"]),
+        str(identity["execution_config_version"]),
     )
 
 
@@ -352,10 +336,14 @@ def _identity_dict(key: ExperimentKey) -> dict[str, str]:
         "prompt_version": key[2],
         "decision_policy_version": key[3],
         "ai_view_version": key[4],
+        "execution_config_version": key[5],
     }
 
 
-def _baseline_key_for_provider(provider: str) -> ExperimentKey | None:
+def _baseline_key_for_provider(
+    provider: str,
+    execution_config_version: str,
+) -> ExperimentKey | None:
     model = BASELINE_MODELS_BY_PROVIDER.get(provider)
     if model is None:
         return None
@@ -365,22 +353,13 @@ def _baseline_key_for_provider(provider: str) -> ExperimentKey | None:
         BASELINE_PROMPT_VERSION,
         BASELINE_DECISION_POLICY_VERSION,
         BASELINE_AI_VIEW_VERSION,
+        execution_config_version,
     )
 
 
 def _is_baseline_key(key: ExperimentKey) -> bool:
-    baseline = _baseline_key_for_provider(key[0])
+    baseline = _baseline_key_for_provider(key[0], key[5])
     return baseline == key
-
-
-def _runtime_config_fingerprints(model_versions: set[str]) -> list[str]:
-    fingerprints = set()
-    for value in model_versions:
-        if _RUNTIME_CONFIG_MARKER in value:
-            fingerprints.add(value.rsplit(_RUNTIME_CONFIG_MARKER, 1)[1])
-        else:
-            fingerprints.add(_LEGACY_EXECUTION_SIGNATURE)
-    return sorted(fingerprints)
 
 
 def _portfolio_metrics(portfolio: dict[str, Any] | None) -> dict[str, Any]:

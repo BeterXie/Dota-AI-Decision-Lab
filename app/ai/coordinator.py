@@ -16,19 +16,24 @@ from app.ai.base import (
     PROMPT_VERSION,
     AiProvider,
     AiProviderFailure,
-    ai_experiment_key,
+    ai_decision_lane_key,
     extract_provider_usage,
     validate_ai_decision,
 )
 from app.ai.input import build_ai_input
 from app.canonical import canonical_bytes
 from app.domain.decision import AiDecision
+from app.domain.experiment import (
+    AiDecisionLaneKey,
+    ai_experiment_key,
+    execution_config_version_for_provider,
+)
 from app.domain.snapshot import DecisionSnapshot
 from app.evaluation.portfolio import PortfolioContext, PortfolioScope, TournamentPortfolioService
 from app.evaluation.portfolio_models import TournamentPortfolioPositionRecord
 from app.models import AiDecisionRecord, DecisionSnapshotRecord
 
-ExperimentKey = tuple[str, str, str, str, str]
+ExperimentKey = AiDecisionLaneKey
 
 
 @dataclass(frozen=True)
@@ -59,6 +64,7 @@ class PreparedAiDecision:
     bankroll_before: float
     input_prepare_started_at: datetime
     input_prepare_completed_at: datetime
+    execution_config_version: str
     existing_record: AiDecisionRecord | None = None
     job_enqueued_at: datetime | None = None
     job_claimed_at: datetime | None = None
@@ -90,7 +96,7 @@ class AiCoordinator:
     @property
     def experiments(self) -> tuple[ExperimentKey, ...]:
         return tuple(
-            ai_experiment_key(provider.name, provider.model) for provider in self._providers
+            ai_decision_lane_key(provider.name, provider.model) for provider in self._providers
         )
 
     def get_provider(self, provider: str, model: str) -> AiProvider:
@@ -115,6 +121,7 @@ class AiCoordinator:
         session is closed again before any HTTP call starts.
         """
         candidate = self.get_provider(provider, model)
+        execution_config_version = execution_config_version_for_provider(candidate)
         input_prepare_started_at = datetime.now(UTC)
         base_input = build_ai_input(
             snapshot,
@@ -122,7 +129,7 @@ class AiCoordinator:
         )
         snapshot_record = await session.get(DecisionSnapshotRecord, snapshot.snapshot_id)
         canonical_map_id = snapshot_record.canonical_map_id if snapshot_record is not None else None
-        experiment = ai_experiment_key(provider, model)
+        experiment = ai_decision_lane_key(provider, model)
         existing_record = await session.scalar(
             select(AiDecisionRecord).where(
                 AiDecisionRecord.snapshot_id == snapshot.snapshot_id,
@@ -131,6 +138,7 @@ class AiCoordinator:
                 AiDecisionRecord.prompt_version == experiment[2],
                 AiDecisionRecord.decision_policy_version == experiment[3],
                 AiDecisionRecord.ai_view_version == experiment[4],
+                AiDecisionRecord.execution_config_version == execution_config_version,
             )
         )
         prior = await self._prior_decisions(
@@ -139,6 +147,10 @@ class AiCoordinator:
             snapshot=snapshot,
             provider=provider,
             model=model,
+            prompt_version=experiment[2],
+            decision_policy_version=experiment[3],
+            ai_view_version=experiment[4],
+            execution_config_version=execution_config_version,
         )
         portfolio_scope = (
             await self._portfolio.scope_for_snapshot(session, snapshot.snapshot_id)
@@ -149,7 +161,7 @@ class AiCoordinator:
             await self._portfolio.context_for_scope(
                 session,
                 scope=portfolio_scope,
-                experiment=experiment,
+                experiment=ai_experiment_key(experiment, execution_config_version),
                 funding_reference_at=snapshot.decision_at,
             )
             if self._portfolio is not None and portfolio_scope is not None
@@ -173,6 +185,7 @@ class AiCoordinator:
             bankroll_before=float(bankroll_context["bankroll_before"]),
             input_prepare_started_at=input_prepare_started_at,
             input_prepare_completed_at=datetime.now(UTC),
+            execution_config_version=execution_config_version,
             existing_record=existing_record,
             job_enqueued_at=job_enqueued_at,
             job_claimed_at=job_claimed_at,
@@ -212,12 +225,15 @@ class AiCoordinator:
             ).all()
         )
         existing_by_experiment = {
-            (
-                record.provider,
-                record.model,
-                record.prompt_version,
-                record.decision_policy_version,
-                record.ai_view_version,
+            ai_experiment_key(
+                (
+                    record.provider,
+                    record.model,
+                    record.prompt_version,
+                    record.decision_policy_version,
+                    record.ai_view_version,
+                ),
+                record.execution_config_version,
             ): record
             for record in existing
         }
@@ -238,9 +254,14 @@ class AiCoordinator:
         )
         prepared: list[PreparedAiDecision] = []
         for provider in self._providers:
-            experiment = ai_experiment_key(provider.name, provider.model)
+            lane = ai_decision_lane_key(provider.name, provider.model)
+            execution_config_version = execution_config_version_for_provider(provider)
+            experiment = ai_experiment_key(lane, execution_config_version)
             existing_record = existing_by_experiment.get(experiment)
-            prior = prior_by_provider_model.get((provider.name, provider.model), [])
+            prior = prior_by_provider_model.get(
+                (provider.name, provider.model, execution_config_version),
+                [],
+            )
             portfolio_context = (
                 await self._portfolio.context_for_scope(
                     session,
@@ -270,6 +291,7 @@ class AiCoordinator:
                     bankroll_before=float(bankroll_context["bankroll_before"]),
                     input_prepare_started_at=input_prepare_started_at,
                     input_prepare_completed_at=datetime.now(UTC),
+                    execution_config_version=execution_config_version,
                     existing_record=existing_record,
                     job_enqueued_at=job_enqueued_at,
                     job_claimed_at=job_claimed_at,
@@ -331,6 +353,7 @@ class AiCoordinator:
             prompt_version=PROMPT_VERSION,
             decision_policy_version=DECISION_POLICY_VERSION,
             ai_view_version=AI_VIEW_VERSION,
+            execution_config_version=prepared.execution_config_version,
             ai_input_hash=prepared.ai_input_hash,
             bankroll_before=prepared.bankroll_before,
             stake=stake,
@@ -385,6 +408,10 @@ class AiCoordinator:
         snapshot: DecisionSnapshot,
         provider: str,
         model: str,
+        prompt_version: str,
+        decision_policy_version: str,
+        ai_view_version: str,
+        execution_config_version: str,
     ) -> list[_PriorDecision]:
         rows = await self._prior_rows(
             session,
@@ -392,6 +419,10 @@ class AiCoordinator:
             snapshot=snapshot,
             provider=provider,
             model=model,
+            prompt_version=prompt_version,
+            decision_policy_version=decision_policy_version,
+            ai_view_version=ai_view_version,
+            execution_config_version=execution_config_version,
         )
         return _prior_from_rows(rows)
 
@@ -402,11 +433,14 @@ class AiCoordinator:
         canonical_map_id: UUID | None,
         snapshot: DecisionSnapshot,
         providers: list[AiProvider],
-    ) -> dict[tuple[str, str], list[_PriorDecision]]:
+    ) -> dict[tuple[str, str, str], list[_PriorDecision]]:
         if canonical_map_id is None or not providers:
             return {}
         provider_names = tuple({item.name for item in providers})
         models = tuple({item.model for item in providers})
+        execution_config_versions = tuple(
+            {execution_config_version_for_provider(item) for item in providers}
+        )
         rows = (
             await session.execute(
                 select(
@@ -430,6 +464,10 @@ class AiCoordinator:
                     DecisionSnapshotRecord.decision_at < snapshot.decision_at,
                     AiDecisionRecord.provider.in_(provider_names),
                     AiDecisionRecord.model.in_(models),
+                    AiDecisionRecord.prompt_version == PROMPT_VERSION,
+                    AiDecisionRecord.decision_policy_version == DECISION_POLICY_VERSION,
+                    AiDecisionRecord.ai_view_version == AI_VIEW_VERSION,
+                    AiDecisionRecord.execution_config_version.in_(execution_config_versions),
                     AiDecisionRecord.parse_status == "SUCCESS",
                     AiDecisionRecord.normalized_response.is_not(None),
                 )
@@ -439,10 +477,11 @@ class AiCoordinator:
                 )
             )
         ).all()
-        by_provider_model: dict[tuple[str, str], list[tuple]] = {}
+        by_provider_model: dict[tuple[str, str, str], list[tuple]] = {}
         for row in rows:
             record = row[0]
-            by_provider_model.setdefault((record.provider, record.model), []).append(tuple(row))
+            key = (record.provider, record.model, record.execution_config_version)
+            by_provider_model.setdefault(key, []).append(tuple(row))
         return {key: _prior_from_rows(value) for key, value in by_provider_model.items()}
 
     async def _prior_rows(
@@ -453,6 +492,10 @@ class AiCoordinator:
         snapshot: DecisionSnapshot,
         provider: str,
         model: str,
+        prompt_version: str,
+        decision_policy_version: str,
+        ai_view_version: str,
+        execution_config_version: str,
     ) -> list[tuple[AiDecisionRecord, datetime, str]]:
         if canonical_map_id is None:
             return []
@@ -479,6 +522,10 @@ class AiCoordinator:
                     DecisionSnapshotRecord.decision_at < snapshot.decision_at,
                     AiDecisionRecord.provider == provider,
                     AiDecisionRecord.model == model,
+                    AiDecisionRecord.prompt_version == prompt_version,
+                    AiDecisionRecord.decision_policy_version == decision_policy_version,
+                    AiDecisionRecord.ai_view_version == ai_view_version,
+                    AiDecisionRecord.execution_config_version == execution_config_version,
                     AiDecisionRecord.parse_status == "SUCCESS",
                     AiDecisionRecord.normalized_response.is_not(None),
                 )

@@ -5,7 +5,7 @@ caller chooses an immutable snapshot and one registered context profile.
 Provider/model/prompt/policy stay fixed while experiment input is explicit.
 
 Normal controlled runs isolate prior-decision history and portfolio state on the
-full five-part experiment identity. Historical matched replay can instead pass a
+full experiment identity. Historical matched replay can instead pass a
 fixed bankroll/prior-decision control and disable portfolio recording, ensuring
 that only match context changes between replay profiles and that post-settlement
 calls never masquerade as historical Shadow ROI.
@@ -24,6 +24,11 @@ from app.ai.context_profiles import context_profile
 from app.ai.coordinator import AiCoordinator, PreparedAiDecision, _prior_from_rows
 from app.ai.input import build_ai_input
 from app.canonical import canonical_bytes
+from app.domain.experiment import (
+    AiExperimentKey,
+    ai_experiment_key,
+    execution_config_version_for_provider,
+)
 from app.evaluation.portfolio_models import TournamentPortfolioPositionRecord
 from app.models import AiDecisionRecord, DecisionSnapshotRecord
 
@@ -37,7 +42,7 @@ _BASELINE_MODELS_BY_PROVIDER = {
     "deepseek": "deepseek-v4-pro",
 }
 
-ExperimentKey = tuple[str, str, str, str, str]
+ExperimentKey = AiExperimentKey
 
 
 class AiContextExperimentRunner:
@@ -60,12 +65,16 @@ class AiContextExperimentRunner:
     ) -> PreparedAiDecision:
         self._validate_controlled_identity(provider, model, ai_view_version)
         candidate = self._coordinator.get_provider(provider, model)
-        experiment: ExperimentKey = (
-            provider,
-            model,
-            PROMPT_VERSION,
-            DECISION_POLICY_VERSION,
-            ai_view_version,
+        execution_config_version = execution_config_version_for_provider(candidate)
+        experiment = ai_experiment_key(
+            (
+                provider,
+                model,
+                PROMPT_VERSION,
+                DECISION_POLICY_VERSION,
+                ai_view_version,
+            ),
+            execution_config_version,
         )
         input_prepare_started_at = datetime.now(UTC)
         existing_record = await session.scalar(
@@ -76,6 +85,7 @@ class AiContextExperimentRunner:
                 AiDecisionRecord.prompt_version == PROMPT_VERSION,
                 AiDecisionRecord.decision_policy_version == DECISION_POLICY_VERSION,
                 AiDecisionRecord.ai_view_version == ai_view_version,
+                AiDecisionRecord.execution_config_version == execution_config_version,
             )
         )
         if existing_record is not None:
@@ -87,6 +97,7 @@ class AiContextExperimentRunner:
                 bankroll_before=float(existing_record.bankroll_before or 0.0),
                 input_prepare_started_at=input_prepare_started_at,
                 input_prepare_completed_at=datetime.now(UTC),
+                execution_config_version=execution_config_version,
                 existing_record=existing_record,
                 job_enqueued_at=job_enqueued_at,
                 job_claimed_at=job_claimed_at,
@@ -143,6 +154,7 @@ class AiContextExperimentRunner:
             bankroll_before=float(bankroll_context["bankroll_before"]),
             input_prepare_started_at=input_prepare_started_at,
             input_prepare_completed_at=datetime.now(UTC),
+            execution_config_version=execution_config_version,
             existing_record=None,
             job_enqueued_at=job_enqueued_at,
             job_claimed_at=job_claimed_at,
@@ -198,7 +210,14 @@ class AiContextExperimentRunner:
     ):
         if canonical_map_id is None:
             return []
-        provider, model, prompt_version, policy_version, ai_view_version = experiment
+        (
+            provider,
+            model,
+            prompt_version,
+            policy_version,
+            ai_view_version,
+            execution_config_version,
+        ) = experiment
         rows = (
             await session.execute(
                 select(
@@ -225,6 +244,7 @@ class AiContextExperimentRunner:
                     AiDecisionRecord.prompt_version == prompt_version,
                     AiDecisionRecord.decision_policy_version == policy_version,
                     AiDecisionRecord.ai_view_version == ai_view_version,
+                    AiDecisionRecord.execution_config_version == execution_config_version,
                     AiDecisionRecord.parse_status == "SUCCESS",
                     AiDecisionRecord.normalized_response.is_not(None),
                 )

@@ -11,6 +11,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.domain.decision import AiDecision
+from app.domain.experiment import AiExperimentKey
 from app.evaluation.portfolio_models import (
     TournamentPortfolioAccountRecord,
     TournamentPortfolioLedgerRecord,
@@ -119,7 +120,7 @@ class TournamentPortfolioService:
         session: AsyncSession,
         *,
         snapshot_id: UUID,
-        experiment: tuple[str, str, str, str, str],
+        experiment: AiExperimentKey,
     ) -> PortfolioContext | None:
         scope = await self.scope_for_snapshot(session, snapshot_id)
         if scope is None:
@@ -137,7 +138,7 @@ class TournamentPortfolioService:
         session: AsyncSession,
         *,
         scope: PortfolioScope,
-        experiment: tuple[str, str, str, str, str],
+        experiment: AiExperimentKey,
         funding_reference_at: datetime | None = None,
     ) -> PortfolioContext:
         account = await self._ensure_account(
@@ -192,6 +193,7 @@ class TournamentPortfolioService:
             record.prompt_version,
             record.decision_policy_version,
             record.ai_view_version,
+            record.execution_config_version,
         )
         await self._ensure_account(
             session,
@@ -209,6 +211,8 @@ class TournamentPortfolioService:
                 TournamentPortfolioAccountRecord.decision_policy_version
                 == record.decision_policy_version,
                 TournamentPortfolioAccountRecord.ai_view_version == record.ai_view_version,
+                TournamentPortfolioAccountRecord.execution_config_version
+                == record.execution_config_version,
             )
             .with_for_update()
         )
@@ -448,6 +452,7 @@ class TournamentPortfolioService:
                         "prompt_version": account.prompt_version,
                         "decision_policy_version": account.decision_policy_version,
                         "ai_view_version": account.ai_view_version,
+                        "execution_config_version": account.execution_config_version,
                     },
                     "initial_bankroll": float(initial),
                     "cash_balance": float(account.cash_balance),
@@ -476,10 +481,17 @@ class TournamentPortfolioService:
         session: AsyncSession,
         *,
         canonical_event_id: UUID,
-        experiment: tuple[str, str, str, str, str],
+        experiment: AiExperimentKey,
         funding_reference_at: datetime | None = None,
     ) -> TournamentPortfolioAccountRecord:
-        provider, model, prompt_version, decision_policy_version, ai_view_version = experiment
+        (
+            provider,
+            model,
+            prompt_version,
+            decision_policy_version,
+            ai_view_version,
+            execution_config_version,
+        ) = experiment
         predicates = (
             TournamentPortfolioAccountRecord.canonical_event_id == canonical_event_id,
             TournamentPortfolioAccountRecord.provider == provider,
@@ -487,6 +499,7 @@ class TournamentPortfolioService:
             TournamentPortfolioAccountRecord.prompt_version == prompt_version,
             TournamentPortfolioAccountRecord.decision_policy_version == decision_policy_version,
             TournamentPortfolioAccountRecord.ai_view_version == ai_view_version,
+            TournamentPortfolioAccountRecord.execution_config_version == execution_config_version,
         )
         account = await session.scalar(select(TournamentPortfolioAccountRecord).where(*predicates))
         if account is not None:
@@ -512,6 +525,7 @@ class TournamentPortfolioService:
             prompt_version=prompt_version,
             decision_policy_version=decision_policy_version,
             ai_view_version=ai_view_version,
+            execution_config_version=execution_config_version,
             initial_bankroll=self._initial_bankroll,
             cash_balance=self._initial_bankroll,
             locked_balance=_ZERO,

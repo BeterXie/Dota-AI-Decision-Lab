@@ -20,7 +20,7 @@ from app.models import (
 )
 
 NOW = datetime(2026, 8, 17, 10, 0, tzinfo=UTC)
-EXPERIMENT = ("late", "fixture", "prompt", "policy", "view")
+EXPERIMENT = ("late", "fixture", "prompt", "policy", "view", "cfg-v1")
 
 
 @pytest.mark.asyncio
@@ -136,7 +136,7 @@ async def _fixture(session):
 
 
 def _decision(snapshot):
-    provider, model, prompt, policy, view = EXPERIMENT
+    provider, model, prompt, policy, view, execution_config = EXPERIMENT
     return AiDecisionRecord(
         snapshot_id=snapshot.id,
         snapshot_hash=snapshot.snapshot_hash,
@@ -146,6 +146,7 @@ def _decision(snapshot):
         prompt_version=prompt,
         decision_policy_version=policy,
         ai_view_version=view,
+        execution_config_version=execution_config,
         ai_input_hash=f"late-input-{uuid4()}",
         bankroll_before=Decimal("10000.00"),
         stake=Decimal("1000.00"),

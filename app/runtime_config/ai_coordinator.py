@@ -1,8 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-import hashlib
-import json
 from contextvars import ContextVar
 from datetime import UTC, datetime
 from time import perf_counter
@@ -17,7 +15,7 @@ from app.ai.base import (
     PROMPT_VERSION,
     AiProvider,
     AiProviderFailure,
-    ai_experiment_key,
+    ai_decision_lane_key,
     extract_provider_usage,
     validate_ai_decision,
 )
@@ -133,7 +131,7 @@ class RuntimeAiCoordinator(StaticAiCoordinator):
         if provider_row is not None and bool(
             getattr(runtime_provider, "runtime_config_managed", False)
         ):
-            runtime_provider.runtime_execution_fingerprint = _execution_config_fingerprint(
+            runtime_provider.runtime_execution_config_version = _execution_config_version(
                 provider_row,
                 policy,
             )
@@ -220,10 +218,7 @@ class RuntimeAiCoordinator(StaticAiCoordinator):
             if close_after_call:
                 await prepared.provider.close()
 
-        model_version = _model_version_with_execution_fingerprint(
-            model_version,
-            getattr(prepared.provider, "runtime_execution_fingerprint", None),
-        )
+        model_version = str(model_version)[:_MODEL_VERSION_MAX_LENGTH]
         return AiDecisionRecord(
             snapshot_id=prepared.snapshot.snapshot_id,
             snapshot_hash=prepared.snapshot.snapshot_hash,
@@ -233,6 +228,7 @@ class RuntimeAiCoordinator(StaticAiCoordinator):
             prompt_version=PROMPT_VERSION,
             decision_policy_version=DECISION_POLICY_VERSION,
             ai_view_version=AI_VIEW_VERSION,
+            execution_config_version=prepared.execution_config_version,
             ai_input_hash=prepared.ai_input_hash,
             bankroll_before=prepared.bankroll_before,
             stake=stake,
@@ -269,7 +265,7 @@ async def _scheduled_notification_batch(
     model: str,
 ) -> tuple[ExperimentKey, ...] | None:
     """Recover the immutable runtime fan-out from the durable jobs themselves."""
-    current_experiment = ai_experiment_key(provider, model)
+    current_experiment = ai_decision_lane_key(provider, model)
     current_dedupe_key = ai_job_dedupe_key_for_experiment(
         snapshot.snapshot_hash,
         current_experiment,
@@ -305,7 +301,7 @@ async def _scheduled_notification_batch(
         job_model = payload.get("model")
         if not isinstance(job_provider, str) or not isinstance(job_model, str):
             continue
-        experiment = ai_experiment_key(job_provider, job_model)
+        experiment = ai_decision_lane_key(job_provider, job_model)
         if job.dedupe_key != ai_job_dedupe_key_for_experiment(
             snapshot.snapshot_hash,
             experiment,
@@ -315,31 +311,14 @@ async def _scheduled_notification_batch(
     return tuple(sorted(expected)) if expected else None
 
 
-def _execution_config_fingerprint(
+def _execution_config_version(
     row: AiProviderConfigRecord,
     policy: AiDecisionPolicySnapshot,
 ) -> str:
-    payload = {
-        "provider": row.provider,
-        "slot": row.slot,
-        "model": row.model,
-        "base_url": validate_provider_base_url(row.provider, row.base_url),
-        "reasoning_effort": row.reasoning_effort,
-        "timeout_seconds": round(float(row.timeout_seconds), 6),
-        "max_live_data_lag_seconds": round(float(policy.max_live_data_lag_seconds), 6),
-        "prior_decisions_limit": int(policy.prior_decisions_limit),
-    }
-    canonical = json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True)
-    return hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-
-
-def _model_version_with_execution_fingerprint(
-    model_version: str,
-    fingerprint: str | None,
-) -> str:
-    value = str(model_version)
-    if not fingerprint:
-        return value[:_MODEL_VERSION_MAX_LENGTH]
-    suffix = f"@cfg:{fingerprint[:12]}"
-    prefix_length = max(0, _MODEL_VERSION_MAX_LENGTH - len(suffix))
-    return f"{value[:prefix_length]}{suffix}"
+    validate_provider_base_url(row.provider, row.base_url)
+    revision = int(row.revision or 1)
+    live_lag = format(float(policy.max_live_data_lag_seconds), "g")
+    return (
+        f"{row.provider}:{row.slot}:r{revision}:"
+        f"lag{live_lag}:prior{int(policy.prior_decisions_limit)}"
+    )

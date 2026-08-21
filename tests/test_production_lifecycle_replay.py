@@ -308,7 +308,7 @@ async def test_production_lifecycle_replay_uses_postgres_and_converges() -> None
         async with engine.connect() as connection:
             assert await connection.scalar(text("select 1")) == 1
             revision = await connection.scalar(text("select version_num from alembic_version"))
-            assert revision == "0038_runtime_configuration"
+            assert revision == "0042_ai_execution_config_version"
 
         start = datetime.now(UTC).replace(microsecond=0)
         dltv_payload = _fixture("dltv_bootstrap.json")

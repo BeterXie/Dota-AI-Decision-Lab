@@ -20,6 +20,7 @@ from sqlalchemy import (
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import JSON_DOCUMENT, Base
+from app.domain.experiment import STATIC_EXECUTION_CONFIG_VERSION
 
 
 def utc_now() -> datetime:
@@ -683,6 +684,7 @@ class AiDecisionRecord(Base):
             "prompt_version",
             "decision_policy_version",
             "ai_view_version",
+            "execution_config_version",
             name="uq_ai_experiment",
         ),
         Index("ix_ai_snapshot_provider", "snapshot_hash", "provider"),
@@ -701,6 +703,13 @@ class AiDecisionRecord(Base):
     # The AI input is a function of the snapshot AND the ai-view projection
     # code; a record without its view version cannot be re-run or compared.
     ai_view_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    # Non-secret runtime configuration identity frozen during PREPARE. A change
+    # starts a new comparison cohort and an independently funded portfolio.
+    execution_config_version: Mapped[str] = mapped_column(
+        String(128),
+        nullable=False,
+        default=STATIC_EXECUTION_CONFIG_VERSION,
+    )
     # Canonical-hash of the exact bytes sent to the provider (audit evidence,
     # not part of the identity: the view version IS the semantic identity).
     ai_input_hash: Mapped[str | None] = mapped_column(String(64))

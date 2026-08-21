@@ -8,7 +8,7 @@ without old succeeded jobs hiding the new version.
 
 from uuid import UUID
 
-from app.ai.base import ai_experiment_key
+from app.ai.base import ai_decision_lane_key
 
 _AI_JOB_PREFIX = "ai"
 
@@ -16,7 +16,7 @@ _AI_JOB_PREFIX = "ai"
 def ai_job_dedupe_key(snapshot_hash: str, provider: str, model: str) -> str:
     return ai_job_dedupe_key_for_experiment(
         snapshot_hash,
-        ai_experiment_key(provider, model),
+        ai_decision_lane_key(provider, model),
     )
 
 

@@ -33,7 +33,7 @@ async def test_postgres_serializes_competing_positions_against_one_event_cash_po
     factory = async_sessionmaker(engine, expire_on_commit=False)
     service = TournamentPortfolioService(initial_bankroll=10_000)
     now = datetime.now(UTC).replace(microsecond=0)
-    experiment = ("concurrency", "fixture", "prompt", "policy", "view")
+    experiment = ("concurrency", "fixture", "prompt", "policy", "view", "cfg-v1")
 
     async with factory() as session, session.begin():
         event = CanonicalEvent(name=f"Concurrent Cup {uuid4()}", started_at=now)
@@ -143,7 +143,7 @@ async def test_postgres_serializes_competing_positions_against_one_event_cash_po
 
 
 def _decision(snapshot, *, experiment, stake: float, offset: int) -> AiDecisionRecord:
-    provider, model, prompt, policy, view = experiment
+    provider, model, prompt, policy, view, execution_config = experiment
     return AiDecisionRecord(
         snapshot_id=snapshot.id,
         snapshot_hash=snapshot.snapshot_hash,
@@ -153,6 +153,7 @@ def _decision(snapshot, *, experiment, stake: float, offset: int) -> AiDecisionR
         prompt_version=prompt,
         decision_policy_version=policy,
         ai_view_version=view,
+        execution_config_version=execution_config,
         ai_input_hash=f"concurrency-{uuid4()}",
         bankroll_before=Decimal("10000.00"),
         stake=Decimal(str(stake)),
@@ -184,7 +185,7 @@ async def test_postgres_same_decision_position_creation_is_idempotent() -> None:
     factory = async_sessionmaker(engine, expire_on_commit=False)
     service = TournamentPortfolioService(initial_bankroll=10_000)
     now = datetime.now(UTC).replace(microsecond=0)
-    experiment = ("idempotent", "fixture", "prompt", "policy", "view")
+    experiment = ("idempotent", "fixture", "prompt", "policy", "view", "cfg-v1")
 
     async with factory() as session, session.begin():
         event = CanonicalEvent(name=f"Idempotent Cup {uuid4()}", started_at=now)

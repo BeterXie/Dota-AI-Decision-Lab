@@ -3,7 +3,7 @@ from pydantic import SecretStr
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.ai.base import ai_experiment_key
+from app.ai.base import ai_decision_lane_key
 from app.auth.social import SocialAuthSettings
 from app.config import Settings, get_settings
 from app.db import Base
@@ -75,7 +75,7 @@ async def test_ai_model_timeout_reasoning_and_enablement_are_hot(monkeypatch) ->
 
         async with factory() as session:
             assert await active_ai_experiments(session) == (
-                ai_experiment_key("openai", "baseline-model"),
+                ai_decision_lane_key("openai", "baseline-model"),
             )
 
         payload = await service.upsert_ai_provider(
@@ -97,7 +97,7 @@ async def test_ai_model_timeout_reasoning_and_enablement_are_hot(monkeypatch) ->
 
         async with factory() as session:
             assert await active_ai_experiments(session) == (
-                ai_experiment_key("openai", "challenger-model"),
+                ai_decision_lane_key("openai", "challenger-model"),
             )
             provider = await resolve_ai_provider(
                 session,

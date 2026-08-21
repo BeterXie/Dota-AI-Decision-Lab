@@ -41,6 +41,7 @@ def _decision(
         prompt_version=prompt_version,
         decision_policy_version="policy-v3",
         ai_view_version="ai-view-v2",
+        execution_config_version="static-v1",
         ai_input_hash=ai_input_hash,
         bankroll_before=Decimal("100.00"),
         stake=Decimal("2.00") if action.startswith("BUY_") else None,

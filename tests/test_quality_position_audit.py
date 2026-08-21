@@ -117,6 +117,7 @@ async def test_position_audit_is_event_scoped_and_preserves_execution_facts() ->
             "prompt_version": "prompt-v1",
             "decision_policy_version": "portfolio-v1",
             "ai_view_version": "view-v1",
+            "execution_config_version": "static-v1",
         }
         assert [row["map_number"] for row in payload["positions"]] == [2, 1]
         assert payload["positions"][0]["status"] == "REJECTED"

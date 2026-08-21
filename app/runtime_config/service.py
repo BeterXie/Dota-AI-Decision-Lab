@@ -10,7 +10,7 @@ from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 from app.ai.anthropic import AnthropicDecisionProvider
-from app.ai.base import AiProvider, ai_experiment_key
+from app.ai.base import AiProvider, ai_decision_lane_key
 from app.ai.chat_completions import KimiDecisionProvider
 from app.ai.deepseek import DeepSeekDecisionProvider
 from app.ai.gemini import GeminiDecisionProvider
@@ -125,7 +125,7 @@ class AiProviderRuntimeSnapshot:
 
     @property
     def experiment(self) -> tuple[str, str, str, str, str]:
-        return ai_experiment_key(self.provider, self.model)
+        return ai_decision_lane_key(self.provider, self.model)
 
 
 class RuntimeConfigurationService:
@@ -665,7 +665,7 @@ async def active_ai_experiments(
     )
     any_row = await session.scalar(select(AiProviderConfigRecord.id).limit(1))
     experiments = (
-        tuple(ai_experiment_key(row.provider, row.model) for row in rows)
+        tuple(ai_decision_lane_key(row.provider, row.model) for row in rows)
         if any_row is not None
         else fallback
     )

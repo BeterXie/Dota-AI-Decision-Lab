@@ -27,6 +27,7 @@ EXPERIMENT_IDENTITY_FIELDS = (
     "prompt_version",
     "decision_policy_version",
     "ai_view_version",
+    "execution_config_version",
 )
 
 
@@ -59,6 +60,7 @@ async def build_ai_performance_payload(
                         AiDecisionRecord.prompt_version,
                         AiDecisionRecord.decision_policy_version,
                         AiDecisionRecord.ai_view_version,
+                        AiDecisionRecord.execution_config_version,
                         AiDecisionRecord.ai_input_hash,
                         AiDecisionRecord.bankroll_before,
                         AiDecisionRecord.stake,
@@ -276,6 +278,7 @@ def _experiment_key(record: AiDecisionRecord) -> tuple[str, ...]:
         record.prompt_version,
         record.decision_policy_version,
         record.ai_view_version,
+        record.execution_config_version,
     )
 
 
@@ -358,6 +361,7 @@ def _build_experiment_groups(
                 "prompt_version": key[3],
                 "decision_policy_version": key[4],
                 "ai_view_version": key[5],
+                "execution_config_version": key[6],
                 "attempts": len(records),
                 "successful": len(successful),
                 "failed": len(failed),
@@ -420,6 +424,7 @@ def _decision_trace_payload(
         "prompt_version": record.prompt_version,
         "decision_policy_version": record.decision_policy_version,
         "ai_view_version": record.ai_view_version,
+        "execution_config_version": record.execution_config_version,
         "parse_status": record.parse_status,
         "error": record.error,
         "action": normalized.get("action"),

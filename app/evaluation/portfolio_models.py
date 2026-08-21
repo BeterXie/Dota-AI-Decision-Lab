@@ -6,6 +6,7 @@ from sqlalchemy import DateTime, Float, ForeignKey, Index, Numeric, String, Uniq
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.db import Base
+from app.domain.experiment import STATIC_EXECUTION_CONFIG_VERSION
 
 
 def utc_now() -> datetime:
@@ -24,6 +25,7 @@ class TournamentPortfolioAccountRecord(Base):
             "prompt_version",
             "decision_policy_version",
             "ai_view_version",
+            "execution_config_version",
             name="uq_ai_tournament_portfolio_experiment",
         ),
         Index("ix_ai_tournament_portfolio_event", "canonical_event_id", "status"),
@@ -38,6 +40,11 @@ class TournamentPortfolioAccountRecord(Base):
     prompt_version: Mapped[str] = mapped_column(String(64), nullable=False)
     decision_policy_version: Mapped[str] = mapped_column(String(64), nullable=False)
     ai_view_version: Mapped[str] = mapped_column(String(32), nullable=False)
+    execution_config_version: Mapped[str] = mapped_column(
+        String(128),
+        nullable=False,
+        default=STATIC_EXECUTION_CONFIG_VERSION,
+    )
     initial_bankroll: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     cash_balance: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False)
     locked_balance: Mapped[Decimal] = mapped_column(Numeric(14, 2), nullable=False, default=0)

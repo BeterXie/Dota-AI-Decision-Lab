@@ -6,7 +6,7 @@ import pytest
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
-from app.ai.base import AiProviderResponse, ai_experiment_key
+from app.ai.base import AiProviderResponse, ai_decision_lane_key
 from app.ai.jobs import ai_job_dedupe_key_for_experiment
 from app.db import Base
 from app.domain.decision import AiDecision
@@ -105,7 +105,7 @@ async def test_runtime_notification_waits_for_the_scheduled_provider_batch() -> 
             ("anthropic", "fixture-anthropic"),
         )
         for scheduled_provider, scheduled_model in scheduled:
-            experiment = ai_experiment_key(scheduled_provider, scheduled_model)
+            experiment = ai_decision_lane_key(scheduled_provider, scheduled_model)
             await jobs.enqueue(
                 session,
                 job_type=JobType.RUN_AI_PROVIDER,
@@ -135,7 +135,7 @@ async def test_runtime_notification_waits_for_the_scheduled_provider_batch() -> 
             email_notifications=email_service,
         )
     )
-    openai_experiment = ai_experiment_key(provider.name, provider.model)
+    openai_experiment = ai_decision_lane_key(provider.name, provider.model)
     job = DurableJob(
         id=uuid4(),
         job_type=JobType.RUN_AI_PROVIDER,
