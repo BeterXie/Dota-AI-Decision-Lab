@@ -58,6 +58,7 @@ from app.live.collector import DltvSocketCollector
 from app.market.collector import RayBetOddsCollector
 from app.market.discovery import RayBetDiscoveryService
 from app.market.odds_registry import OddsRegistry
+from app.market.registry_recovery import enqueue_recent_raybet_registry_refreshes
 from app.market.registry_refresh import RayBetRegistryRefreshService
 from app.models import (
     CanonicalSeries,
@@ -137,7 +138,11 @@ async def run() -> None:
             for host in settings.raybet_http_hosts
         )
     )
-    raybet_socket = RayBetSocketClient(settings.raybet_socket_url, settings.raybet_origin)
+    raybet_socket = RayBetSocketClient(
+        settings.raybet_socket_url,
+        settings.raybet_origin,
+        business_message_timeout_seconds=settings.provider_business_message_max_age_seconds,
+    )
     dltv_http = DltvBootstrapClient(settings.dltv_base_url)
     dltv_result = DltvResultProvider(dltv_http)
     dltv_socket = DltvSocketClient(settings.dltv_base_url)
@@ -646,6 +651,15 @@ async def run() -> None:
     async def raybet_state(state: str, error: str | None) -> None:
         connected = state == "CONNECTED"
         metrics.provider_connected.labels(provider="raybet").set(int(connected))
+        recovery_refreshes = 0
+        if connected:
+            connected_at = datetime.now(UTC)
+            async with session_factory() as session, session.begin():
+                recovery_refreshes = await enqueue_recent_raybet_registry_refreshes(
+                    session,
+                    jobs=jobs,
+                    connected_at=connected_at,
+                )
         await health.dependency(
             "RAYBET_SOCKET",
             "UNKNOWN" if connected else "DEGRADED",
@@ -653,6 +667,7 @@ async def run() -> None:
             requires_message=True,
             max_message_age_seconds=settings.provider_business_message_max_age_seconds,
             connected=connected,
+            recovery_refreshes=recovery_refreshes,
         )
 
     async def dltv_event(
