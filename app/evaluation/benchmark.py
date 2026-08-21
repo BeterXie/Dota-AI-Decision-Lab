@@ -280,9 +280,7 @@ class AiBaselineBenchmarkService:
                     _average(market_briers),
                     _average(comparable_ai_briers),
                 ),
-                "abstention_rate": (
-                    abstentions / action_total if action_total else None
-                ),
+                "abstention_rate": (abstentions / action_total if action_total else None),
                 "action_counts": dict(sorted(acc.action_counts.items())),
                 "parse_status_counts": dict(sorted(acc.parse_statuses.items())),
             },

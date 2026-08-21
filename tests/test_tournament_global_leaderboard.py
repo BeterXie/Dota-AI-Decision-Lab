@@ -137,9 +137,7 @@ async def test_global_leaderboard_keeps_execution_config_versions_separate() -> 
 
         report = await TournamentLeaderboardService().build_report(session)
 
-    assert [
-        row["experiment"]["execution_config_version"] for row in report["experiments"]
-    ] == [
+    assert [row["experiment"]["execution_config_version"] for row in report["experiments"]] == [
         "openai:default:r2:lag120:prior10",
         "openai:default:r1:lag120:prior10",
     ]

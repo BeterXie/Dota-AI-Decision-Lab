@@ -499,8 +499,7 @@ class TournamentPortfolioService:
             TournamentPortfolioAccountRecord.prompt_version == prompt_version,
             TournamentPortfolioAccountRecord.decision_policy_version == decision_policy_version,
             TournamentPortfolioAccountRecord.ai_view_version == ai_view_version,
-            TournamentPortfolioAccountRecord.execution_config_version
-            == execution_config_version,
+            TournamentPortfolioAccountRecord.execution_config_version == execution_config_version,
         )
         account = await session.scalar(select(TournamentPortfolioAccountRecord).where(*predicates))
         if account is not None:
