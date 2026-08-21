@@ -182,14 +182,17 @@ def upgrade() -> None:
         "ai_decisions",
         sa.Column("execution_config_version", sa.String(length=128), nullable=True),
     )
-    op.execute(
-        f"""
+    op.get_bind().execute(
+        sa.text(
+            """
         UPDATE ai_decisions
         SET execution_config_version = COALESCE(
             NULLIF(substring(model_version from '@cfg:([^@]+)$'), ''),
-            '{_STATIC_VERSION}'
+            :static_version
         )
         """
+        ),
+        {"static_version": _STATIC_VERSION},
     )
     op.alter_column("ai_decisions", "execution_config_version", nullable=False)
     op.drop_constraint("uq_ai_experiment", "ai_decisions", type_="unique")
@@ -217,8 +220,9 @@ def upgrade() -> None:
         type_="unique",
     )
 
-    op.execute(
-        f"""
+    op.get_bind().execute(
+        sa.text(
+            """
         CREATE TEMPORARY TABLE _portfolio_execution_targets ON COMMIT DROP AS
         WITH positioned AS (
             SELECT
@@ -235,7 +239,7 @@ def upgrade() -> None:
         unpositioned AS (
             SELECT
                 account.id AS old_account_id,
-                '{_STATIC_VERSION}'::varchar AS execution_config_version,
+                CAST(:static_version AS varchar) AS execution_config_version,
                 account.created_at AS first_observed_at
             FROM ai_tournament_portfolios AS account
             WHERE NOT EXISTS (
@@ -267,6 +271,8 @@ def upgrade() -> None:
             END AS new_account_id
         FROM ranked
         """
+        ),
+        {"static_version": _STATIC_VERSION},
     )
 
     op.execute(
