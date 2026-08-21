@@ -4,6 +4,8 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
+from app.ai.base import ai_decision_lane_key
+from app.ai.jobs import ai_job_dedupe_key_for_experiment, ai_job_payload
 from app.db import Base
 from app.domain.events import DomainEventType
 from app.domain.jobs import JobType
@@ -173,6 +175,95 @@ async def test_reconciliation_refreshes_runtime_provider_rows_before_ai_recovery
         )
     assert [(job.payload["provider"], job.payload["model"]) for job in jobs] == [
         ("kimi", "reconcile-kimi-model")
+    ]
+
+    await engine.dispose()
+
+
+@pytest.mark.asyncio
+async def test_reconciliation_backfills_provider_missing_from_an_existing_batch() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+    now = datetime(2026, 8, 18, 12, 0, tzinfo=UTC)
+
+    async with factory() as session, session.begin():
+        snapshot = await SnapshotRepository().persist(
+            session,
+            canonical_map_id=None,
+            decision_at=now,
+            mode="LIVE_BASIC",
+            identity={
+                "team_a": {"id": "team-a", "name": "A"},
+                "team_b": {"id": "team-b", "name": "B"},
+            },
+            market={},
+            draft=None,
+            history={},
+            live={"game_time_seconds": 600},
+            quality={"eligible": True, "blockers": [], "warnings": []},
+        )
+        session.add_all(
+            [
+                AiProviderConfigRecord(
+                    provider="kimi",
+                    slot="default",
+                    enabled=True,
+                    decisions_enabled=True,
+                    base_url="https://api.moonshot.cn/v1",
+                    model="existing-kimi-model",
+                    reasoning_effort=None,
+                    timeout_seconds=20,
+                    api_key_secret_key="ai.kimi.api_key",
+                ),
+                AiProviderConfigRecord(
+                    provider="openai",
+                    slot="default",
+                    enabled=True,
+                    decisions_enabled=True,
+                    base_url="https://api.quya.org",
+                    model="quya-gpt-model",
+                    reasoning_effort="high",
+                    timeout_seconds=50,
+                    api_key_secret_key="ai.openai.api_key",
+                ),
+            ]
+        )
+        existing_experiment = ai_decision_lane_key("kimi", "existing-kimi-model")
+        await JobRepository().enqueue(
+            session,
+            job_type=JobType.RUN_AI_PROVIDER,
+            dedupe_key=ai_job_dedupe_key_for_experiment(
+                snapshot.snapshot_hash, existing_experiment
+            ),
+            payload=ai_job_payload(snapshot.snapshot_id, "kimi", "existing-kimi-model"),
+        )
+
+    reconciler = ReconciliationService(
+        JobRepository(),
+        EventRepository(),
+        lease_seconds=30,
+        ai_experiments=(),
+        future_odds_horizons=(),
+    )
+    async with factory() as session, session.begin():
+        result = await reconciler.run(session, now=now)
+        assert result.ai_jobs == 1
+
+    async with factory() as session:
+        jobs = list(
+            (
+                await session.scalars(
+                    select(DurableJobRecord).where(
+                        DurableJobRecord.job_type == JobType.RUN_AI_PROVIDER.value
+                    )
+                )
+            ).all()
+        )
+    assert sorted((job.payload["provider"], job.payload["model"]) for job in jobs) == [
+        ("kimi", "existing-kimi-model"),
+        ("openai", "quya-gpt-model"),
     ]
 
     await engine.dispose()

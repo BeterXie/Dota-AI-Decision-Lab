@@ -2,15 +2,23 @@ from __future__ import annotations
 
 from urllib.parse import urlsplit
 
-_CLOUD_PROVIDERS = frozenset({"openai", "anthropic", "gemini", "deepseek", "kimi"})
+_CLOUD_PROVIDER_HOSTS: dict[str, frozenset[str]] = {
+    # api.quya.org is the project's approved OpenAI-compatible gateway.
+    "openai": frozenset({"api.openai.com", "api.quya.org"}),
+    "anthropic": frozenset({"api.anthropic.com"}),
+    "gemini": frozenset({"generativelanguage.googleapis.com"}),
+    "deepseek": frozenset({"api.deepseek.com"}),
+    "kimi": frozenset({"api.moonshot.cn"}),
+}
 
 
 def validate_provider_base_url(provider: str, base_url: str) -> str:
     """Validate a provider endpoint before a managed credential can reach it.
 
-    Cloud providers may use their official endpoint or an operator-selected
-    HTTPS relay. ``local_openai`` additionally accepts HTTP for loopback/LAN
-    OpenAI-compatible endpoints.
+    Cloud credentials are intentionally pinned to the provider's official API
+    host or an explicitly approved compatible gateway. ``local_openai`` is the
+    escape hatch for loopback/LAN/custom OpenAI-compatible endpoints and
+    therefore accepts either HTTP or HTTPS.
     """
 
     value = base_url.strip().rstrip("/")
@@ -30,10 +38,14 @@ def validate_provider_base_url(provider: str, base_url: str) -> str:
             raise ValueError("local_openai base_url must use http or https")
         return value
 
-    if provider_key not in _CLOUD_PROVIDERS:
+    allowed_hosts = _CLOUD_PROVIDER_HOSTS.get(provider_key)
+    if allowed_hosts is None:
         raise ValueError(f"unsupported AI provider: {provider}")
     if parsed.scheme != "https":
         raise ValueError(f"{provider_key} base_url must use https")
+    if parsed.hostname.lower() not in allowed_hosts:
+        allowed = ", ".join(sorted(allowed_hosts))
+        raise ValueError(f"{provider_key} base_url must use an approved provider host: {allowed}")
     return value
 
 

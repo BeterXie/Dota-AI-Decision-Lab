@@ -57,26 +57,20 @@ def _provider_row(
     )
 
 
-def test_cloud_provider_base_url_accepts_https_relays_and_local_http() -> None:
+def test_cloud_provider_base_url_allows_approved_gateway_but_rejects_unknown_hosts() -> None:
     assert (
         validate_provider_base_url("openai", "https://api.openai.com/v1/")
         == "https://api.openai.com/v1"
     )
-    assert (
-        validate_provider_base_url("openai", "https://api.quya.org/v1") == "https://api.quya.org/v1"
-    )
-    assert (
-        validate_provider_base_url("anthropic", "https://relay.example/anthropic")
-        == "https://relay.example/anthropic"
-    )
+    assert validate_provider_base_url("openai", "https://api.quya.org") == "https://api.quya.org"
     assert (
         validate_provider_base_url("local_openai", "http://127.0.0.1:11434/v1")
         == "http://127.0.0.1:11434/v1"
     )
+    with pytest.raises(ValueError, match="approved provider host"):
+        validate_provider_base_url("openai", "https://credential-capture.example/v1")
     with pytest.raises(ValueError, match="must use https"):
         validate_provider_base_url("deepseek", "http://api.deepseek.com")
-    with pytest.raises(ValueError, match="must not contain user credentials"):
-        validate_provider_base_url("openai", "https://user:password@relay.example/v1")
 
 
 @pytest.mark.asyncio
@@ -289,16 +283,13 @@ async def test_admin_provider_guard_rejects_ambiguous_model_unsafe_url_and_missi
             "flash",
             {"model": "pro-model"},
         )
-    with pytest.raises(ValueError, match="must not contain user credentials"):
+    with pytest.raises(ValueError, match="approved provider host"):
         await _validated_provider_changes(
             service,
             _FakeAdminPolicy(operational=True),
             "deepseek",
             "flash",
-            {
-                "base_url": "https://user:password@relay.example",
-                "decisions_enabled": False,
-            },
+            {"base_url": "https://credential-capture.example", "decisions_enabled": False},
         )
     with pytest.raises(ValueError, match="credential is not operational"):
         await _validated_provider_changes(
