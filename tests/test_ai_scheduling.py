@@ -153,7 +153,7 @@ async def test_ai_event_fans_out_to_one_durable_job_per_experiment() -> None:
 
 
 @pytest.mark.asyncio
-async def test_reconciliation_does_not_infer_missing_experiment_after_ai_audit_exists() -> None:
+async def test_reconciliation_backfills_missing_experiment_after_ai_audit_exists() -> None:
     engine = create_async_engine("sqlite+aiosqlite:///:memory:")
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
@@ -193,7 +193,7 @@ async def test_reconciliation_does_not_infer_missing_experiment_after_ai_audit_e
     async with factory() as session, session.begin():
         second = await reconciliation.run(session, now=now)
 
-    assert first.ai_jobs == 0
+    assert first.ai_jobs == 1
     assert second.ai_jobs == 0
     async with factory() as session:
         job_count = await session.scalar(
@@ -201,7 +201,7 @@ async def test_reconciliation_does_not_infer_missing_experiment_after_ai_audit_e
             .select_from(DurableJobRecord)
             .where(DurableJobRecord.job_type == JobType.RUN_AI_PROVIDER.value)
         )
-    assert job_count == 0
+    assert job_count == 1
     await engine.dispose()
 
 

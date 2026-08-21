@@ -605,9 +605,6 @@ Chat Completions 兼容接口的 JSON Object 模式，并在本地执行同一 `
 `LOCAL_OPENAI_API_KEY` 启用本地 OpenAI 兼容代理（Ollama、LiteLLM 等），作为
 独立的 `local_openai` GPT provider 参与投票；其 Base URL、模型与 reasoning effort
 分别由 `LOCAL_OPENAI_BASE_URL`、`LOCAL_OPENAI_MODEL`、`LOCAL_OPENAI_REASONING_EFFORT` 配置。
-云端 Provider 的 Base URL 可以指向官方接口或兼容对应协议的第三方 HTTPS 中转站；
-运行时配置仍拒绝 URL 内嵌凭据、query、fragment 以及云端明文 HTTP。配置中转站即表示
-运维方选择将该 Provider 的凭据发送到该地址。`local_openai` 额外允许本机或局域网 HTTP。
 OpenAI、DeepSeek Flash 和 DeepSeek Pro 的 Responses 请求使用 `reasoning.effort=xhigh`。
 所有 Provider 必须接收同一个不可变 Snapshot，独立失败和记录。
 

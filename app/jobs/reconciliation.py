@@ -581,11 +581,7 @@ class ReconciliationService:
         return created
 
     async def _reconcile_ai(self, session: AsyncSession, *, now: datetime) -> int:
-        """Recover virgin snapshots and terminal jobs for the current experiment only.
-
-        A snapshot with an AI record or a job for another experiment version is
-        still left alone. This preserves the no-implicit-historical-replay rule.
-        """
+        """Recover each missing provider for recent, game-time-eligible snapshots."""
         if not self._ai_experiments:
             return 0
         snapshots = list(
@@ -605,13 +601,26 @@ class ReconciliationService:
                 min_game_time_seconds=self._ai_min_game_time_seconds,
             ):
                 continue
-            any_record = await session.scalar(
-                select(AiDecisionRecord.id)
-                .where(AiDecisionRecord.snapshot_id == snapshot.id)
-                .limit(1)
-            )
-            if any_record is not None:
-                continue
+            record_keys = {
+                (
+                    row.provider,
+                    row.model,
+                    row.prompt_version,
+                    row.decision_policy_version,
+                    row.ai_view_version,
+                )
+                for row in (
+                    await session.execute(
+                        select(
+                            AiDecisionRecord.provider,
+                            AiDecisionRecord.model,
+                            AiDecisionRecord.prompt_version,
+                            AiDecisionRecord.decision_policy_version,
+                            AiDecisionRecord.ai_view_version,
+                        ).where(AiDecisionRecord.snapshot_id == snapshot.id)
+                    )
+                ).all()
+            }
             existing_jobs = list(
                 (
                     await session.scalars(
@@ -622,16 +631,25 @@ class ReconciliationService:
                     )
                 ).all()
             )
-            if existing_jobs:
-                by_key = {job.dedupe_key: job for job in existing_jobs}
-                for experiment in self._ai_experiments:
-                    provider, model = experiment[:2]
-                    dedupe_key = ai_job_dedupe_key_for_experiment(
-                        snapshot.snapshot_hash, experiment
+            by_key = {job.dedupe_key: job for job in existing_jobs}
+            # Backfill each missing provider independently. One provider may
+            # already have a record or job while another was enabled later.
+            for experiment in self._ai_experiments:
+                if experiment in record_keys:
+                    continue
+                provider, model = experiment[:2]
+                dedupe_key = ai_job_dedupe_key_for_experiment(snapshot.snapshot_hash, experiment)
+                existing = by_key.get(dedupe_key)
+                if existing is None:
+                    await self._jobs.enqueue(
+                        session,
+                        job_type=JobType.RUN_AI_PROVIDER,
+                        dedupe_key=dedupe_key,
+                        payload=ai_job_payload(snapshot.id, provider, model),
+                        priority=150,
                     )
-                    existing = by_key.get(dedupe_key)
-                    if existing is None or existing.status != JobStatus.FAILED_TERMINAL.value:
-                        continue
+                    created += 1
+                elif existing.status == JobStatus.FAILED_TERMINAL.value:
                     await self._jobs.enqueue(
                         session,
                         job_type=JobType.RUN_AI_PROVIDER,
@@ -641,20 +659,6 @@ class ReconciliationService:
                         reopen_terminal=True,
                     )
                     created += 1
-                continue
-            for experiment in self._ai_experiments:
-                provider, model = experiment[:2]
-                await self._jobs.enqueue(
-                    session,
-                    job_type=JobType.RUN_AI_PROVIDER,
-                    dedupe_key=ai_job_dedupe_key_for_experiment(
-                        snapshot.snapshot_hash,
-                        experiment,
-                    ),
-                    payload=ai_job_payload(snapshot.id, provider, model),
-                    priority=150,
-                )
-                created += 1
         return created
 
     async def _reconcile_future_odds(self, session: AsyncSession, *, now: datetime) -> int:
