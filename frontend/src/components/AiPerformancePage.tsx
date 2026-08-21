@@ -37,7 +37,7 @@ export function AiPerformancePage() {
     if (!query) return rows;
     return rows.filter((row) => {
       const identity = row.experiment;
-      return `${identity.provider} ${identity.model} ${identity.prompt_version} ${identity.decision_policy_version}`
+      return `${identity.provider} ${identity.model} ${identity.prompt_version} ${identity.decision_policy_version} ${identity.execution_config_version}`
         .toLocaleLowerCase()
         .includes(query);
     });
@@ -214,6 +214,9 @@ export function AiPerformancePage() {
                     <span>{selectedExperiment.experiment.prompt_version}</span>
                     <span>{selectedExperiment.experiment.decision_policy_version}</span>
                     <span>{selectedExperiment.experiment.ai_view_version}</span>
+                    <span title={selectedExperiment.experiment.execution_config_version}>
+                      {executionConfigLabel(selectedExperiment.experiment.execution_config_version)}
+                    </span>
                   </div>
                   <div className="performance-summary-guide">
                     <strong>{locale === "zh-CN" ? "如何理解榜单" : "How to read this leaderboard"}</strong>
@@ -310,7 +313,7 @@ function LeaderboardRow({
       <span className="performance-place">#{row.rank}</span>
       <span className="performance-model-name">
         <strong>{providerLabel(row.experiment.provider)}</strong>
-        <small>{row.experiment.model}</small>
+        <small>{row.experiment.model} · {executionConfigLabel(row.experiment.execution_config_version)}</small>
       </span>
       <span className={`performance-table-number performance-col-roi ${tone(row.realized_roi)}`}>{rate(row.realized_roi, locale)}</span>
       <span className={`performance-table-number performance-col-pnl ${tone(row.realized_pnl)}`}>{signedMoney(row.realized_pnl, locale)}</span>
@@ -596,11 +599,15 @@ function StateBlock({ text, error, onRetry }: { text: string; error?: boolean; o
 }
 
 export function identityKey(identity: AiExperimentIdentity): string {
-  return [identity.provider, identity.model, identity.prompt_version, identity.decision_policy_version, identity.ai_view_version].join("\u0000");
+  return [identity.provider, identity.model, identity.prompt_version, identity.decision_policy_version, identity.ai_view_version, identity.execution_config_version].join("\u0000");
 }
 
 function sameIdentity(left: AiExperimentIdentity, right: AiExperimentIdentity): boolean {
   return identityKey(left) === identityKey(right);
+}
+
+function executionConfigLabel(value: string): string {
+  return `cfg ${value.length > 24 ? `${value.slice(0, 22)}…` : value}`;
 }
 
 function rankingLabel(ranking: string | undefined, locale: string): string {

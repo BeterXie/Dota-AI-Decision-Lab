@@ -21,7 +21,7 @@ async def test_baseline_benchmark_api_returns_frozen_empty_contract() -> None:
 
     assert response.status_code == 200
     payload = response.json()
-    assert payload["benchmark_report_version"] == "ai-benchmark-v1"
+    assert payload["benchmark_report_version"] == "ai-benchmark-v2"
     assert payload["baseline_contract"] == {
         "id": "production-baseline-v1",
         "frozen_at_commit": "81698ca175a75dfb08285c3725c98835f616a843",

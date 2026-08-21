@@ -1,3 +1,7 @@
+from datetime import UTC, datetime
+from types import SimpleNamespace
+from uuid import uuid4
+
 import pytest
 from fastapi import FastAPI
 from httpx import ASGITransport, AsyncClient
@@ -5,13 +9,15 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 import app.runtime_config.service as runtime_service
-from app.ai.base import ai_experiment_key
+from app.ai.base import AiProviderResponse, ai_decision_lane_key
+from app.ai.coordinator import PreparedAiDecision
 from app.db import Base
+from app.domain.decision import AiDecision
+from app.domain.experiment import ai_experiment_key
 from app.evaluation.benchmark import AiBaselineBenchmarkService, _ExperimentAccumulator
 from app.runtime_config.ai_coordinator import (
     RuntimeAiCoordinator,
-    _execution_config_fingerprint,
-    _model_version_with_execution_fingerprint,
+    _execution_config_version,
 )
 from app.runtime_config.models import AiProviderConfigRecord
 from app.runtime_config.policy import AiDecisionPolicySnapshot
@@ -117,7 +123,7 @@ def test_runtime_coordinator_keeps_last_known_provider_set_across_cache_invalida
     original = runtime_service._ACTIVE_EXPERIMENT_CACHE
     try:
         coordinator = RuntimeAiCoordinator([_Provider()], timeout_seconds=10)
-        hot = (ai_experiment_key("kimi", "hot-model"),)
+        hot = (ai_decision_lane_key("kimi", "hot-model"),)
         runtime_service._ACTIVE_EXPERIMENT_CACHE = hot
         assert coordinator.experiments == hot
         runtime_service._ACTIVE_EXPERIMENT_CACHE = None
@@ -128,54 +134,89 @@ def test_runtime_coordinator_keeps_last_known_provider_set_across_cache_invalida
         runtime_service._ACTIVE_EXPERIMENT_CACHE = original
 
 
-def test_execution_fingerprint_tracks_semantic_runtime_config_without_secrets() -> None:
+def test_execution_config_version_tracks_runtime_revision_and_input_policy() -> None:
     row = _provider_row()
     policy = AiDecisionPolicySnapshot(
         enabled=True,
         max_live_data_lag_seconds=120,
         prior_decisions_limit=10,
     )
-    first = _execution_config_fingerprint(row, policy)
+    first = _execution_config_version(row, policy)
     row.reasoning_effort = "low"
-    second = _execution_config_fingerprint(row, policy)
+    row.revision = 2
+    second = _execution_config_version(row, policy)
     changed_policy = AiDecisionPolicySnapshot(
         enabled=True,
         max_live_data_lag_seconds=90,
         prior_decisions_limit=10,
     )
-    third = _execution_config_fingerprint(row, changed_policy)
+    third = _execution_config_version(row, changed_policy)
 
     assert first != second
     assert second != third
-    version = _model_version_with_execution_fingerprint("gpt-5.6-terra", first)
-    assert version.startswith("gpt-5.6-terra@cfg:")
-    assert len(version) <= 128
-    assert "api_key" not in version
+    assert first == "openai:default:r1:lag120:prior10"
+    assert "api_key" not in first
 
 
-@pytest.mark.parametrize(
-    "versions",
-    [
-        {
-            "gpt-5.6-terra@cfg:aaaaaaaaaaaa",
-            "gpt-5.6-terra@cfg:bbbbbbbbbbbb",
-        },
-        {
-            "gpt-5.6-terra",
-            "gpt-5.6-terra@cfg:aaaaaaaaaaaa",
-        },
-    ],
-)
-def test_benchmark_blocks_mixed_runtime_execution_config_comparisons(
-    versions: set[str],
-) -> None:
+@pytest.mark.asyncio
+async def test_runtime_inference_persists_config_version_outside_model_version() -> None:
+    class _ManagedProvider:
+        name = "openai"
+        model = "gpt-5.6-sol"
+        runtime_config_managed = True
+        runtime_execution_config_version = "openai:default:r2:lag120:prior10"
+        runtime_timeout_seconds = 10.0
+
+        async def decide(self, snapshot_input: str) -> AiProviderResponse:
+            return AiProviderResponse(
+                raw_response={"ok": True},
+                decision=AiDecision(
+                    action="NO_BUY",
+                    fair_probability_a=0.5,
+                    confidence=0.5,
+                    market_assessment="FAIR",
+                    minimum_acceptable_odds_a=None,
+                    stake=None,
+                    primary_reasons=[],
+                    blockers=[],
+                ),
+                model_version="provider-release-2026-08",
+            )
+
+        async def close(self) -> None:
+            return None
+
+    now = datetime.now(UTC)
+    provider = _ManagedProvider()
+    prepared = PreparedAiDecision(
+        provider=provider,
+        snapshot=SimpleNamespace(snapshot_id=uuid4(), snapshot_hash="snapshot-hash"),
+        provider_input="{}",
+        ai_input_hash="input-hash",
+        bankroll_before=10_000.0,
+        input_prepare_started_at=now,
+        input_prepare_completed_at=now,
+        execution_config_version=provider.runtime_execution_config_version,
+    )
+
+    record = await RuntimeAiCoordinator([provider], timeout_seconds=10).run_inference(prepared)
+
+    assert record.model_version == "provider-release-2026-08"
+    assert record.execution_config_version == "openai:default:r2:lag120:prior10"
+
+
+def test_benchmark_uses_explicit_execution_config_identity() -> None:
     acc = _ExperimentAccumulator(
         attempts=2,
         successful_attempts=2,
-        model_versions=versions,
+        model_versions={"provider-release-a", "provider-release-b"},
+        latencies=[1.0, 3.0],
     )
     row = AiBaselineBenchmarkService()._build_experiment_row(
-        ai_experiment_key("openai", "gpt-5.6-terra"),
+        ai_experiment_key(
+            ai_decision_lane_key("openai", "gpt-5.6-terra"),
+            "openai:default:r2:lag120:prior10",
+        ),
         acc,
         {
             "event_count": 2,
@@ -186,11 +227,14 @@ def test_benchmark_blocks_mixed_runtime_execution_config_comparisons(
         },
     )
 
-    assert row["execution_config"]["mixed"] is True
-    assert row["execution_config"]["comparison_eligible"] is False
-    assert row["quality"]["average_brier_score"] is None
-    assert row["latency"]["average_seconds"] is None
-    assert row["portfolio"]["realized_roi"] is None
+    assert row["execution_config"] == {
+        "version": "openai:default:r2:lag120:prior10",
+        "mixed": False,
+        "comparison_eligible": True,
+        "blocker": None,
+    }
+    assert row["latency"]["average_seconds"] == 2.0
+    assert row["portfolio"]["realized_roi"] == 0.2
 
 
 class _FakeService:

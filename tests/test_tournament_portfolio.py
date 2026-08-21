@@ -23,7 +23,7 @@ from app.models import (
 )
 
 NOW = datetime(2026, 8, 17, 9, 30, tzinfo=UTC)
-EXPERIMENT = ("gpt", "fixture", "prompt-v1", "policy-v1", "view-v1")
+EXPERIMENT = ("gpt", "fixture", "prompt-v1", "policy-v1", "view-v1", "cfg-v1")
 
 
 async def _fixture(session):
@@ -82,7 +82,7 @@ def _snapshot(map_id, team_a_id, team_b_id, index):
 
 
 def _decision(snapshot, *, action: str, stake: float, offset: int = 0):
-    provider, model, prompt, policy, view = EXPERIMENT
+    provider, model, prompt, policy, view, execution_config = EXPERIMENT
     return AiDecisionRecord(
         snapshot_id=snapshot.id,
         snapshot_hash=snapshot.snapshot_hash,
@@ -92,6 +92,7 @@ def _decision(snapshot, *, action: str, stake: float, offset: int = 0):
         prompt_version=prompt,
         decision_policy_version=policy,
         ai_view_version=view,
+        execution_config_version=execution_config,
         ai_input_hash=f"hash-{snapshot.id}-{offset}",
         bankroll_before=Decimal("10000.00"),
         stake=Decimal(str(stake)),

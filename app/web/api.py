@@ -1922,6 +1922,8 @@ def _decision_payload(
         "model_version": record.model_version,
         "prompt_version": record.prompt_version,
         "decision_policy_version": record.decision_policy_version,
+        "ai_view_version": record.ai_view_version,
+        "execution_config_version": record.execution_config_version,
         "snapshot_hash": record.snapshot_hash,
         "job_enqueued_at": record.job_enqueued_at,
         "job_claimed_at": record.job_claimed_at,

@@ -6,7 +6,7 @@ from uuid import UUID
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-from app.ai.base import ai_experiment_key
+from app.ai.base import ai_decision_lane_key
 from app.ai.coordinator import AiCoordinator, PreparedAiDecision
 from app.ai.eligibility import ai_decision_is_game_time_eligible
 from app.ai.lanes import AiExperimentLaneRegistry, ai_experiment_lane_key
@@ -518,7 +518,7 @@ class ApplicationJobHandlers:
                     record.decision_policy_version,
                     record.ai_view_version,
                 )
-                == ai_experiment_key(record.provider, record.model)
+                == ai_decision_lane_key(record.provider, record.model)
             ]
             if not runtime_effects:
                 return

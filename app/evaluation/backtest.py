@@ -275,6 +275,7 @@ def _experiment_identity(record: AiDecisionRecord) -> dict[str, str]:
         "provider": record.provider,
         "model": record.model,
         "model_version": record.model_version,
+        "execution_config_version": record.execution_config_version,
         "prompt_version": record.prompt_version,
         "decision_policy_version": record.decision_policy_version,
         "ai_view_version": record.ai_view_version,

@@ -21,7 +21,7 @@ from app.ai import (
     LocalOpenAiDecisionProvider,
     OpenAiDecisionProvider,
 )
-from app.ai.base import ai_experiment_key
+from app.ai.base import ai_decision_lane_key
 from app.config import Settings, get_settings
 from app.db import create_engine, create_session_factory
 from app.db_partitions import ensure_weekly_partitions
@@ -384,7 +384,7 @@ async def run() -> None:
         jobs,
         events,
         lease_seconds=settings.job_lease_seconds,
-        ai_experiments=tuple(ai_experiment_key(item.name, item.model) for item in ai_providers),
+        ai_experiments=tuple(ai_decision_lane_key(item.name, item.model) for item in ai_providers),
         future_odds_horizons=settings.future_odds_horizons,
         ai_min_game_time_seconds=settings.ai_min_game_time_seconds,
         checkpoint_minutes=settings.checkpoint_minutes,
@@ -396,7 +396,7 @@ async def run() -> None:
     hub = EventHub(on_drop=metrics.event_hub_dropped.inc)
     domain_dispatcher = DomainEventDispatcher(
         jobs,
-        ai_experiments=tuple(ai_experiment_key(item.name, item.model) for item in ai_providers),
+        ai_experiments=tuple(ai_decision_lane_key(item.name, item.model) for item in ai_providers),
     )
     outbox_dispatcher = OutboxDispatcher(session_factory, hub.publish)
     workers = []

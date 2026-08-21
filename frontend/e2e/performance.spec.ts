@@ -5,12 +5,14 @@ const gptIdentity = {
   model: "gpt-5.6",
   prompt_version: "decision-analyst-v5.1-output",
   decision_policy_version: "shadow-tournament-portfolio-v3",
-  ai_view_version: "ai-view-v6"
+  ai_view_version: "ai-view-v6",
+  execution_config_version: "openai:default:r2:lag120:prior10"
 };
 const deepseekIdentity = {
   ...gptIdentity,
   provider: "deepseek",
-  model: "deepseek-reasoner"
+  model: "deepseek-reasoner",
+  execution_config_version: "deepseek:pro:r2:lag120:prior10"
 };
 
 const leaderboard = {

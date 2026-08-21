@@ -1,0 +1,3 @@
+# Version Shadow Portfolios by execution configuration
+
+An AI Experiment is a Decision Lane plus the Execution Config Version frozen before inference. Runtime provider or input-context changes therefore create a separately funded event-level Shadow Portfolio; they are not hidden inside `model_version`, merged into an existing bankroll, or excluded wholesale from performance reporting. Existing mixed portfolios are split by their preserved decision configuration during migration, with ledger balances recomputed from the original append-only deltas so historical decisions, positions, odds, and settlement outcomes remain auditable.

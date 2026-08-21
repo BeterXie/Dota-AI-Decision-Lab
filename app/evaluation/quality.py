@@ -168,6 +168,8 @@ class TournamentQualityService:
                         AiDecisionRecord.decision_policy_version
                         == identity["decision_policy_version"],
                         AiDecisionRecord.ai_view_version == identity["ai_view_version"],
+                        AiDecisionRecord.execution_config_version
+                        == identity["execution_config_version"],
                         AiDecisionRecord.parse_status == "SUCCESS",
                         AiDecisionRecord.normalized_response.is_not(None),
                     )

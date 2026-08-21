@@ -5,6 +5,7 @@ from typing import Any, Protocol
 
 from app.ai.input import AI_VIEW_VERSION
 from app.domain.decision import LEGACY_EXPLANATION_FIELDS, AiDecision
+from app.domain.experiment import AiDecisionLaneKey
 
 PROMPT_VERSION = "decision-analyst-v5.1-output"
 DECISION_POLICY_VERSION = "shadow-tournament-portfolio-v3"
@@ -196,13 +197,12 @@ class AiProvider(Protocol):
     async def close(self) -> None: ...
 
 
-def ai_experiment_key(provider: str, model: str) -> tuple[str, str, str, str, str]:
-    """The single source of the AI experiment identity.
+def ai_decision_lane_key(provider: str, model: str) -> AiDecisionLaneKey:
+    """Identity used to schedule one provider/model decision lane.
 
-    The AI input is a function of the snapshot AND the provider-facing ai-view
-    composition, so its version belongs in the identity next to prompt and
-    policy versions. Coordinator dedupe, durable reconciliation, and the
-    database unique constraint must all use this key.
+    Runtime execution configuration is frozen later, during PREPARE. The lane
+    key therefore drives durable scheduling, while the final AI experiment adds
+    that frozen execution-config version before comparison and portfolio use.
     """
     return (provider, model, PROMPT_VERSION, DECISION_POLICY_VERSION, AI_VIEW_VERSION)
 

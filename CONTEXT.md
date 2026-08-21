@@ -26,6 +26,18 @@ _Avoid_: match when the individual game is meant.
 
 ## AI Content
 
+**AI Decision Lane**:
+The scheduled provider/model path identified by its prompt, decision policy, and AI-view versions. A lane may produce several AI Experiments as runtime configuration changes.
+_Avoid_: AI Experiment when the frozen execution configuration is not yet known.
+
+**Execution Config Version**:
+A non-secret identifier frozen before inference for the provider and input-context configuration used by an AI Decision. Changing that configuration creates a new version.
+_Avoid_: model version; configuration fingerprint hidden inside a model name.
+
+**AI Experiment**:
+An AI Decision Lane under one frozen Execution Config Version. Each experiment owns an independent event-level Shadow Portfolio and is compared separately.
+_Avoid_: merging decisions across execution configuration changes.
+
 **AI Decision**:
 The model's decision intelligence for a series or map checkpoint, including direction, confidence, probability, and reasoning where the data is eligible.
 

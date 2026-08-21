@@ -6,6 +6,7 @@ import pytest
 from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 
 from app.db import Base
+from app.domain.experiment import STATIC_EXECUTION_CONFIG_VERSION
 from app.evaluation.leaderboard import TournamentLeaderboardService
 from app.evaluation.portfolio_models import TournamentPortfolioAccountRecord
 from app.models import CanonicalEvent
@@ -101,6 +102,51 @@ async def test_global_leaderboard_aggregates_independent_event_bankrolls() -> No
     await engine.dispose()
 
 
+@pytest.mark.asyncio
+async def test_global_leaderboard_keeps_execution_config_versions_separate() -> None:
+    engine = create_async_engine("sqlite+aiosqlite:///:memory:")
+    async with engine.begin() as connection:
+        await connection.run_sync(Base.metadata.create_all)
+    factory = async_sessionmaker(engine, expire_on_commit=False)
+
+    async with factory() as session, session.begin():
+        event = CanonicalEvent(id=uuid4(), name="Config Split", started_at=NOW)
+        session.add(event)
+        await session.flush()
+        session.add_all(
+            [
+                _account(
+                    event.id,
+                    provider="openai",
+                    model="gpt-fixture",
+                    pnl=Decimal("100.00"),
+                    max_drawdown_pct=0.02,
+                    execution_config_version="openai:default:r1:lag120:prior10",
+                ),
+                _account(
+                    event.id,
+                    provider="openai",
+                    model="gpt-fixture",
+                    pnl=Decimal("300.00"),
+                    max_drawdown_pct=0.01,
+                    execution_config_version="openai:default:r2:lag120:prior10",
+                ),
+            ]
+        )
+        await session.flush()
+
+        report = await TournamentLeaderboardService().build_report(session)
+
+    assert [
+        row["experiment"]["execution_config_version"] for row in report["experiments"]
+    ] == [
+        "openai:default:r2:lag120:prior10",
+        "openai:default:r1:lag120:prior10",
+    ]
+    assert "excluded_runtime_config_mixes" not in report
+    await engine.dispose()
+
+
 def _account(
     event_id,
     *,
@@ -108,6 +154,7 @@ def _account(
     model: str,
     pnl: Decimal,
     max_drawdown_pct: float,
+    execution_config_version: str = STATIC_EXECUTION_CONFIG_VERSION,
 ) -> TournamentPortfolioAccountRecord:
     initial = Decimal("10000.00")
     return TournamentPortfolioAccountRecord(
@@ -117,6 +164,7 @@ def _account(
         prompt_version="prompt-v1",
         decision_policy_version="policy-v1",
         ai_view_version="view-v1",
+        execution_config_version=execution_config_version,
         initial_bankroll=initial,
         cash_balance=initial + pnl,
         locked_balance=Decimal("0.00"),
