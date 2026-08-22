@@ -13,6 +13,7 @@ import {
 } from "../billingApi";
 import { buildEventSummaries, buildSeriesSummaries } from "../events";
 import { useI18n } from "../i18n";
+import { isLivePhase, isUpcomingPhase } from "../matchPhase";
 import { UiIcon } from "./VisualIdentity";
 import "./billing.css";
 
@@ -136,7 +137,7 @@ export function BillingPage({
           </p>
         </div>
         <div className="billing-scope-note">
-          <strong>{zh ? "一次购买" : "One-time purchase"}</strong>
+          <strong>{zh ? "单次付费" : "Single payment"}</strong>
           <span>{zh ? "权限跟随所选系列赛或赛事" : "Access follows the selected series or event"}</span>
         </div>
       </header>
@@ -152,8 +153,8 @@ export function BillingPage({
             </strong>
             <p>
               {zh
-                ? "对应方案的购买按钮会把权限绑定到这个范围，不按天数过期。"
-                : "The matching purchase button binds access to this scope without a time expiry."}
+                ? "对应方案的获取权限操作会绑定到这个范围，不按天数过期。"
+                : "The matching access action binds access to this scope without a time expiry."}
             </p>
           </div>
         </section>
@@ -193,21 +194,21 @@ export function BillingPage({
           action={<PassAction kind="free" locale={locale} />}
           includedHeading={zh ? "包含" : "Includes"}
           features={zh ? [
-            { label: "小组赛 AI 决策", included: true },
+            { label: "小组赛 AI 预测", included: true },
             { label: "AI 表现与复盘", included: true },
             { label: "确认赛果后的基础 AI", included: true },
             { label: "付费阶段进行中的完整 AI", included: false },
             { label: "实时通知", included: false }
           ] : [
-            { label: "Group-stage AI decisions", included: true },
+            { label: "Group-stage AI predictions", included: true },
             { label: "AI Performance and Review", included: true },
             { label: "Core AI after confirmed results", included: true },
             { label: "Full live AI for paid stages", included: false },
             { label: "Realtime notifications", included: false }
           ]}
           finePrint={zh
-            ? "无需购买。赛后公开不会创建会员权限，也不会补发实时通知。"
-            : "No purchase required. Public post-match access does not create a pass or backfill alerts."}
+            ? "无需付费。赛后公开不会创建会员权限，也不会补发实时通知。"
+            : "No payment required. Public post-match access does not create a pass or backfill alerts."}
         />
 
         <PlanCard
@@ -236,14 +237,14 @@ export function BillingPage({
           )}
           includedHeading={zh ? "包含 Free Access 的全部内容，以及" : "Everything in Free Access, plus"}
           features={zh ? [
-            { label: "系列赛进行中的完整 AI 决策", included: true },
+            { label: "系列赛进行中的完整 AI 预测", included: true },
             { label: "该系列赛的实时通知", included: true },
-            { label: "全部地图的完整决策历史", included: true },
+            { label: "全部地图的完整预测记录", included: true },
             { label: "银行卡、支付宝与微信支付（符合条件时）", included: true }
           ] : [
-            { label: "Full live AI decisions for the series", included: true },
+            { label: "Full live AI predictions for the series", included: true },
             { label: "Realtime notifications for the series", included: true },
-            { label: "Complete decision history for every map", included: true },
+            { label: "Complete prediction history for every map", included: true },
             { label: "Card, Alipay and WeChat Pay when eligible", included: true }
           ]}
           finePrint={zh
@@ -276,19 +277,19 @@ export function BillingPage({
           )}
           includedHeading={zh ? "包含 Free Access 的全部内容，以及" : "Everything in Free Access, plus"}
           features={zh ? [
-            { label: "赛事全部系列赛的完整 AI", included: true },
+            { label: "赛事全部系列赛的完整 AI 预测", included: true },
             { label: "赛事范围内的实时通知", included: true },
             { label: "全部系列赛与地图历史", included: true },
             { label: "银行卡、支付宝与微信支付（符合条件时）", included: true }
           ] : [
-            { label: "Full AI for every series in the event", included: true },
+            { label: "Full AI predictions for every series in the event", included: true },
             { label: "Realtime notifications across the event", included: true },
             { label: "Complete series and map history", included: true },
             { label: "Card, Alipay and WeChat Pay when eligible", included: true }
           ]}
           finePrint={zh
             ? "权限仅绑定一个赛事，不会自动续费。"
-            : "Access covers one event only as a one-time purchase."}
+            : "Access covers one event with a single payment and no auto-renewal."}
         />
       </section>
 
@@ -302,7 +303,7 @@ export function BillingPage({
       {(seriesCheckout.error || eventCheckout.error) && (
         <div className="billing-status-message is-error" role="alert">
           <strong>{zh ? "支付请求失败" : "Checkout request failed"}</strong>
-          <span>{zh ? "请确认所选范围尚未购买，然后稍后重试。" : "Confirm this scope is still available, then try again."}</span>
+          <span>{zh ? "请确认所选范围尚未解锁，然后稍后重试。" : "Confirm this scope is still available, then try again."}</span>
         </div>
       )}
 
@@ -314,14 +315,14 @@ export function BillingPage({
               <h2>{zh ? "邀请好友" : "Invite friends"}</h2>
               <p>{zh
                 ? `好友完成首次付费后，双方按活动规则获得奖励。当前已奖励 ${referral.data.rewarded_invites} 人。`
-                : `Rewards are issued after a friend's first paid purchase. ${referral.data.rewarded_invites} referrals rewarded.`}</p>
+                : `Rewards are issued after a friend's first payment. ${referral.data.rewarded_invites} referrals rewarded.`}</p>
               <code>{referral.data.code ?? "—"}</code>
             </article>
           )}
           {activePasses.length > 0 && (
             <article className="billing-support-card">
               <span className="billing-eyebrow">YOUR PASSES</span>
-              <h2>{zh ? "已购买的范围" : "Purchased scopes"}</h2>
+              <h2>{zh ? "已解锁范围" : "Unlocked scopes"}</h2>
               <div className="billing-pass-list">
                 {activePasses.map((pass) => (
                   <span key={`${pass.scope_type}:${pass.canonical_event_id ?? pass.canonical_series_id}`}>
@@ -432,7 +433,7 @@ function CatalogPrice({
       <small>{loading
         ? (locale === "zh-CN" ? "正在读取价格" : "Loading price")
         : offer?.enabled
-          ? (locale === "zh-CN" ? "一次购买" : "One-time purchase")
+          ? (locale === "zh-CN" ? "单次付费" : "Single payment")
           : (locale === "zh-CN" ? "暂未开放" : "Unavailable")}</small>
     </div>
   );
@@ -514,10 +515,10 @@ function PassAction({
       {pending
         ? (zh ? "正在创建结账" : "Creating checkout")
         : !authenticated
-          ? (zh ? "登录后购买" : "Sign in to buy")
+          ? (zh ? "登录后获取权限" : "Sign in for access")
           : kind === "series"
-            ? (zh ? "购买当前系列赛" : "Buy this series")
-            : (zh ? "购买当前赛事" : "Buy this event")}
+            ? (zh ? "获取当前系列赛权限" : "Get series access")
+            : (zh ? "获取当前赛事权限" : "Get event access")}
     </button>
   );
 }
@@ -577,7 +578,7 @@ function ScopePicker({
                 ? (zh ? "选择一场 BO 系列赛" : "Select a BO series")
                 : (zh ? "选择一项赛事" : "Select an event")}
             </h2>
-            <p>{zh ? `${formattedPrice ?? "—"} · 一次购买` : `${formattedPrice ?? "—"} · One-time purchase`}</p>
+            <p>{zh ? `${formattedPrice ?? "—"} · 单次付费` : `${formattedPrice ?? "—"} · Single payment`}</p>
           </div>
           <button className="billing-picker-close" type="button" onClick={onClose} title={zh ? "关闭" : "Close"} aria-label={zh ? "关闭" : "Close"} autoFocus>
             <Close size={19} aria-hidden="true" />
@@ -596,7 +597,7 @@ function ScopePicker({
           />
         </label>
 
-        <div className="billing-picker-list" role="radiogroup" aria-label={zh ? "可购买范围" : "Purchasable scopes"}>
+        <div className="billing-picker-list" role="radiogroup" aria-label={zh ? "可解锁范围" : "Available access scopes"}>
           {loading ? (
             <div className="billing-picker-state" role="status">{zh ? "正在读取赛事范围…" : "Loading competition scopes…"}</div>
           ) : error ? (
@@ -689,9 +690,8 @@ function buildScopeOptions(
   return events.flatMap((event) =>
     buildSeriesSummaries(event)
       .filter((series) =>
-        series.phase === "LIVE"
-        || series.phase === "PREMATCH"
-        || series.phase === "UNKNOWN"
+        isLivePhase(series.phase)
+        || isUpcomingPhase(series.phase)
       )
       .map((series) => ({
         id: series.seriesId,
@@ -716,6 +716,8 @@ function eventStatusLabel(status: string, locale: string): string {
 
 function seriesStatusLabel(phase: MapSummary["phase"], locale: string): string {
   if (phase === "LIVE") return locale === "zh-CN" ? "进行中" : "Live";
+  if (phase === "LIVE_DATA_DELAYED") return locale === "zh-CN" ? "实时数据延迟" : "Live data delayed";
+  if (phase === "DELAYED_START") return locale === "zh-CN" ? "赛程延迟" : "Start delayed";
   if (phase === "PREMATCH" || phase === "UNKNOWN") return locale === "zh-CN" ? "即将开始" : "Upcoming";
   if (phase === "AWAITING_RESULT") return locale === "zh-CN" ? "等待赛果" : "Awaiting result";
   return locale === "zh-CN" ? "已结束" : "Completed";
@@ -759,7 +761,7 @@ function ReferralClaim({
       <div>
         <span className="billing-eyebrow">REFERRAL</span>
         <strong>{zh ? "好友邀请" : "Friend referral"}</strong>
-        <p>{zh ? `邀请码 ${code}，首次付费后按活动规则发放奖励。` : `Referral code ${code}. Rewards follow the campaign rules after a first purchase.`}</p>
+        <p>{zh ? `邀请码 ${code}，首次付费后按活动规则发放奖励。` : `Referral code ${code}. Rewards follow the campaign rules after a first payment.`}</p>
       </div>
       {!authenticated ? (
         <button type="button" onClick={onLogin}><UiIcon name="user" size={16} />{zh ? "登录后领取" : "Sign in to claim"}</button>

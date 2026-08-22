@@ -34,10 +34,12 @@ export function findMatchByRoute(matches: MapSummary[], routeId: string): MapSum
 
 const phasePriority: Record<MapSummary["phase"], number> = {
   LIVE: 0,
-  AWAITING_RESULT: 1,
-  PREMATCH: 2,
-  UNKNOWN: 3,
-  POSTMATCH: 4
+  LIVE_DATA_DELAYED: 1,
+  AWAITING_RESULT: 2,
+  DELAYED_START: 3,
+  PREMATCH: 4,
+  UNKNOWN: 5,
+  POSTMATCH: 6
 };
 
 function compareSeriesRouteMatches(left: MapSummary, right: MapSummary): number {

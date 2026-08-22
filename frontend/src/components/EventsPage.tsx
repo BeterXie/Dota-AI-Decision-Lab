@@ -11,7 +11,9 @@ import {
   type EventSummary
 } from "../events";
 import { useI18n } from "../i18n";
+import { isLivePhase, isUpcomingPhase } from "../matchPhase";
 import { matchHref } from "../matches";
+import { matchPhaseBadgePresentation } from "../utils/presentation";
 import { EventMark, TeamCrest, UiIcon } from "./VisualIdentity";
 
 type EventFilter = "ALL" | "LIVE" | "UPCOMING" | "COMPLETED";
@@ -66,8 +68,8 @@ const EventIndex: React.FC<{ events: EventSummary[]; loading: boolean; error: bo
           <h1>{locale === "zh-CN" ? "全球 Dota 赛事，一处追踪" : "One place for the Dota events that matter"}</h1>
           <p>
             {locale === "zh-CN"
-              ? "先看赛事进度，再进入具体对局。赛程、对阵、赛果和确认赛果后的基础 AI 决策公开；付费阶段进行中的完整 AI 与实时通知需要 Pass。"
-              : "Start with the event, then drill into the match. Schedules, matchups, results and confirmed post-match core AI decisions are public; full live paid-stage AI and alerts require a Pass."}
+              ? "先看赛事进度，再进入具体对局。赛程、对阵、赛果和确认赛果后的基础 AI 预测公开；付费阶段进行中的完整 AI 预测与实时通知需要 Pass。"
+              : "Start with the event, then drill into the match. Schedules, matchups, results, and confirmed post-match core AI predictions are public; full live paid-stage predictions and alerts require a Pass."}
           </p>
         </div>
         <div className="events-hero-stats" aria-label={locale === "zh-CN" ? "赛事概览" : "Event overview"}>
@@ -163,7 +165,9 @@ const EventDetail: React.FC<{
 
   const series = buildSeriesSummaries(event);
   const visibleSeries = filterEventSeries(series, activeTab);
-  const featured = event.matches.find((match) => match.phase === "LIVE") ?? event.nextMatch;
+  const featured = event.matches.find((match) => match.phase === "LIVE")
+    ?? event.matches.find((match) => match.phase === "LIVE_DATA_DELAYED")
+    ?? event.nextMatch;
   const stages = groupSeriesByStage(visibleSeries, locale);
   const teams = eventTeams(event);
   const completedSeries = series.filter((item) => item.phase === "POSTMATCH").length;
@@ -227,8 +231,14 @@ const EventDetail: React.FC<{
       {featured && activeTab === "OVERVIEW" && (
         <section className="product-container event-featured-match product-section">
           <div className="event-featured-kicker">
-            <span className={featured.phase === "LIVE" ? "is-live" : undefined} />
-            {featured.phase === "LIVE" ? (locale === "zh-CN" ? "正在进行" : "Live now") : (locale === "zh-CN" ? "下一场比赛" : "Next match")}
+            <span className={isLivePhase(featured.phase) ? "is-live" : undefined} />
+            {featured.phase === "LIVE_DATA_DELAYED"
+              ? (locale === "zh-CN" ? "实时数据延迟" : "Live data delayed")
+              : featured.phase === "LIVE"
+                ? (locale === "zh-CN" ? "正在进行" : "Live now")
+                : featured.phase === "DELAYED_START"
+                  ? (locale === "zh-CN" ? "赛程延迟" : "Start delayed")
+                  : (locale === "zh-CN" ? "下一场比赛" : "Next match")}
           </div>
           <div className="event-featured-main">
             <time><UiIcon name="clock" size={12} />{featured.scheduled_at ? formatDateTime(featured.scheduled_at, locale) : "—"}</time>
@@ -284,7 +294,7 @@ const EventDetail: React.FC<{
             <span className="home-eyebrow">ACCESS</span>
             <h2>{locale === "zh-CN" ? "比赛公开，AI 按权限解锁" : "Matches public. AI unlocked by access."}</h2>
             <div className="event-access-row"><i>✓</i><div><strong>{locale === "zh-CN" ? "公开赛事层" : "Public event layer"}</strong><p>{locale === "zh-CN" ? "赛程、对阵、比分、赛果与基础比赛情报无需登录。" : "Schedules, matchups, scores, results and core match intelligence require no sign-in."}</p></div></div>
-            <div className="event-access-row is-pro"><i>✦</i><div><strong>{locale === "zh-CN" ? "进行中的完整 AI 与实时通知" : "Full live AI & realtime alerts"}</strong><p>{locale === "zh-CN" ? "小组赛和确认赛果后的基础 AI 决策公开；付费阶段进行中的完整 AI 与通知按赛事或系列赛 Pass 解锁。" : "Group-stage and confirmed post-match core AI decisions are public; full live paid-stage AI and alerts unlock by Event or Series Pass."}</p></div></div>
+            <div className="event-access-row is-pro"><i>✦</i><div><strong>{locale === "zh-CN" ? "进行中的完整 AI 预测与实时通知" : "Full live AI predictions & realtime alerts"}</strong><p>{locale === "zh-CN" ? "小组赛和确认赛果后的基础 AI 预测公开；付费阶段进行中的完整预测与通知按赛事或系列赛 Pass 解锁。" : "Group-stage and confirmed post-match core AI predictions are public; full live paid-stage predictions and alerts unlock by Event or Series Pass."}</p></div></div>
             <a href={event.canonicalEventId ? `/billing?event=${encodeURIComponent(event.canonicalEventId)}` : "/billing"}>{locale === "zh-CN" ? "查看赛事 Pass" : "View Event Pass"}<span>→</span></a>
           </article>
           <article className="event-trust-card">
@@ -298,7 +308,10 @@ const EventDetail: React.FC<{
 };
 
 const EventDirectoryCard: React.FC<{ event: EventSummary; index: number; locale: string }> = ({ event, index, locale }) => {
-  const focus = event.matches.find((match) => match.phase === "LIVE") ?? event.nextMatch ?? event.latestMatch;
+  const focus = event.matches.find((match) => match.phase === "LIVE")
+    ?? event.matches.find((match) => match.phase === "LIVE_DATA_DELAYED")
+    ?? event.nextMatch
+    ?? event.latestMatch;
   return (
     <article className={`event-directory-card event-tone-${index % 3}`}>
       <div className="event-directory-top">
@@ -315,7 +328,15 @@ const EventDirectoryCard: React.FC<{ event: EventSummary; index: number; locale:
       </div>
       {focus ? (
         <div className="event-directory-focus">
-          <small>{focus.phase === "LIVE" ? (locale === "zh-CN" ? "正在进行" : "Live") : event.status === "COMPLETED" ? (locale === "zh-CN" ? "最近赛果" : "Latest") : (locale === "zh-CN" ? "下一场" : "Next")}</small>
+          <small>{focus.phase === "LIVE_DATA_DELAYED"
+            ? (locale === "zh-CN" ? "实时数据延迟" : "Live data delayed")
+            : focus.phase === "LIVE"
+              ? (locale === "zh-CN" ? "正在进行" : "Live")
+              : focus.phase === "DELAYED_START"
+                ? (locale === "zh-CN" ? "赛程延迟" : "Start delayed")
+                : event.status === "COMPLETED"
+                  ? (locale === "zh-CN" ? "最近赛果" : "Latest")
+                  : (locale === "zh-CN" ? "下一场" : "Next")}</small>
           <strong><TeamCrest team={focus.team_a} fallbackName={focus.team_a?.name} size="sm" />{focus.team_a?.name || (locale === "zh-CN" ? "待定" : "TBD")} <em>vs</em> <TeamCrest team={focus.team_b} fallbackName={focus.team_b?.name} size="sm" />{focus.team_b?.name || (locale === "zh-CN" ? "待定" : "TBD")}</strong>
           <span><UiIcon name="clock" size={10} />{focus.scheduled_at ? formatDateTime(focus.scheduled_at, locale) : "—"}</span>
         </div>
@@ -327,7 +348,7 @@ const EventDirectoryCard: React.FC<{ event: EventSummary; index: number; locale:
 
 const SeriesRow: React.FC<{ series: EventSeriesSummary; locale: string }> = ({ series, locale }) => {
   const score = series.score;
-  const showScore = Boolean(score && (series.phase === "LIVE" || series.phase === "POSTMATCH" || series.phase === "AWAITING_RESULT"));
+  const showScore = Boolean(score && (isLivePhase(series.phase) || series.phase === "POSTMATCH" || series.phase === "AWAITING_RESULT"));
   return (
     <article className="event-series-row">
       <div className="event-series-time"><time><UiIcon name="clock" size={10} />{series.scheduledAt ? formatDateTime(series.scheduledAt, locale) : "—"}</time><PhasePill phase={series.phase} locale={locale} /></div>
@@ -376,15 +397,8 @@ const StatusPill: React.FC<{ status: EventStatus; locale: string }> = ({ status,
 );
 
 const PhasePill: React.FC<{ phase: MapSummary["phase"]; locale: string }> = ({ phase, locale }) => {
-  const normalized = phase === "LIVE" ? "live" : phase === "PREMATCH" || phase === "UNKNOWN" ? "upcoming" : phase === "AWAITING_RESULT" ? "settling" : "completed";
-  const text = phase === "LIVE"
-    ? (locale === "zh-CN" ? "进行中" : "Live")
-    : phase === "PREMATCH" || phase === "UNKNOWN"
-      ? (locale === "zh-CN" ? "未开始" : "Upcoming")
-      : phase === "AWAITING_RESULT"
-        ? (locale === "zh-CN" ? "赛果确认中" : "Confirming")
-        : (locale === "zh-CN" ? "已结束" : "Final");
-  return <span className={`event-series-phase is-${normalized}`}>{text}</span>;
+  const { key, text } = matchPhaseBadgePresentation(phase, locale);
+  return <span className={`event-series-phase is-${key}`}>{text}</span>;
 };
 
 function filterLabel(filter: EventFilter, locale: string): string {
@@ -405,8 +419,8 @@ function eventScheduleTitle(tab: EventDetailTab, locale: string): string {
 }
 
 function filterEventSeries(series: EventSeriesSummary[], tab: EventDetailTab): EventSeriesSummary[] {
-  if (tab === "UPCOMING") return series.filter((item) => item.phase === "PREMATCH" || item.phase === "UNKNOWN");
-  if (tab === "LIVE") return series.filter((item) => item.phase === "LIVE");
+  if (tab === "UPCOMING") return series.filter((item) => isUpcomingPhase(item.phase));
+  if (tab === "LIVE") return series.filter((item) => isLivePhase(item.phase));
   if (tab === "COMPLETED") return series.filter((item) => item.phase === "POSTMATCH" || item.phase === "AWAITING_RESULT");
   return series;
 }

@@ -5,7 +5,7 @@ import { resolveVerifiedMapSides, type VerifiedMapSides } from "../utils/mapSide
 
 const IntelligenceChart = React.lazy(() => import("../Chart"));
 
-type LiveDisplayState = "normal" | "stale" | "disconnected" | "unsynced" | "unavailable" | "final";
+type LiveDisplayState = "normal" | "waiting" | "stale" | "disconnected" | "unsynced" | "unavailable" | "final";
 
 interface MatchLivePulseProps {
   match: MapSummary | MapDetail;
@@ -32,7 +32,12 @@ export const MatchLivePulse: React.FC<MatchLivePulseProps> = ({
   liveMaxAgeSeconds = 120
 }) => {
   const live = match.live;
-  const shouldRender = Boolean(live) || match.phase === "LIVE" || match.phase === "AWAITING_RESULT";
+  const hasStartedLive = live?.game_time_seconds != null;
+  const shouldRender = Boolean(live)
+    || match.phase === "DELAYED_START"
+    || match.phase === "LIVE"
+    || match.phase === "LIVE_DATA_DELAYED"
+    || match.phase === "AWAITING_RESULT";
   if (!shouldRender) return null;
 
   const sides = resolveVerifiedMapSides(match);
@@ -41,7 +46,7 @@ export const MatchLivePulse: React.FC<MatchLivePulseProps> = ({
   const effectiveAgeSeconds = finiteNumber(freshness.effectiveAgeSeconds);
   const displayState = resolveDisplayState(
     match,
-    Boolean(live),
+    hasStartedLive,
     freshness.complete,
     messageAgeSeconds,
     effectiveAgeSeconds,
@@ -65,7 +70,7 @@ export const MatchLivePulse: React.FC<MatchLivePulseProps> = ({
         <span className={`match-live-status is-${displayState}`} role="status">{stateCopy.label}</span>
       </div>
 
-      {live ? (
+      {hasStartedLive && live ? (
         <div className="match-live-main">
           <div className="match-live-lead">
             <span>{locale === "zh-CN" ? "当前净经济" : "Current net worth"}</span>
@@ -113,13 +118,21 @@ export const MatchLivePulse: React.FC<MatchLivePulseProps> = ({
         </div>
       ) : (
         <div className="match-live-unavailable">
-          <strong>{locale === "zh-CN" ? "暂未收到可信的比赛进程数据" : "No trusted match-progress data yet"}</strong>
-          <span>{locale === "zh-CN" ? "页面会在收到有效局势后自动更新。" : "This view updates automatically when a valid state arrives."}</span>
+          <strong>{displayState === "waiting"
+            ? (locale === "zh-CN" ? "等待实际开局" : "Waiting for the actual start")
+            : (locale === "zh-CN" ? "暂未收到可信的比赛进程数据" : "No trusted match-progress data yet")}</strong>
+          <span>{stateCopy.detail ?? (locale === "zh-CN" ? "页面会在收到有效局势后自动更新。" : "This view updates automatically when a valid state arrives.")}</span>
         </div>
       )}
 
       <div className="match-live-trust">
-        {displayState === "final" ? (
+        {displayState === "waiting" ? (
+          <>
+            <TrustItem label={locale === "zh-CN" ? "实际开局" : "Actual start"} value={locale === "zh-CN" ? "尚未确认" : "Not confirmed"} warning />
+            <TrustItem label={locale === "zh-CN" ? "选手已识别" : "Players identified"} value={`${match.draft?.roster_ready_count ?? 0}/10`} />
+            <TrustItem label={locale === "zh-CN" ? "英雄已识别" : "Heroes identified"} value={`${match.draft?.hero_ready_count ?? 0}/10`} />
+          </>
+        ) : displayState === "final" ? (
           <>
             <TrustItem label={locale === "zh-CN" ? "数据状态" : "Data state"} value={locale === "zh-CN" ? "已归档" : "Archived"} />
             <TrustItem label={locale === "zh-CN" ? "比赛时间" : "Game time"} value={formatGameClock(live?.game_time_seconds)} />
@@ -150,6 +163,7 @@ function resolveDisplayState(
   maxAgeSeconds: number
 ): LiveDisplayState {
   if (match.phase === "POSTMATCH") return hasLive ? "final" : "unavailable";
+  if (match.phase === "DELAYED_START") return "waiting";
   if (!hasLive || complete === false) return "unavailable";
   if (messageAgeSeconds != null && messageAgeSeconds > maxAgeSeconds) return "disconnected";
   if (effectiveAgeSeconds != null && effectiveAgeSeconds > maxAgeSeconds) return "stale";
@@ -161,6 +175,7 @@ function displayStateCopy(state: LiveDisplayState, locale: string): { label: str
   const zh = locale === "zh-CN";
   switch (state) {
     case "final": return { label: zh ? "最终观测" : "Final observation", detail: null };
+    case "waiting": return { label: zh ? "赛程延迟" : "Start delayed", detail: zh ? "计划时间可能因前序系列赛顺延；收到有效比赛时钟后会自动切换为进行中。" : "The schedule may have shifted after an earlier series; this changes to Live when a valid game clock arrives." };
     case "stale": return { label: zh ? "显示最后确认值" : "Last confirmed value", detail: zh ? "局势长时间未变化，当前数值不再标记为实时。" : "The state has not changed recently, so this value is no longer marked live." };
     case "disconnected": return { label: zh ? "连接中断" : "Connection interrupted", detail: zh ? "正在显示连接中断前的最后确认值。" : "Showing the last value confirmed before the connection was interrupted." };
     case "unsynced": return { label: zh ? "市场暂不可比较" : "Market comparison unavailable", detail: zh ? "比赛局势仍可查看，但时间尚未与市场数据安全对齐。" : "Match progress remains visible, but its timing is not safely aligned with market data." };

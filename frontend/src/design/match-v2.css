@@ -27,6 +27,7 @@
 .match-phase-badge { display: inline-flex; align-items: center; gap: 6px; min-height: 24px; padding: 0 9px; border-radius: 999px; border: 1px solid var(--product-border); color: #8498aa; background: rgba(6, 15, 24, 0.56); font-size: 9px; font-weight: 780; }
 .match-phase-badge i { width: 6px; height: 6px; border-radius: 50%; background: currentColor; }
 .match-phase-badge.is-live { color: #54dca8; border-color: rgba(49, 214, 139, 0.24); background: rgba(49, 214, 139, 0.07); }
+.match-phase-badge.is-delayed { color: #e8b95f; border-color: rgba(232, 185, 95, 0.24); background: rgba(232, 185, 95, 0.08); }
 .match-phase-badge.is-upcoming { color: #72cbe6; }
 .match-phase-badge.is-tracked { color: #a8b5c0; }
 .match-phase-badge.is-settling { color: #e8b95f; }
@@ -88,6 +89,7 @@
 .match-live-status::before { width: 6px; height: 6px; border-radius: 50%; background: currentColor; content: ""; }
 .match-live-status.is-stale,
 .match-live-status.is-disconnected,
+.match-live-status.is-waiting,
 .match-live-status.is-unsynced { color: #ddb36a; }
 .match-live-status.is-unavailable,
 .match-live-status.is-final { color: #8799a7; }
@@ -204,7 +206,7 @@
 .match-ai-lock-status.is-pending { color: #a9b8c2; }
 .match-ai-lock h3 { margin: 7px 0 0; color: #dce6ec; font-size: 14px; }
 .match-ai-lock p { max-width: 390px; margin: 7px 0 15px; color: #8296a7; font-size: 9px; line-height: 1.7; }
-.match-ai-disclaimer { margin: 12px 0 0; padding-top: 10px; border-top: 1px solid rgba(143, 166, 188, 0.08); color: #65798d; font-size: 8px; line-height: 1.6; }
+.match-ai-disclaimer { margin: 12px 0 0; padding-top: 10px; border-top: 1px solid rgba(143, 166, 188, 0.08); color: #7f94a6; font-size: 10px; line-height: 1.65; }
 .match-ai-loading { display: grid; gap: 8px; margin-top: 17px; }
 .match-ai-loading span { height: 61px; border-radius: 8px; background: linear-gradient(90deg, rgba(20, 34, 48, 0.7), rgba(31, 49, 63, 0.8), rgba(20, 34, 48, 0.7)); background-size: 200% 100%; animation: matchSkeleton 1.3s ease infinite; }
 .match-ai-card.has-access .player-ai-strip-embedded { margin-top: 15px; padding: 0; border: 0; border-radius: 0; background: transparent; }

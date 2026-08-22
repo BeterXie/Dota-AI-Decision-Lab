@@ -3,7 +3,7 @@ import type { MapSummary, MarketObservation } from "../api";
 export type MatchDisplayPhase = "LIVE" | "UPCOMING" | "AWAITING_RESULT" | "POSTMATCH" | "TRACKED";
 
 export interface MatchPhaseBadgePresentation {
-  key: "live" | "upcoming" | "settling" | "completed" | "tracked";
+  key: "live" | "delayed" | "upcoming" | "settling" | "completed" | "tracked";
   text: string;
 }
 
@@ -14,10 +14,16 @@ export function matchPhaseBadgePresentation(
 ): MatchPhaseBadgePresentation {
   const zh = locale === "zh-CN";
   if (phase === "LIVE") return { key: "live", text: zh ? "进行中" : "Live" };
+  if (phase === "LIVE_DATA_DELAYED") {
+    return { key: "delayed", text: zh ? "实时数据延迟" : "Live data delayed" };
+  }
   if (seriesOngoing && phase === "POSTMATCH") {
     return { key: "live", text: zh ? "系列赛进行中" : "Series in progress" };
   }
   if (phase === "PREMATCH") return { key: "upcoming", text: zh ? "未开始" : "Upcoming" };
+  if (phase === "DELAYED_START") {
+    return { key: "delayed", text: zh ? "赛程延迟" : "Start delayed" };
+  }
   if (phase === "AWAITING_RESULT") {
     return { key: "settling", text: zh ? "赛果确认中" : "Confirming result" };
   }
@@ -26,19 +32,10 @@ export function matchPhaseBadgePresentation(
 }
 
 export function getMatchDisplayPhase(match: MapSummary): MatchDisplayPhase {
-  if (match.phase === "LIVE") return "LIVE";
-  if (match.phase === "PREMATCH") return "UPCOMING";
+  if (match.phase === "LIVE" || match.phase === "LIVE_DATA_DELAYED") return "LIVE";
+  if (match.phase === "PREMATCH" || match.phase === "DELAYED_START") return "UPCOMING";
   if (match.phase === "AWAITING_RESULT") return "AWAITING_RESULT";
   if (match.phase === "POSTMATCH") return "POSTMATCH";
-
-  // Backward-compatible fallback for cached fixtures / transitional API payloads.
-  if (match.live?.game_time_seconds != null || match.latest_snapshot?.mode?.startsWith("LIVE")) {
-    return "LIVE";
-  }
-  if (match.scheduled_at) {
-    const scheduledAt = Date.parse(match.scheduled_at);
-    if (Number.isFinite(scheduledAt) && scheduledAt > Date.now()) return "UPCOMING";
-  }
   return "TRACKED";
 }
 

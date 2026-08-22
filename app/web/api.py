@@ -41,10 +41,12 @@ from app.models import (
     PlayerFormSnapshotRecord,
     PlayerHeroSnapshotRecord,
     ProviderMatchMapping,
+    ProviderRawEvent,
     RayBetMatch,
     TeamFormSnapshotRecord,
     TeamRatingSnapshotRecord,
 )
+from app.providers.dltv.parser import draft_observation_counts
 from app.runtime.health import HealthRegistry
 from app.time import elapsed_seconds, ensure_utc
 from app.web.review import create_review_router
@@ -164,7 +166,8 @@ def create_app(
             payloads = [
                 item
                 for item in payloads
-                if item["phase"] not in ("AWAITING_RESULT", "UNKNOWN")
+                if item["phase"]
+                not in ("DELAYED_START", "LIVE_DATA_DELAYED", "AWAITING_RESULT", "UNKNOWN")
                 or (
                     item["scheduled_at"] is not None
                     and ensure_utc(item["scheduled_at"]) >= settling_cutoff
@@ -930,6 +933,19 @@ async def _map_payload(
         else []
     )
     draft_slot_payloads = await _draft_slot_payloads(session, draft_slots)
+    roster_ready_count = sum(slot.account_id is not None for slot in draft_slots)
+    hero_ready_count = sum(slot.hero_id is not None for slot in draft_slots)
+    if draft is not None:
+        raw_draft_event = await session.scalar(
+            select(ProviderRawEvent)
+            .where(ProviderRawEvent.id == draft.raw_event_id)
+            .order_by(ProviderRawEvent.received_at.desc())
+            .limit(1)
+        )
+        if raw_draft_event is not None:
+            observed_players, observed_heroes = draft_observation_counts(raw_draft_event.payload)
+            roster_ready_count = max(roster_ready_count, observed_players)
+            hero_ready_count = max(hero_ready_count, observed_heroes)
     player_form_ready_count = 0
     player_hero_ready_count = 0
     player_feature_cutoffs: list[datetime] = []
@@ -1215,8 +1231,8 @@ async def _map_payload(
                 "features": curve.derived_features if curve else None,
                 "model_version": curve.model_version if curve else None,
                 "data_version": curve.data_version if curve else None,
-                "roster_ready_count": sum(slot.account_id is not None for slot in draft_slots),
-                "hero_ready_count": sum(slot.hero_id is not None for slot in draft_slots),
+                "roster_ready_count": roster_ready_count,
+                "hero_ready_count": hero_ready_count,
                 "slots": draft_slot_payloads,
             }
             if draft
@@ -1369,16 +1385,37 @@ def _match_phase(
 ) -> str:
     if _confirmed_result(result):
         return "POSTMATCH"
-    if live is not None:
+    if _has_started_live_state(live):
         message_age = elapsed_seconds(observed_at, live.last_message_received_at)
-        if 0 <= message_age <= live_state_max_age_seconds:
+        state_age = elapsed_seconds(observed_at, live.last_state_change_received_at)
+        if (
+            0 <= message_age <= live_state_max_age_seconds
+            and 0 <= state_age <= live_state_max_age_seconds
+        ):
             return "LIVE"
-        return "AWAITING_RESULT"
+        if result is not None:
+            return "AWAITING_RESULT"
+        return "LIVE_DATA_DELAYED"
     if result is not None:
         return "AWAITING_RESULT"
-    if scheduled_at is not None and ensure_utc(scheduled_at) >= ensure_utc(observed_at):
-        return "PREMATCH"
-    return "UNKNOWN"
+    return _not_started_phase(scheduled_at=scheduled_at, observed_at=observed_at)
+
+
+def _has_started_live_state(live: DltvLiveObservationRecord | None) -> bool:
+    if live is None:
+        return False
+    game_time = live.game_time_seconds
+    return isinstance(game_time, int) and not isinstance(game_time, bool) and game_time >= 0
+
+
+def _not_started_phase(*, scheduled_at: datetime | None, observed_at: datetime) -> str:
+    if scheduled_at is None:
+        return "UNKNOWN"
+    return (
+        "PREMATCH"
+        if ensure_utc(scheduled_at) >= ensure_utc(observed_at)
+        else "DELAYED_START"
+    )
 
 
 def _confirmed_result(result: MapResultRecord | None) -> bool:
@@ -1662,11 +1699,9 @@ async def _pending_series_payloads(
                 "series_score": {"team_a": 0, "team_b": 0},
                 "series_maps": [],
                 "scheduled_at": scheduled_at,
-                "phase": (
-                    "PREMATCH"
-                    if scheduled_at is not None
-                    and ensure_utc(scheduled_at) >= ensure_utc(observed_at)
-                    else "UNKNOWN"
+                "phase": _not_started_phase(
+                    scheduled_at=scheduled_at,
+                    observed_at=observed_at,
                 ),
                 "provider_match_id": raybet_match.provider_match_id if raybet_match else None,
                 "tournament_name": event.name

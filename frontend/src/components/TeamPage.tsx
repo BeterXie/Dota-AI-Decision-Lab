@@ -4,6 +4,7 @@ import { useQuery } from "@tanstack/react-query";
 import type { MapSummary } from "../api";
 import { eventHref, eventName } from "../events";
 import { useI18n } from "../i18n";
+import { isLivePhase, isUpcomingPhase } from "../matchPhase";
 import { matchHref } from "../matches";
 import {
   fetchTeamDetail,
@@ -39,7 +40,7 @@ export const TeamPage: React.FC<TeamPageProps> = ({ slug, matches, matchesLoadin
   );
   const teamMatches = matches.filter((match) => matchHasTeam(match, detail.id));
   const upcoming = teamMatches
-    .filter((match) => match.phase === "LIVE" || match.phase === "PREMATCH")
+    .filter((match) => isLivePhase(match.phase) || isUpcomingPhase(match.phase))
     .sort(byScheduledAscending)
     .slice(0, 5);
   const recent = teamMatches
@@ -283,7 +284,7 @@ function dateValue(value: string | null | undefined): number {
 }
 
 function scoreText(match: MapSummary): string {
-  if (match.series_score && (match.phase === "LIVE" || match.phase === "POSTMATCH" || match.phase === "AWAITING_RESULT")) {
+  if (match.series_score && (isLivePhase(match.phase) || match.phase === "POSTMATCH" || match.phase === "AWAITING_RESULT")) {
     return `${match.series_score.team_a} : ${match.series_score.team_b}`;
   }
   return "VS";

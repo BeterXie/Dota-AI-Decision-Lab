@@ -409,6 +409,7 @@
 .event-series-time time { color: #71879a; font-size: 9px; }
 .event-series-phase { width: fit-content; padding: 3px 6px; border-radius: 5px; background: rgba(125, 146, 168, 0.08); color: #75899d; font-size: 8px; font-weight: 720; }
 .event-series-phase.is-live { color: #51dca6; background: rgba(49, 214, 139, 0.07); }
+.event-series-phase.is-delayed { color: #eaba64; background: rgba(234, 186, 100, 0.08); }
 .event-series-phase.is-settling { color: #eaba64; }
 .event-series-teams { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) 46px minmax(0, 1fr); align-items: center; gap: 8px; }
 .event-series-teams > strong { color: #64778a; text-align: center; font-size: 9px; font-weight: 750; }

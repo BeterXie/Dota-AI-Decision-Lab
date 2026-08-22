@@ -64,6 +64,20 @@ describe("event aggregation", () => {
     expect(events.map((event) => event.name)).toEqual(["Future Cup", "Finished Cup"]);
   });
 
+  it("keeps delayed starts upcoming and delayed live data in the live group", () => {
+    const [delayedStartEvent] = buildEventSummaries([
+      match({ phase: "DELAYED_START" }),
+    ]);
+    const [delayedLiveEvent] = buildEventSummaries([
+      match({ phase: "LIVE_DATA_DELAYED" }),
+    ]);
+
+    expect(delayedStartEvent.status).toBe("UPCOMING");
+    expect(delayedStartEvent.nextMatch?.phase).toBe("DELAYED_START");
+    expect(delayedLiveEvent.status).toBe("LIVE");
+    expect(buildSeriesSummaries(delayedLiveEvent)[0].phase).toBe("LIVE_DATA_DELAYED");
+  });
+
   it("keeps an event ongoing between completed and upcoming series", () => {
     const [event] = buildEventSummaries([
       match({ id: "done", series_id: "series-done", phase: "POSTMATCH" }),

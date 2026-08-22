@@ -28,6 +28,6 @@ test("keeps the public performance route focused on leaderboard data without dup
   await page.goto("/performance");
 
   await expect(page.getByRole("heading", { name: "AI 表现榜" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "真实比赛决策就绪度" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "真实比赛预测就绪度" })).toHaveCount(0);
   expect(readinessRequests).toBe(0);
 });

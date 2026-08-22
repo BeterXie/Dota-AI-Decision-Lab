@@ -198,6 +198,64 @@ def parse_draft_labels(payload: dict[str, Any]) -> tuple[dict[int, str], dict[in
     return player_names, hero_names
 
 
+def draft_observation_counts(payload: dict[str, Any]) -> tuple[int, int]:
+    """Count observed draft identities without treating them as verified slots."""
+    account_ids: set[int] = set()
+    hero_ids: set[int] = set()
+
+    def add_player(item: object, *, require_playing_team: bool = False) -> None:
+        if not isinstance(item, dict):
+            return
+        if require_playing_team and item.get("team") not in (0, 1):
+            return
+        account_id = _optional_int(item.get("account_id"))
+        hero_id = _optional_int(item.get("hero_id"))
+        player = item.get("player")
+        hero = item.get("hero")
+        if account_id is None and isinstance(player, dict):
+            account_id = _optional_int(player.get("steam_id"))
+        if hero_id is None and isinstance(hero, dict):
+            hero_id = _optional_int(hero.get("steam_id"))
+        if account_id is not None and account_id > 0:
+            account_ids.add(account_id)
+        if hero_id is not None and hero_id > 0:
+            hero_ids.add(hero_id)
+
+    def add_picks(team: object) -> None:
+        if not isinstance(team, dict):
+            return
+        for pick in team.get("picks") if isinstance(team.get("picks"), list) else []:
+            add_player(pick)
+
+    for item in payload.get("players") if isinstance(payload.get("players"), list) else []:
+        add_player(item, require_playing_team=True)
+
+    database = payload.get("db")
+    if isinstance(database, dict):
+        add_picks(database.get("first_team"))
+        add_picks(database.get("second_team"))
+
+    full_stats = payload.get("full_stats")
+    if isinstance(full_stats, dict):
+        for side in ("radiant", "dire"):
+            team = full_stats.get(side)
+            raw_players = team.get("players") if isinstance(team, dict) else None
+            for item in raw_players if isinstance(raw_players, list) else []:
+                add_player(item)
+
+    live_league_data = payload.get("live_league_data")
+    if isinstance(live_league_data, dict):
+        raw_players = live_league_data.get("players")
+        for item in raw_players if isinstance(raw_players, list) else []:
+            add_player(item, require_playing_team=True)
+        scoreboard = live_league_data.get("scoreboard")
+        if isinstance(scoreboard, dict):
+            add_picks(scoreboard.get("radiant"))
+            add_picks(scoreboard.get("dire"))
+
+    return min(len(account_ids), 10), min(len(hero_ids), 10)
+
+
 def _collect_pick_hero_names(team: object, hero_names: dict[int, str]) -> None:
     if not isinstance(team, dict):
         return

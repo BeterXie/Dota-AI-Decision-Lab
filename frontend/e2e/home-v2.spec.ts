@@ -85,7 +85,7 @@ test("2.0 homepage explains the product and surfaces live, upcoming and complete
   await expect(page.getByText("Team Spirit")).toBeVisible();
   await expect(page.getByText("Tundra Esports")).toBeVisible();
   await expect(page.getByText("比赛追踪", { exact: true })).toBeVisible();
-  await expect(page.getByText("AI 决策对比", { exact: true })).toBeVisible();
+  await expect(page.getByText("AI 预测对比", { exact: true })).toBeVisible();
   await expect(page.getByText("Shadow 表现复盘", { exact: true })).toBeVisible();
 
   const noOverflow = await page.evaluate(

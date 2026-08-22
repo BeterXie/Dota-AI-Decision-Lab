@@ -11,12 +11,15 @@ export function PlayerDraftAdvantageCard({ match, onViewDetails }: { match: MapS
   const curve = match.draft?.curve ?? [];
   const features = match.draft?.features ?? {};
   const draftComplete = Boolean(match.draft?.complete);
-  const draftDecisionReady = draftComplete && sides !== null;
+  const curveReady = curve.length > 0;
+  const draftDecisionReady = draftComplete && curveReady && sides !== null;
   const draftStatus = !draftComplete
     ? "PARTIAL"
-    : draftDecisionReady
-      ? "READY"
-      : (locale === "zh-CN" ? "阵营未验证" : "SIDE UNVERIFIED");
+    : !curveReady
+      ? (locale === "zh-CN" ? "计算中" : "CALCULATING")
+      : draftDecisionReady
+        ? "READY"
+        : (locale === "zh-CN" ? "阵营未验证" : "SIDE UNVERIFIED");
   const current = featureNumber(features, "current_edge") ?? nearestCurrentEdge(curve, match.live?.game_time_seconds);
   const next5 = featureNumber(features, "next_5m_edge");
   const peak = featureNumber(features, "peak_edge") ?? peakEdge(curve)?.edge ?? null;
@@ -64,13 +67,17 @@ export function PlayerDraftAdvantageCard({ match, onViewDetails }: { match: MapS
           <strong>{current == null ? "—" : currentSide === "even" ? (locale === "zh-CN" ? "双方接近均势" : "Near even") : `${sideLabel(currentSide, locale, teamForSide(currentSide))} ${locale === "zh-CN" ? "占优" : "advantage"}`}</strong>
         </div>
         <b>{current == null ? "—" : currentSide === "even" ? "0.0pp" : `+${Math.abs(current).toFixed(1)}pp`}</b>
-        <small>{locale === "zh-CN"
-          ? sides
+        <small>{!draftComplete
+          ? (locale === "zh-CN" ? "等待完整且可验证的十人阵容后计算阵容优势。" : "Waiting for a complete, verified ten-player draft before calculating the advantage.")
+          : !curveReady
+            ? (locale === "zh-CN" ? "阵容已经完整，阵容分正在计算或等待数据服务恢复；结果生成后会自动显示。" : "The draft is complete. Its score is calculating or waiting for the data service to recover and will appear automatically.")
+            : locale === "zh-CN"
+              ? sides
             ? `R.O.S.H. 仍表示天辉相对夜魇的阵容优势；本局已验证：${sides.radiant.name} = 天辉，${sides.dire.name} = 夜魇。`
             : "R.O.S.H. 曲线本身仍可按天辉 / 夜魇阅读，但在本局阵营映射验证前不会绑定到 Team A / Team B，也不会作为赛后选人决策输入。"
-          : sides
-            ? `R.O.S.H. remains Radiant-minus-Dire draft edge; verified this map: ${sides.radiant.name} = Radiant, ${sides.dire.name} = Dire.`
-            : "The R.O.S.H. curve remains readable as Radiant vs Dire, but it is not bound to Team A/B or used for post-draft decisions until map-side identity is verified."}</small>
+              : sides
+                ? `R.O.S.H. remains Radiant-minus-Dire draft edge; verified this map: ${sides.radiant.name} = Radiant, ${sides.dire.name} = Dire.`
+                : "The R.O.S.H. curve remains readable as Radiant vs Dire, but it is not bound to Team A/B or used for post-draft decisions until map-side identity is verified."}</small>
       </div>
 
       <div className="rosh-direction-metrics">
@@ -88,7 +95,9 @@ export function PlayerDraftAdvantageCard({ match, onViewDetails }: { match: MapS
             <React.Suspense fallback={<span className="chart-empty">{t("noRoshCurve")}</span>}>
               <IntelligenceChart option={chartOption} />
             </React.Suspense>
-          ) : <span className="chart-empty">{t("noRoshCurve")}</span>}
+          ) : <span className="chart-empty">{draftComplete
+            ? (locale === "zh-CN" ? "阵容分计算中，页面会自动更新。" : "Draft score calculation is in progress. This page updates automatically.")
+            : t("noRoshCurve")}</span>}
         </div>
       </div>
 

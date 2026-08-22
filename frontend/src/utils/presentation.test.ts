@@ -32,6 +32,14 @@ describe("matchPhaseBadgePresentation", () => {
       key: "upcoming",
       text: "未开始"
     });
+    expect(matchPhaseBadgePresentation("DELAYED_START", "zh-CN")).toEqual({
+      key: "delayed",
+      text: "赛程延迟"
+    });
+    expect(matchPhaseBadgePresentation("LIVE_DATA_DELAYED", "zh-CN")).toEqual({
+      key: "delayed",
+      text: "实时数据延迟"
+    });
     expect(matchPhaseBadgePresentation("UNKNOWN", "en").text).toBe("Status pending");
     expect(matchPhaseBadgePresentation("POSTMATCH", "zh-CN", true)).toEqual({
       key: "live",

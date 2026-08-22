@@ -209,11 +209,11 @@ test("renders auditable post-match review ledger for entitled users", async ({ p
   await expect(page.getByText("Spirit +2.0pp ✕", { exact: true })).toBeVisible();
   await expect(page.getByText("🏆 Aurora", { exact: true })).toBeVisible();
   await expect(page.getByText("🏆 Spirit", { exact: true })).toBeVisible();
-  await expect(page.getByText("BUY A · Aurora", { exact: true })).toBeVisible();
-  await expect(page.getByText("BUY B · Spirit", { exact: true })).toBeVisible();
+  await expect(page.getByText("预测 A · Aurora", { exact: true })).toBeVisible();
+  await expect(page.getByText("预测 B · Spirit", { exact: true })).toBeVisible();
   await expect(page.getByText("2.20 → 1.80", { exact: true })).toBeVisible();
   await expect(page.getByText(/A fair p \+9\.7pp · 收盘/)).toBeVisible();
-  await expect(page.getByText(/A fair p -6\.8pp · 最后决策/)).toBeVisible();
+  await expect(page.getByText(/A fair p -6\.8pp · 最后预测/)).toBeVisible();
 
   await page.getByRole("button", { name: "ROSH 错误" }).click();
   await expect(page.getByText("🏆 Aurora", { exact: true })).toBeVisible();

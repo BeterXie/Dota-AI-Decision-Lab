@@ -11,7 +11,7 @@ import {
 import { getOfficialEventDisplayName } from "../utils/officialVisuals";
 import "./ReviewPage.css";
 
-type ReviewFilter = "ALL" | "ROSH_WRONG" | "AI_BUY" | "CLOSING";
+type ReviewFilter = "ALL" | "ROSH_WRONG" | "AI_PREDICTION" | "CLOSING";
 
 export function ReviewPage() {
   const { locale, setLocale, t } = useI18n();
@@ -32,7 +32,7 @@ export function ReviewPage() {
         if (!haystack.includes(query)) return false;
       }
       if (filter === "ROSH_WRONG") return match.rosh?.reference?.adjusted.correct === false;
-      if (filter === "AI_BUY") return match.ai.some((item) => item.buy_decisions > 0);
+      if (filter === "AI_PREDICTION") return match.ai.some((item) => item.buy_decisions > 0);
       if (filter === "CLOSING") return match.odds?.end_kind === "CLOSING";
       return true;
     });
@@ -109,7 +109,7 @@ export function ReviewPage() {
                 {([
                   ["ALL", t("reviewFilterAll")],
                   ["ROSH_WRONG", t("reviewFilterRoshMiss")],
-                  ["AI_BUY", t("reviewFilterAiBuy")],
+                  ["AI_PREDICTION", t("reviewFilterAiBuy")],
                   ["CLOSING", t("reviewFilterClosing")]
                 ] as Array<[ReviewFilter, string]>).map(([key, label]) => (
                   <button key={key} className={filter === key ? "active" : ""} onClick={() => setFilter(key)}>{label}</button>
@@ -225,12 +225,24 @@ function RoshScore({ label, edge, match }: { label: string; edge: ReviewRoshEdge
 function AiBadge({ item, match, locale }: { item: ReviewAiGroup; match: ReviewMatch; locale: Locale }) {
   const action = item.latest?.action ?? "—";
   const actionTeam = action === "BUY_A" ? match.team_a.name : action === "BUY_B" ? match.team_b.name : null;
+  const actionLabel = predictionActionLabel(action, locale);
   return (
     <div className="review-ai-badge">
-      <div><strong>{providerLabel(item.provider)}</strong><span>{actionTeam ? `${action.replace("_", " ")} · ${actionTeam}` : action.replaceAll("_", " ")}</span></div>
+      <div><strong>{providerLabel(item.provider)}</strong><span>{actionTeam ? `${actionLabel} · ${actionTeam}` : actionLabel}</span></div>
       <small>{item.settled_buy_decisions > 0 ? `${item.correct_buy_decisions}/${item.settled_buy_decisions} ${translate("reviewCorrect", locale)}` : translate("reviewNoSettledBuy", locale)}{item.latest?.confidence != null ? ` · conf ${rate(item.latest.confidence, locale)}` : ""}</small>
     </div>
   );
+}
+
+function predictionActionLabel(action: string, locale: Locale): string {
+  const labels: Record<string, [string, string]> = {
+    BUY_A: ["PREDICT A", "预测 A"],
+    BUY_B: ["PREDICT B", "预测 B"],
+    NO_BUY: ["NO PREDICTION", "暂不预测"],
+    INSUFFICIENT_DATA: ["INSUFFICIENT DATA", "数据不足"]
+  };
+  const pair = labels[action] ?? [action.replaceAll("_", " "), action.replaceAll("_", " ")];
+  return locale === "zh-CN" ? pair[1] : pair[0];
 }
 
 function Metric({ label, value, tone: toneClass }: { label: string; value: string; tone?: string }) {

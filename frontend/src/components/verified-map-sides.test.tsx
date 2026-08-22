@@ -82,6 +82,24 @@ test("R.O.S.H. attributes positive radiant edge to the verified radiant team", (
   expect(screen.queryByText("Alpha advantage")).not.toBeInTheDocument();
 });
 
+test("R.O.S.H. distinguishes a queued score from an incomplete draft", () => {
+  withI18n(
+    <PlayerDraftAdvantageCard
+      match={{
+        ...match,
+        draft: {
+          ...match.draft!,
+          features: null,
+          curve: [],
+        },
+      }}
+    />,
+  );
+
+  expect(screen.getByText("CALCULATING")).toBeInTheDocument();
+  expect(screen.getByText(/Draft score calculation is in progress/)).toBeInTheDocument();
+});
+
 test("lineup uses the verified side mapping", () => {
   withI18n(<LineupCard match={match} />);
 

@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from "react";
 import type { AiBenchmarkExperiment, AiBenchmarkPayload, AiContextExperimentMetadata } from "../benchmarkApi";
+import { predictionPolicyLabel } from "../utils/predictionCopy";
 import "./baseline-benchmark.css";
 
 export function BaselineBenchmarkPanel({
@@ -45,7 +46,7 @@ export function BaselineBenchmarkPanel({
     <section className="baseline-benchmark" aria-label={zh ? "AI 基线 Benchmark" : "AI baseline benchmark"}>
       <div className="performance-section-heading baseline-benchmark-heading">
         <div>
-          <span className="performance-kicker">BASELINE CONTRACT · SHADOW BENCHMARK</span>
+          <span className="performance-kicker">BASELINE CONTRACT · POINTS BENCHMARK</span>
           <h3>{zh ? "AI 基线 Benchmark" : "AI Baseline Benchmark"}</h3>
         </div>
         <span className="baseline-frozen-badge">{zh ? "已冻结" : "FROZEN"}</span>
@@ -61,7 +62,7 @@ export function BaselineBenchmarkPanel({
         </div>
         <div className="baseline-contract-grid">
           <ContractField label="Prompt" value={contract.prompt_version} />
-          <ContractField label={zh ? "决策策略" : "Decision policy"} value={contract.decision_policy_version} />
+          <ContractField label={zh ? "预测策略" : "Prediction policy"} value={predictionPolicyLabel(contract.decision_policy_version)} title={contract.decision_policy_version} />
           <ContractField label={zh ? "AI Context / View" : "AI context / view"} value={contract.ai_view_version} />
           <ContractField label={zh ? "校准规则" : "Calibration policy"} value={data.methodology.calibration.version} />
         </div>
@@ -111,7 +112,7 @@ function ExperimentCard({ row, locale }: { row: AiBenchmarkExperiment; locale: s
           </span>
           <strong>{row.experiment.provider} · {row.experiment.model}</strong>
           <small>
-            {row.experiment.prompt_version} · {row.experiment.decision_policy_version} · {row.experiment.ai_view_version}
+            {row.experiment.prompt_version} · <span title={row.experiment.decision_policy_version}>{predictionPolicyLabel(row.experiment.decision_policy_version)}</span> · {row.experiment.ai_view_version}
           </small>
           {context && (
             <small>
@@ -137,7 +138,7 @@ function ExperimentCard({ row, locale }: { row: AiBenchmarkExperiment; locale: s
         <Metric label={zh ? "Brier vs 市场" : "Brier vs market"} value={signedDecimal(row.quality.market_brier_improvement)} sub={`N=${row.samples.market_comparison_maps}`} />
         <Metric label={zh ? "弃权率" : "Abstention"} value={percent(row.quality.abstention_rate, locale)} />
         <Metric label={zh ? "平均延迟" : "Avg latency"} value={seconds(row.latency.average_seconds)} sub={`p95 ${seconds(row.latency.p95_seconds)}`} />
-        <Metric label="Shadow ROI" value={signedPercent(row.portfolio.realized_roi, locale)} sub={`${row.portfolio.event_count} ${zh ? "赛事" : "events"}`} />
+        <Metric label={zh ? "积分变化率" : "Points change rate"} value={signedPercent(row.portfolio.realized_roi, locale)} sub={`${row.portfolio.event_count} ${zh ? "赛事" : "events"}`} />
         <Metric label={zh ? "最差回撤" : "Worst DD"} value={signedPercent(row.portfolio.worst_event_drawdown_pct === null ? null : -row.portfolio.worst_event_drawdown_pct, locale)} />
         <Metric label={zh ? "Parse 成功率" : "Parse success"} value={percent(row.samples.parse_success_rate, locale)} />
       </div>
@@ -157,7 +158,7 @@ function ExperimentCard({ row, locale }: { row: AiBenchmarkExperiment; locale: s
           <Delta label="ECE" value={signedDecimal(delta.calibration_improvement)} />
           <Delta label="CLV" value={signedPercent(delta.clv_improvement, locale)} />
           <Delta label={zh ? "平均延迟" : "Avg latency"} value={signedSeconds(delta.average_latency_improvement_seconds)} />
-          <Delta label="ROI" value={signedPercent(delta.shadow_roi_delta, locale)} />
+          <Delta label={zh ? "积分变化率" : "Points change rate"} value={signedPercent(delta.shadow_roi_delta, locale)} />
         </div>
       )}
     </article>
@@ -174,8 +175,8 @@ function contextDetail(context: AiContextExperimentMetadata, zh: boolean): strin
   return ` · ${zh ? "匹配回放生产视图控制" : "matched replay production-view control"}`;
 }
 
-function ContractField({ label, value }: { label: string; value: string }) {
-  return <div><span>{label}</span><code>{value}</code></div>;
+function ContractField({ label, value, title }: { label: string; value: string; title?: string }) {
+  return <div><span>{label}</span><code title={title}>{value}</code></div>;
 }
 
 function Metric({ label, value, sub }: { label: string; value: string; sub?: string }) {

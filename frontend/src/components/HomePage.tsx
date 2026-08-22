@@ -2,6 +2,7 @@ import React from "react";
 import type { MapSummary } from "../api";
 import { buildEventSummaries, buildSeriesSummaries, eventHref, type EventStatus, type EventSummary } from "../events";
 import { useI18n } from "../i18n";
+import { isUpcomingPhase } from "../matchPhase";
 import { matchHref } from "../matches";
 import { EventMark, TeamCrest, UiIcon } from "./VisualIdentity";
 
@@ -25,7 +26,7 @@ export const HomePage: React.FC<HomePageProps> = ({
   const series = React.useMemo(() => groups.flatMap((group) => buildSeriesSummaries(group)), [groups]);
   const featuredGroups = groups.filter((group) => group.status !== "COMPLETED").slice(0, 3);
   const upcoming = series
-    .filter((item) => item.phase === "PREMATCH" || item.phase === "UNKNOWN")
+    .filter((item) => isUpcomingPhase(item.phase))
     .map((item) => item.representative)
     .sort(byScheduledAscending)
     .slice(0, 4);
@@ -51,8 +52,8 @@ export const HomePage: React.FC<HomePageProps> = ({
           <h1>{locale === "zh-CN" ? "看懂比赛，验证 AI，追踪真实表现" : "Follow the match. Test the AI. Track real performance."}</h1>
           <p>
             {locale === "zh-CN"
-              ? "追踪全球 Dota 赛事和比赛进程，对比 AI 在关键节点的判断，并在赛后用数据验证这些决策到底表现如何。"
-              : "Track Dota events and matches, compare AI calls at key moments, and verify after the match which decisions actually held up."}
+              ? "追踪全球 Dota 赛事和比赛进程，对比 AI 在关键节点的预测，并在赛后用数据验证这些预测的表现。"
+              : "Track Dota events and matches, compare AI predictions at key moments, and verify their performance after the match."}
           </p>
           <div className="home-hero-actions">
             <a className="product-btn product-btn-primary" href="/events">{locale === "zh-CN" ? "探索赛事" : "Explore events"}<span>→</span></a>
@@ -92,13 +93,13 @@ export const HomePage: React.FC<HomePageProps> = ({
 
       <section className="product-container product-section home-capabilities" id="capabilities">
         <article><span className="capability-icon radar-icon"><UiIcon name="clock" size={19} /></span><div><h3>{locale === "zh-CN" ? "比赛追踪" : "Match tracking"}</h3><p>{locale === "zh-CN" ? "赛程、比分、Draft、Live 数据和赛果都放在同一条比赛线上。" : "Schedule, score, Draft, live data and results in one match flow."}</p></div><a href="/events" aria-label={locale === "zh-CN" ? "进入比赛追踪" : "Open match tracking"}>›</a></article>
-        <article><span className="capability-icon ai-icon"><UiIcon name="spark" size={19} /></span><div><h3>{locale === "zh-CN" ? "AI 决策对比" : "AI decision comparison"}</h3><p>{locale === "zh-CN" ? "查看不同模型在关键节点怎么判断，以及它们为什么做出不同选择。" : "Compare what models called at key moments and why they disagreed."}</p></div><a href="/review" aria-label={locale === "zh-CN" ? "查看 AI 决策" : "See AI decisions"}>›</a></article>
-        <article><span className="capability-icon shadow-icon"><UiIcon name="layers" size={19} /></span><div><h3>{locale === "zh-CN" ? "Shadow 表现复盘" : "Shadow performance"}</h3><p>{locale === "zh-CN" ? "用相同模拟规则回看长期表现，不把模拟结果包装成真实收益。" : "Review long-run results under the same simulation rules without presenting them as real returns."}</p></div><a href="/performance" aria-label={locale === "zh-CN" ? "查看 AI 表现" : "See AI performance"}>›</a></article>
+        <article><span className="capability-icon ai-icon"><UiIcon name="spark" size={19} /></span><div><h3>{locale === "zh-CN" ? "AI 预测对比" : "AI prediction comparison"}</h3><p>{locale === "zh-CN" ? "查看不同模型在关键节点预测哪一方，以及它们为什么做出不同选择。" : "Compare which side each model predicts at key moments and why they disagree."}</p></div><a href="/review" aria-label={locale === "zh-CN" ? "查看 AI 预测" : "See AI predictions"}>›</a></article>
+        <article><span className="capability-icon shadow-icon"><UiIcon name="layers" size={19} /></span><div><h3>{locale === "zh-CN" ? "积分表现复盘" : "Points performance"}</h3><p>{locale === "zh-CN" ? "用统一的预测积分规则回看长期表现，并结合命中率、Brier 与样本量比较模型。" : "Review long-run performance under one prediction-points rule, together with hit rate, Brier score, and sample size."}</p></div><a href="/performance" aria-label={locale === "zh-CN" ? "查看积分排行" : "See points leaderboard"}>›</a></article>
       </section>
 
       <section className="product-container home-access-banner product-section">
         <div className="home-access-icon" aria-hidden="true"><UiIcon name="spark" size={24} /></div>
-        <div><h2>{locale === "zh-CN" ? "先体验，再解锁你关心的比赛" : "Start free, then unlock the matches you follow"}</h2><p>{locale === "zh-CN" ? "小组赛 AI、AI 表现和复盘免费开放；付费阶段进行中的完整 AI 与实时通知需要 Pass，确认赛果后基础 AI 决策公开。" : "Group-stage AI, AI Performance and Review are free. Live paid-stage AI and alerts require a Pass; core AI decisions become public after the result is confirmed."}</p></div>
+        <div><h2>{locale === "zh-CN" ? "先体验，再解锁你关心的比赛" : "Start free, then unlock the matches you follow"}</h2><p>{locale === "zh-CN" ? "小组赛 AI、积分表现和复盘免费开放；付费阶段进行中的完整 AI 预测与实时通知需要 Pass，确认赛果后基础预测公开。" : "Group-stage AI, points performance, and review are free. Full live predictions and alerts for paid stages require a Pass; core predictions become public after the result is confirmed."}</p></div>
         {signedIn ? <a className="product-btn access-btn" href="/billing">{locale === "zh-CN" ? "查看赛事 Pass" : "View competition passes"}<span>→</span></a> : <button className="product-btn access-btn" type="button" onClick={onLogin}>{locale === "zh-CN" ? "登录后查看 Pass" : "Sign in to view passes"}<span>→</span></button>}
       </section>
     </div>

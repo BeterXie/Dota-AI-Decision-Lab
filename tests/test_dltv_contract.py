@@ -20,6 +20,7 @@ from app.models import (
 )
 from app.providers.dltv.parser import (
     delayed_detail_is_fresh,
+    draft_observation_counts,
     parse_bootstrap_identity,
     parse_draft,
     parse_draft_labels,
@@ -116,6 +117,35 @@ def test_draft_labels_use_pick_metadata_when_full_stats_hero_is_missing() -> Non
 
     assert player_names == {210053851: "lorenof"}
     assert hero_names == {35: "Sniper"}
+
+
+def test_draft_observation_counts_partial_picks_without_claiming_verified_slots() -> None:
+    payload = {
+        "players": [
+            {
+                "account_id": 10_000 + index,
+                "hero_id": 0,
+                "team": 0 if index < 5 else 1,
+                "team_slot": (index % 5) + 1,
+            }
+            for index in range(10)
+        ],
+        "db": {
+            "first_team": {
+                "picks": [{"hero_id": hero_id} for hero_id in range(1, 5)],
+            },
+            "second_team": {
+                "picks": [{"hero_id": hero_id} for hero_id in range(5, 10)],
+            },
+        },
+        "live_league_data": {
+            "players": [
+                {"account_id": 99_999, "hero_id": 99, "team": 4},
+            ],
+        },
+    }
+
+    assert draft_observation_counts(payload) == (10, 9)
 
 
 def test_fast_state_sparse_merge_and_duplicate_timestamps() -> None:

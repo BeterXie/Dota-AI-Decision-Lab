@@ -87,26 +87,26 @@ test("shows one fixed AI card per model and opens all rounds in one modal", () =
 
   // One fixed card for GPT, not one card per round.
   expect(screen.getAllByText("GPT")).toHaveLength(1);
-  expect(screen.getByText("2 rounds")).toBeInTheDocument();
-  expect(screen.getAllByText("BUY B").length).toBeGreaterThan(0);
-  expect(screen.queryByText("BUY A")).not.toBeInTheDocument();
+  expect(screen.getByText("2 prediction rounds")).toBeInTheDocument();
+  expect(screen.getAllByText("PREDICT B").length).toBeGreaterThan(0);
+  expect(screen.queryByText("PREDICT A")).not.toBeInTheDocument();
 
   fireEvent.click(screen.getByRole("button", { name: /GPT/ }));
 
   // Both rounds live inside the same modal.
-  const checkpoints = screen.getAllByText(/Checkpoint ·/);
+  const checkpoints = screen.getAllByText(/Prediction time ·/);
   expect(checkpoints).toHaveLength(2);
   expect(checkpoints[0]).toHaveTextContent(/05/);
   expect(checkpoints[1]).toHaveTextContent(/00/);
-  expect(screen.getByText("BUY A")).toBeInTheDocument();
-  expect(screen.getAllByText("BUY B").length).toBeGreaterThan(0);
+  expect(screen.getByText("PREDICT A")).toBeInTheDocument();
+  expect(screen.getAllByText("PREDICT B").length).toBeGreaterThan(0);
   expect(screen.getAllByText("500").length).toBeGreaterThan(0);
   expect(screen.getAllByText("200").length).toBeGreaterThan(0);
   expect(screen.getAllByText("+50").length).toBeGreaterThan(0);
   expect(screen.getAllByText("-20").length).toBeGreaterThan(0);
   expect(screen.getAllByText("+30").length).toBeGreaterThan(0);
-    expect(screen.getByText("10,030")).toBeInTheDocument();
-    expect(screen.getByText("Final bankroll")).toBeInTheDocument();
+  expect(screen.getByText("10,030")).toBeInTheDocument();
+  expect(screen.getByText("Final points")).toBeInTheDocument();
   expect(screen.getByText("Draft and price align")).toBeInTheDocument();
   expect(screen.getByText("Momentum flipped")).toBeInTheDocument();
   expect(screen.queryByText("Crossover risk")).not.toBeInTheDocument();
@@ -131,14 +131,14 @@ test("deduplicates repeated experiments on the same checkpoint", () => {
 
   renderStrip([newer, older]);
 
-  expect(screen.getByText("1 round")).toBeInTheDocument();
-  expect(screen.getAllByText("NO BUY").length).toBeGreaterThan(0);
-  expect(screen.queryByText("BUY A")).not.toBeInTheDocument();
+  expect(screen.getByText("1 prediction round")).toBeInTheDocument();
+  expect(screen.getAllByText("NO PREDICTION").length).toBeGreaterThan(0);
+  expect(screen.queryByText("PREDICT A")).not.toBeInTheDocument();
 });
 
 
 
-test("final bankroll is initial plus settled P&L only when every staked round is settled", () => {
+test("final points are initial points plus settled changes only when every prediction is settled", () => {
   const settled = decision({
     id: "settled",
     snapshot_id: "s1",
@@ -161,9 +161,9 @@ test("final bankroll is initial plus settled P&L only when every staked round is
   renderStrip([settled, unsettled]);
   fireEvent.click(screen.getByRole("button", { name: /GPT/ }));
 
-  expect(screen.queryByText("Final bankroll")).not.toBeInTheDocument();
-  expect(screen.getByText("Current available bankroll")).toBeInTheDocument();
+  expect(screen.queryByText("Final points")).not.toBeInTheDocument();
+  expect(screen.getByText("Current available points")).toBeInTheDocument();
   expect(screen.getByText("9,700")).toBeInTheDocument();
-  expect(screen.getByText("Pending unsettled stake")).toBeInTheDocument();
+  expect(screen.getByText("Pending prediction points")).toBeInTheDocument();
   expect(screen.getAllByText("200").length).toBeGreaterThan(0);
 });
