@@ -304,7 +304,7 @@ function ChannelCard({
         </div>
         <label className="notification-toggle">
           <input
-            aria-label={`${channel} AI decision alerts`}
+            aria-label={`${channel} AI prediction alerts`}
             type="checkbox"
             checked={enabled}
             disabled={busy}

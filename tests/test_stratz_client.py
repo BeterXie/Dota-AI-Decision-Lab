@@ -49,3 +49,49 @@ async def test_stratz_client_serializes_requests_through_rate_limit_gate() -> No
     await provider.execute(operation_name="B", query="query B { __typename }", variables={})
     assert calls == 2
     await client.aclose()
+
+
+@pytest.mark.asyncio
+async def test_owned_stratz_client_rebuilds_poisoned_pool_once(monkeypatch) -> None:
+    request = httpx.Request("POST", "https://api.stratz.com/graphql")
+
+    class FakeClient:
+        def __init__(self, *, fails: bool) -> None:
+            self.fails = fails
+            self.closed = False
+            self.calls = 0
+
+        async def post(self, _url: str, *, json: dict) -> httpx.Response:
+            self.calls += 1
+            assert json["operationName"] == "PoolRecovery"
+            if self.fails:
+                raise httpx.PoolTimeout("poisoned pool", request=request)
+            return httpx.Response(
+                200,
+                json={"data": {"__typename": "Query"}},
+                request=request,
+            )
+
+        async def aclose(self) -> None:
+            self.closed = True
+
+    clients = [FakeClient(fails=True), FakeClient(fails=False)]
+
+    def client_factory(**_kwargs) -> FakeClient:
+        return clients.pop(0)
+
+    monkeypatch.setattr(httpx, "AsyncClient", client_factory)
+    provider = StratzClient("https://api.stratz.com/graphql", "fixture-token")
+    poisoned = provider._client
+
+    result = await provider.execute(
+        operation_name="PoolRecovery",
+        query="query PoolRecovery { __typename }",
+        variables={},
+    )
+
+    assert result.payload == {"data": {"__typename": "Query"}}
+    assert poisoned.closed is True
+    assert provider._client.calls == 1
+    await provider.close()
+    assert provider._client.closed is True

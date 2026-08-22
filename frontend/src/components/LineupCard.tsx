@@ -110,7 +110,16 @@ export const LineupCard: React.FC<LineupCardProps> = ({ match }) => {
       </div>
 
       <div className="lineup-teams-container">
-        {radiantSlots.length === 0 && direSlots.length === 0 && <div className="empty-rail-msg">{t("noValidatedLineup")}</div>}
+        {radiantSlots.length === 0 && direSlots.length === 0 && (
+          <div className="empty-rail-msg">
+            {lineupPendingLabel(
+              match.draft?.roster_ready_count ?? 0,
+              match.draft?.hero_ready_count ?? 0,
+              locale,
+              t("noValidatedLineup"),
+            )}
+          </div>
+        )}
         <HeroSide side="radiant" teamName={sides?.radiant.name} slots={radiantSlots} locale={locale} onSelect={setSelectedSlot} />
         <div className="vs-divider-box"><span className="vs-txt">VS</span></div>
         <HeroSide side="dire" teamName={sides?.dire.name} slots={direSlots} locale={locale} onSelect={setSelectedSlot} />
@@ -217,4 +226,17 @@ function sideLabel(side: "radiant" | "dire", locale: string, teamName?: string):
     ? (locale === "zh-CN" ? "天辉" : "Radiant")
     : (locale === "zh-CN" ? "夜魇" : "Dire");
   return teamName ? `${teamName} · ${sideName}` : sideName;
+}
+
+function lineupPendingLabel(
+  players: number,
+  heroes: number,
+  locale: string,
+  fallback: string,
+): string {
+  if (players === 0 && heroes === 0) return fallback;
+  if (locale === "zh-CN") {
+    return `阵容确认中 · 已识别 ${players}/10 名选手、${heroes}/10 个英雄；完整身份与位置验证后自动展示。`;
+  }
+  return `Lineup confirmation in progress · ${players}/10 players and ${heroes}/10 heroes identified. Verified roles appear automatically.`;
 }

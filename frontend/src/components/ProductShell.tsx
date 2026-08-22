@@ -163,6 +163,20 @@ export const ProductShell: React.FC<ProductShellProps> = ({
         </div>
       </header>
       <main className="product-page">{children}</main>
+      <footer className="product-footer">
+        <div className="product-container product-footer-grid">
+          <div className="product-footer-brand">
+            <a href="/">{PRODUCT_NAME}</a>
+            <p>{locale === "zh-CN" ? "独立的 Dota 赛事数据与 AI 预测平台。平台不接受、保管或执行任何真实资金投注。" : "Independent Dota match data and AI predictions. The service does not accept, hold, or execute real-money wagers."}</p>
+          </div>
+          <nav aria-label={locale === "zh-CN" ? "法律信息" : "Legal"}>
+            <a href="/terms">{locale === "zh-CN" ? "使用条款" : "Terms of Use"}</a>
+            <a href="/privacy">{locale === "zh-CN" ? "隐私政策" : "Privacy Policy"}</a>
+          </nav>
+          <p className="product-footer-points">{locale === "zh-CN" ? "预测积分不可充值、提现、转让或兑换。" : "Prediction points cannot be purchased, withdrawn, transferred, or redeemed."}</p>
+          <small>© 2026 {PRODUCT_NAME}. Dota and Steam marks belong to their respective owners.</small>
+        </div>
+      </footer>
     </div>
   );
 };

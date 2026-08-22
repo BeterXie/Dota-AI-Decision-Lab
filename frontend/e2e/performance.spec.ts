@@ -321,9 +321,9 @@ test("compares AI portfolios and drills into an auditable event position", async
   await page.goto("/performance");
 
   await expect(page.getByRole("heading", { name: "AI 表现榜", exact: true })).toBeVisible();
-  await expect(page.getByText("跨赛事 Shadow 排行")).toBeVisible();
-  await expect(page.getByText(/排序规则：已实现 ROI 从高到低/)).toBeVisible();
-  await expect(page.getByText(/不涉及真实资金或真实下注/)).toBeVisible();
+  await expect(page.getByText("跨赛事积分排行")).toBeVisible();
+  await expect(page.getByText(/排序规则：积分变化率从高到低/)).toBeVisible();
+  await expect(page.getByText("所有模型使用相同的初始预测积分和结算规则。积分只能用于比较预测表现，不可充值、提现、转让或兑换。", { exact: true })).toBeVisible();
   await expect(page.getByText("SAME STARTING BANKROLL · SHADOW SETTLEMENT", { exact: true })).toHaveCount(0);
   await expect(page.getByText("REAL SETTLEMENT", { exact: true })).toHaveCount(0);
 
@@ -354,7 +354,7 @@ test("compares AI portfolios and drills into an auditable event position", async
   await expect(page.locator(".performance-selected-summary")).not.toContainText("GPT");
   await expect(page.getByRole("button", { name: /#1 GPT gpt-5\.6/ })).toHaveCount(0);
   await expect(page.getByText("FAIL", { exact: true })).toBeVisible();
-  await expect(page.getByText("ROI 未达标", { exact: true })).toBeVisible();
+  await expect(page.getByText("积分变化率未达标", { exact: true })).toBeVisible();
 
   const noOverflow = await page.evaluate(
     () => document.documentElement.scrollWidth === document.documentElement.clientWidth
@@ -376,7 +376,7 @@ test("keeps ranking semantics and position audit discoverable at tablet width", 
   await expect(positionButton).toContainText("WON");
   await expect(positionButton).toContainText("详情");
   await positionButton.click();
-  await expect(page.getByText("模拟成交前现金", { exact: true })).toBeVisible();
+  await expect(page.getByText("预测前可用积分", { exact: true })).toBeVisible();
 
   const noOverflow = await page.evaluate(
     () => document.documentElement.scrollWidth === document.documentElement.clientWidth

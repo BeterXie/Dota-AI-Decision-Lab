@@ -27,6 +27,7 @@ from app.models import (
     MapResultRecord,
     OddsObservationRecord,
     ProviderMatchMapping,
+    ProviderRawEvent,
     RayBetMatch,
     TeamRatingSnapshotRecord,
 )
@@ -49,6 +50,7 @@ def test_match_phase_uses_result_and_fresh_live_facts() -> None:
     live = DltvLiveObservationRecord(
         canonical_map_id=uuid4(),
         valve_match_id=8941656460,
+        game_time_seconds=120,
         received_at=now - timedelta(seconds=20),
         payload_hash="phase-live",
         last_message_received_at=now - timedelta(seconds=20),
@@ -90,7 +92,7 @@ def test_match_phase_uses_result_and_fresh_live_facts() -> None:
             observed_at=now,
             live_state_max_age_seconds=45,
         )
-        == "AWAITING_RESULT"
+        == "LIVE_DATA_DELAYED"
     )
     assert (
         _match_phase(
@@ -495,7 +497,7 @@ async def test_match_feed_includes_raybet_series_pending_map_identity() -> None:
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, expire_on_commit=False)
-    observed_at = datetime(2026, 8, 20, 12, 0, tzinfo=UTC)
+    observed_at = datetime.now(UTC)
     async with factory.begin() as session:
         event_record = CanonicalEvent(name="The International 2026")
         team_a = CanonicalTeam(name="Spirit")
@@ -654,12 +656,12 @@ async def test_match_feed_orders_newest_scheduled_match_first() -> None:
     async with engine.begin() as connection:
         await connection.run_sync(Base.metadata.create_all)
     factory = async_sessionmaker(engine, expire_on_commit=False)
-    observed_at = datetime(2026, 8, 12, 4, 0, tzinfo=UTC)
+    observed_at = datetime.now(UTC)
     async with factory.begin() as session:
         for index, (team_a_name, team_b_name, scheduled_at) in enumerate(
             (
-                ("Spirit", "Xtreme Gaming", datetime(2026, 8, 21, 5, 0, tzinfo=UTC)),
-                ("Level Up", "Rune Eaters", datetime(2026, 8, 20, 9, 0, tzinfo=UTC)),
+                ("Spirit", "Xtreme Gaming", observed_at + timedelta(days=2)),
+                ("Level Up", "Rune Eaters", observed_at + timedelta(days=1)),
             ),
             start=1,
         ):
@@ -730,6 +732,37 @@ async def test_map_api_exposes_partial_lineup_and_readiness_counts() -> None:
         canonical_map = CanonicalMap(series_id=series.id, valve_match_id=8941656460)
         session.add(canonical_map)
         await session.flush()
+        raw_event_id = uuid4()
+        session.add(
+            ProviderRawEvent(
+                id=raw_event_id,
+                provider="dltv",
+                event_type="DLTV_BOOTSTRAP",
+                provider_key="8941656460",
+                received_at=observed_at,
+                payload={
+                    "players": [
+                        {
+                            "account_id": 20_000 + index,
+                            "hero_id": 0,
+                            "team": 0 if index < 5 else 1,
+                            "team_slot": (index % 5) + 1,
+                        }
+                        for index in range(10)
+                    ],
+                    "db": {
+                        "first_team": {
+                            "picks": [{"hero_id": hero_id} for hero_id in range(1, 5)],
+                        },
+                        "second_team": {
+                            "picks": [{"hero_id": hero_id} for hero_id in range(5, 10)],
+                        },
+                    },
+                },
+                payload_hash="partial-draft-raw",
+                parser_version="dltv-v3",
+            )
+        )
         draft = DraftSnapshotRecord(
             canonical_map_id=canonical_map.id,
             valve_match_id=8941656460,
@@ -739,7 +772,7 @@ async def test_map_api_exposes_partial_lineup_and_readiness_counts() -> None:
             payload_hash="partial-draft",
             statistics_cutoff=observed_at,
             observed_at=observed_at,
-            raw_event_id=uuid4(),
+            raw_event_id=raw_event_id,
         )
         session.add(draft)
         await session.flush()
@@ -790,8 +823,8 @@ async def test_map_api_exposes_partial_lineup_and_readiness_counts() -> None:
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         payload = (await client.get(f"/api/maps/{canonical_map.id}")).json()
 
-    assert payload["draft"]["roster_ready_count"] == 2
-    assert payload["draft"]["hero_ready_count"] == 1
+    assert payload["draft"]["roster_ready_count"] == 10
+    assert payload["draft"]["hero_ready_count"] == 9
     assert payload["draft"]["slots"][0]["account_id"] == 93526520
     assert payload["draft"]["slots"][0]["hero_id"] is None
     assert payload["draft"]["slots"][1]["account_id"] == 418942836

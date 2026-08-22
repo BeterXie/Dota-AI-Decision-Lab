@@ -56,3 +56,31 @@ Design schema: v3.1
 - Editable format: React/CSS source.
 - Interactive HTML: the running Vite application.
 - Motion inventory: functional hover/focus/state feedback only, 150-250 ms, with reduced-motion support.
+
+## 2026-08-21 revision control — prediction points and legal pages
+
+- Gate 1 status: released under the approved `existing-product-refinement` direction.
+- Approval evidence: the owner explicitly requested the terminology change, two legal pages, and footer links in the existing project.
+- Reference role: `IMG_0504.PNG` is a positive product benchmark, not placed. It demonstrates a viable closed-points prediction interaction; DotaScope learns the outcome-selection, points-commitment, expected-points, settlement, and ranking relationship without copying MAX+ visual treatment.
+- Revision contract: preserve the current shell and evidence hierarchy; remove public virtual-money, BUY, stake, bankroll, P&L, ROI, turnover, position, and purchase-like prediction copy; strengthen the explicit boundary between free prediction points and paid access.
+- Interpretive copy status: approved as an implementation draft by the requested legal-page scope; copy reflects current product behavior and does not invent an operator entity, physical address, or product capability. It is not recorded as jurisdiction-specific legal advice.
+- Source route: repository architecture, authentication, billing, and notification contracts; no external visual asset and no generated content.
+- Target density: legal pages carry orientation, a plain-language summary, navigable policy sections, effective date/contact, and a recovery route; operational AI states retain their existing evidence density.
+- Gate 2 master: released after build validation and browser review of the running React application at `http://127.0.0.1:5173/`.
+- Browser review: Edge extension at the desktop viewport plus a 390 × 844 responsive override covered home/footer, a populated match AI card and its four-round detail, the populated points leaderboard, Competition Access, Terms, Privacy, and the mobile Terms/footer state.
+- Content review: static labels and historical AI explanations show prediction, points balance, points change, market reference, and prediction records. Original API/database values remain unchanged for audit. The raw `SHADOW_ONLY` mode and legacy policy identifier receive presentation aliases only.
+- Layout review: Terms and Performance reported no horizontal overflow; the mobile Terms page reached its bottom edge without clipping; legal navigation, contact recovery, footer links, and long Chinese paragraphs remained readable.
+- Review result: no P0/P1 findings remain. The observed P2 issues—8 px match disclaimer copy and low-contrast footer microcopy—were corrected and rechecked.
+- Copy sweep: `unlock`/`解锁` is retained only as the factual paid-access entitlement action. Negative statements about payments, wagers, cash value, affiliation, and tracking are sourced service boundaries, not marketing contrast.
+- Gate 3 delivery: React/CSS source; no separate Figma deliverable requested.
+
+## Benchmark comparison — prediction-points revision
+
+- Reference family: the user-supplied MAX+ screenshot is a positive closed-points prediction-flow benchmark; the approved DotaScope application remains the visual master.
+- Type levels: MAX+ uses modal title, outcome choice, field label, numeric value, and action levels. DotaScope preserves at least five functional levels across prediction cards and legal pages: route title, section title, action/state, body evidence, and metadata/disclaimer.
+- Reading loop: MAX+ moves from outcome selection to committed points, expected points, and submission. DotaScope moves from model and prediction state to prediction points, available points, settled change, full round evidence, then Terms/Privacy recovery links.
+- Image operations: the MAX+ screenshot remains reference-only and is not placed. No new main image was introduced; existing DotaScope hero crops and identity assets remain unchanged.
+- Craft family: DotaScope keeps its broadcast field and evidence-board system. Cyan marks navigation/action, amber marks abstention or caution, violet identifies AI evidence, and green/red carry real result or points-change state.
+- Dense and quiet zones: prediction cards concentrate state and metrics; modal rounds carry dense evidence; legal hero and section gaps provide quiet orientation; the footer closes the route without competing with primary content.
+- Concrete acts: action-label mapping, points-ledger relabeling, generated-reason normalization, policy/mode presentation aliases, plain-language legal summaries, sticky/stacked policy navigation, explicit contact recovery, and responsive footer recomposition.
+- Signature refusal: the implementation does not copy MAX+ branding, teams, split-color match header, modal layout, icons, or H-coin treatment.

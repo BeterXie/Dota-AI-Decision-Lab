@@ -138,7 +138,7 @@ const fixture = {
   }
 };
 
-test("renders winner, R.O.S.H., AI decisions and odds movement in one ledger", async () => {
+test("renders winner, R.O.S.H., AI predictions and market movement in one ledger", async () => {
   vi.stubGlobal("fetch", vi.fn(async () => response(fixture)));
   renderReview();
 
@@ -147,7 +147,7 @@ test("renders winner, R.O.S.H., AI decisions and odds movement in one ledger", a
   expect(screen.getByText("🏆 Aurora")).toBeInTheDocument();
   expect(screen.getByText(/Aurora \+4\.0pp ✓/)).toBeInTheDocument();
   expect(screen.getByText(/Spirit \+2\.0pp ✕/)).toBeInTheDocument();
-  expect(screen.getByText(/BUY A · Aurora/)).toBeInTheDocument();
+  expect(screen.getByText(/预测 A · Aurora/)).toBeInTheDocument();
   expect(screen.getByText("2.20 → 1.80")).toBeInTheDocument();
   expect(screen.getByText(/A fair p \+9\.7pp/)).toBeInTheDocument();
   expect(screen.getAllByText("1/1").length).toBeGreaterThan(0);

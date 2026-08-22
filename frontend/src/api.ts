@@ -187,7 +187,14 @@ export interface SeriesScore {
 export interface MapSummary {
   entity_type: "MAP" | "SERIES";
   identity_status: "RESOLVED" | "PENDING_MAP_IDENTITY";
-  phase: "PREMATCH" | "LIVE" | "AWAITING_RESULT" | "POSTMATCH" | "UNKNOWN";
+  phase:
+    | "PREMATCH"
+    | "DELAYED_START"
+    | "LIVE"
+    | "LIVE_DATA_DELAYED"
+    | "AWAITING_RESULT"
+    | "POSTMATCH"
+    | "UNKNOWN";
   id: string;
   series_id: string;
   canonical_event_id?: string | null;

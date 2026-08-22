@@ -1,6 +1,7 @@
 import React, { useMemo, useState } from "react";
 import type { AiDecision } from "../api";
 import { useI18n } from "../i18n";
+import { presentPredictionCopy } from "../utils/predictionCopy";
 
 interface AiDecisionGroup {
   key: string;
@@ -56,11 +57,11 @@ export function PlayerAiDecisionStrip({
                 </div>
                 <div className="player-ai-rounds-badge">
                   {group.rounds.length === 1
-                    ? locale === "zh-CN" ? "1 轮决策" : "1 round"
-                    : locale === "zh-CN" ? `${group.rounds.length} 轮决策` : `${group.rounds.length} rounds`}
+                    ? locale === "zh-CN" ? "1 轮预测" : "1 prediction round"
+                    : locale === "zh-CN" ? `${group.rounds.length} 轮预测` : `${group.rounds.length} prediction rounds`}
                 </div>
                 <div className="player-ai-checkpoint">
-                  {locale === "zh-CN" ? "最新决策 · " : "Latest · "}
+                  {locale === "zh-CN" ? "最新预测 · " : "Latest prediction · "}
                   {formatCheckpoint(group.latest.snapshot_decision_at, group.latest.snapshot_mode, locale, false)}
                 </div>
                 <div className={`player-ai-action ${actionTone(summary.action)}`} style={actionStyle(summary.action)}>{displayAction(summary.action, locale)}</div>
@@ -69,12 +70,12 @@ export function PlayerAiDecisionStrip({
                   <div><span>{t("confidence")}</span><strong>{formatPercent(summary.confidence, locale)}</strong></div>
                 </div>
                 <div className="player-ai-bankroll">
-                  <div><span>{locale === "zh-CN" ? "本轮虚拟下注" : "Virtual stake"}</span><strong>{formatMoney(summary.stake, locale)}</strong></div>
-                  <div><span>{locale === "zh-CN" ? "可用虚拟资金" : "Bankroll"}</span><strong>{formatMoney(summary.bankrollBefore, locale)}</strong></div>
+                  <div><span>{locale === "zh-CN" ? "本轮预测积分" : "Prediction points"}</span><strong>{formatPoints(summary.stake, locale)}</strong></div>
+                  <div><span>{locale === "zh-CN" ? "可用积分" : "Available points"}</span><strong>{formatPoints(summary.bankrollBefore, locale)}</strong></div>
                 </div>
                 <div className={`player-ai-pnl ${pnlTone(summary.settledPnl)}`}>
-                  <span>{locale === "zh-CN" ? "已结算虚拟盈亏" : "Settled virtual P&L"}</span>
-                  <strong>{formatSignedMoney(summary.settledPnl, locale)}</strong>
+                  <span>{locale === "zh-CN" ? "已结算积分变化" : "Settled points change"}</span>
+                  <strong>{formatSignedPoints(summary.settledPnl, locale)}</strong>
                 </div>
                 <div className="confidence-track"><i style={{ width: `${Math.max(0, Math.min(100, (summary.confidence ?? 0) * 100))}%` }} /></div>
               </button>
@@ -99,17 +100,17 @@ export function PlayerAiDecisionStrip({
             </div>
             <div className="modal-body">
               <div className="ai-bankroll-summary">
-                <div><span>{locale === "zh-CN" ? "初始虚拟资金" : "Initial bankroll"}</span><strong>{formatMoney(initialBankroll(selected), locale)}</strong></div>
-                <div><span>{locale === "zh-CN" ? "累计虚拟下注" : "Total staked"}</span><strong>{formatMoney(totalStaked(selected), locale)}</strong></div>
-                <div><span>{locale === "zh-CN" ? "已结算虚拟盈亏" : "Settled virtual P&L"}</span><strong className={pnlTone(settledPnl(selected))}>{formatSignedMoney(settledPnl(selected), locale)}</strong></div>
+                <div><span>{locale === "zh-CN" ? "初始预测积分" : "Initial prediction points"}</span><strong>{formatPoints(initialBankroll(selected), locale)}</strong></div>
+                <div><span>{locale === "zh-CN" ? "累计预测积分" : "Total prediction points"}</span><strong>{formatPoints(totalStaked(selected), locale)}</strong></div>
+                <div><span>{locale === "zh-CN" ? "已结算积分变化" : "Settled points change"}</span><strong className={pnlTone(settledPnl(selected))}>{formatSignedPoints(settledPnl(selected), locale)}</strong></div>
                   {pendingStake(selected) != null && pendingStake(selected)! > 0 && (
-                    <div><span>{locale === "zh-CN" ? "待结算虚拟下注" : "Pending unsettled stake"}</span><strong>{formatMoney(pendingStake(selected), locale)}</strong></div>
+                    <div><span>{locale === "zh-CN" ? "待结算预测积分" : "Pending prediction points"}</span><strong>{formatPoints(pendingStake(selected), locale)}</strong></div>
                   )}
                   {finalBankroll(selected) == null && (
-                    <div><span>{locale === "zh-CN" ? "当前可用虚拟资金" : "Current available bankroll"}</span><strong>{formatMoney(availableBankroll(selected), locale)}</strong></div>
+                    <div><span>{locale === "zh-CN" ? "当前可用积分" : "Current available points"}</span><strong>{formatPoints(availableBankroll(selected), locale)}</strong></div>
                   )}
                 {finalBankroll(selected) != null && (
-                    <div><span>{locale === "zh-CN" ? "最终虚拟资金" : "Final bankroll"}</span><strong>{formatMoney(finalBankroll(selected), locale)}</strong></div>
+                    <div><span>{locale === "zh-CN" ? "最终积分" : "Final points"}</span><strong>{formatPoints(finalBankroll(selected), locale)}</strong></div>
                   )}
               </div>
               <div className="ai-round-timeline">
@@ -128,12 +129,12 @@ export function PlayerAiDecisionStrip({
                       <div className="ai-round-metrics">
                         <div><span>{locale === "zh-CN" ? "A 公平概率" : "Fair A"}</span><strong>{formatPercent(numberOrNull(item.decision?.fair_probability_a), locale)}</strong></div>
                         <div><span>{t("confidence")}</span><strong>{formatPercent(numberOrNull(item.decision?.confidence), locale)}</strong></div>
-                        <div><span>{locale === "zh-CN" ? "市场判断" : "Market read"}</span><strong>{item.decision?.market_assessment ?? "—"}</strong></div>
-                        <div><span>{locale === "zh-CN" ? "A 最低赔率" : "Min odds A"}</span><strong>{item.decision?.minimum_acceptable_odds_a ?? "—"}</strong></div>
-                        <div><span>{locale === "zh-CN" ? "虚拟下注" : "Stake"}</span><strong>{formatMoney(stake, locale)}</strong></div>
-                        <div><span>{locale === "zh-CN" ? "虚拟资金" : "Bankroll"}</span><strong>{before == null ? "—" : `${formatMoney(before, locale)} → ${formatMoney(after, locale)}`}</strong></div>
-                        <div><span>{locale === "zh-CN" ? "结算赔率" : "Settled odds"}</span><strong>{item.evaluation?.virtual_odds == null ? (locale === "zh-CN" ? "未结算" : "Unsettled") : item.evaluation.virtual_odds.toFixed(2)}</strong></div>
-                        <div><span>{locale === "zh-CN" ? "结算盈亏" : "Virtual P&L"}</span><strong className={pnlTone(numberOrNull(item.evaluation?.virtual_pnl))}>{formatSignedMoney(numberOrNull(item.evaluation?.virtual_pnl), locale)}</strong></div>
+                        <div><span>{locale === "zh-CN" ? "市场判断" : "Market view"}</span><strong>{item.decision?.market_assessment ?? "—"}</strong></div>
+                        <div><span>{locale === "zh-CN" ? "A 市场参考下限" : "Min market reference A"}</span><strong>{item.decision?.minimum_acceptable_odds_a ?? "—"}</strong></div>
+                        <div><span>{locale === "zh-CN" ? "预测积分" : "Prediction points"}</span><strong>{formatPoints(stake, locale)}</strong></div>
+                        <div><span>{locale === "zh-CN" ? "积分余额" : "Points balance"}</span><strong>{before == null ? "—" : `${formatPoints(before, locale)} → ${formatPoints(after, locale)}`}</strong></div>
+                        <div><span>{locale === "zh-CN" ? "积分结算倍率" : "Points settlement multiplier"}</span><strong>{item.evaluation?.virtual_odds == null ? (locale === "zh-CN" ? "未结算" : "Unsettled") : item.evaluation.virtual_odds.toFixed(2)}</strong></div>
+                        <div><span>{locale === "zh-CN" ? "积分变化" : "Points change"}</span><strong className={pnlTone(numberOrNull(item.evaluation?.virtual_pnl))}>{formatSignedPoints(numberOrNull(item.evaluation?.virtual_pnl), locale)}</strong></div>
                       </div>
                       <div className="confidence-track"><i style={{ width: `${Math.max(0, Math.min(100, (numberOrNull(item.decision?.confidence) ?? 0) * 100))}%` }} /></div>
                       {item.error && <div className="model-error">{item.error}</div>}
@@ -285,7 +286,7 @@ function availableBankroll(group: AiDecisionGroup): number | null {
 
 function ReasonList({ title, values }: { title: string; values?: string[] }) {
   if (!values?.length) return null;
-  return <div className="detail-section"><h4>{title}</h4><ul>{values.map((value, index) => <li key={`${index}-${value}`}>{value}</li>)}</ul></div>;
+  return <div className="detail-section"><h4>{title}</h4><ul>{values.map((value, index) => <li key={`${index}-${value}`}>{presentPredictionCopy(value)}</li>)}</ul></div>;
 }
 
 function normalizeAction(value: string | undefined): string {
@@ -295,7 +296,7 @@ function normalizeAction(value: string | undefined): string {
 }
 
 function displayAction(value: string, locale: string): string {
-  const labels: Record<string, [string, string]> = { BUY_A: ["BUY A", "买 A"], BUY_B: ["BUY B", "买 B"], NO_BUY: ["NO BUY", "不买"], INSUFFICIENT_DATA: ["INSUFFICIENT", "数据不足"] };
+  const labels: Record<string, [string, string]> = { BUY_A: ["PREDICT A", "预测 A"], BUY_B: ["PREDICT B", "预测 B"], NO_BUY: ["NO PREDICTION", "暂不预测"], INSUFFICIENT_DATA: ["INSUFFICIENT", "数据不足"] };
   const label = labels[value] ?? labels.INSUFFICIENT_DATA;
   return locale === "zh-CN" ? label[1] : label[0];
 }
@@ -325,13 +326,13 @@ function providerLabel(value: string): string {
 }
 
 function formatCheckpoint(value: string | undefined, mode: string | undefined, locale: string, includeLabel = true): string {
-  if (!value) return mode || (locale === "zh-CN" ? "历史决策" : "Previous round");
+  if (!value) return mode || (locale === "zh-CN" ? "历史预测" : "Previous prediction");
   const date = new Date(value);
   if (Number.isNaN(date.getTime())) return mode ?? "";
   const time = date.toLocaleTimeString(locale, { hour: "2-digit", minute: "2-digit" });
   const suffix = mode ? ` · ${mode}` : "";
   if (!includeLabel) return `${time}${suffix}`;
-  return locale === "zh-CN" ? `决策时点 · ${time}${suffix}` : `Checkpoint · ${time}${suffix}`;
+  return locale === "zh-CN" ? `预测时点 · ${time}${suffix}` : `Prediction time · ${time}${suffix}`;
 }
 
 function formatPercent(value: number | null, locale: string): string {
@@ -339,12 +340,12 @@ function formatPercent(value: number | null, locale: string): string {
   return new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 1 }).format(value);
 }
 
-function formatMoney(value: number | null, locale: string): string {
+function formatPoints(value: number | null, locale: string): string {
   if (value == null) return "—";
   return new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }).format(value);
 }
 
-function formatSignedMoney(value: number | null, locale: string): string {
+function formatSignedPoints(value: number | null, locale: string): string {
   if (value == null) return "—";
   const sign = value > 0 ? "+" : "";
   return `${sign}${new Intl.NumberFormat(locale, { maximumFractionDigits: 2 }).format(value)}`;

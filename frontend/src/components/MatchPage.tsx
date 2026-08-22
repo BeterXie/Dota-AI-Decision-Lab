@@ -10,6 +10,7 @@ import {
 } from "../api";
 import type { AuthSessionState } from "../authApi";
 import { eventHref, eventName, isSeriesOngoing } from "../events";
+import { shouldPollMatchFrequently } from "../matchPhase";
 import { aiAccessScope, findMatchByRoute, type AiAccessScope } from "../matches";
 import { useI18n } from "../i18n";
 import { CanonicalMarketCard } from "./CanonicalMarketCard";
@@ -57,7 +58,7 @@ export const MatchPage: React.FC<MatchPageProps> = ({
     queryFn: () => fetchMap(canonicalMapId!),
     enabled: Boolean(canonicalMapId),
     retry: 1,
-    refetchInterval: summary?.phase === "LIVE" ? 4000 : 15_000
+    refetchInterval: shouldPollMatchFrequently(summary?.phase) ? 4000 : 15_000
   });
   const match = detail.data ?? summary;
   const runtime = useQuery({
@@ -73,7 +74,7 @@ export const MatchPage: React.FC<MatchPageProps> = ({
     queryFn: () => fetchMatchAi(canonicalMapId!),
     enabled: Boolean(canonicalMapId && scope),
     retry: 1,
-    refetchInterval: match?.phase === "LIVE" ? 5000 : 20_000
+    refetchInterval: shouldPollMatchFrequently(match?.phase) ? 5000 : 20_000
   });
 
   if (matchesLoading && !match) return <MatchPageSkeleton />;
@@ -331,15 +332,15 @@ const AiMatchCard: React.FC<{
   const accessHeading = !authEnabled
     ? (locale === "zh-CN" ? "AI 权限当前不可用" : "AI access is unavailable")
     : !signedIn
-      ? (locale === "zh-CN" ? "登录后查看完整 AI 决策" : "Sign in to view the full AI decision")
-      : (locale === "zh-CN" ? "解锁这场比赛的 AI 决策" : "Unlock this match's AI decision");
+      ? (locale === "zh-CN" ? "登录后查看完整 AI 预测" : "Sign in to view the full AI prediction")
+      : (locale === "zh-CN" ? "解锁这场比赛的 AI 预测" : "Unlock this match's AI prediction");
   return (
     <article className={`match-ai-card ${scope ? "has-access" : "is-locked"}`}>
       <PanelHeading kicker="AI INTELLIGENCE" title={locale === "zh-CN" ? "AI 怎么看这场比赛" : "How AI sees this match"} aside={scope ? scopeLabel(scope, locale) : undefined} />
       {scope ? (
         loading ? <div className="match-ai-loading"><span /><span /><span /></div> : successful.length > 0 ? (
           <PlayerAiDecisionStrip decisions={successful} embedded />
-        ) : <EmptyCardMessage text={locale === "zh-CN" ? "你的权限已生效，但这场比赛暂时还没有成功的 AI 判断。" : "Your access is active, but this match has no successful AI call yet."} />
+        ) : <EmptyCardMessage text={locale === "zh-CN" ? "你的权限已生效，但这场比赛暂时还没有成功的 AI 预测。" : "Your access is active, but this match has no successful AI prediction yet."} />
       ) : (
         <div className={`match-ai-lock ${decisionGenerated ? "has-decision" : "is-pending"}`}>
           <div className="match-ai-preview" aria-hidden="true">
@@ -360,18 +361,18 @@ const AiMatchCard: React.FC<{
             <span className="match-ai-lock-icon" aria-hidden="true"><UiIcon name="lock" size={18} /></span>
             <span className={`match-ai-lock-status ${decisionGenerated ? "is-ready" : "is-pending"}`} role="status">
               {decisionGenerated
-                ? (locale === "zh-CN" ? "AI 已产生决策方案" : "AI decision is ready")
-                : (locale === "zh-CN" ? "AI 尚未产生决策方案" : "AI decision is not ready yet")}
+                ? (locale === "zh-CN" ? "AI 预测已生成" : "AI prediction is ready")
+                : (locale === "zh-CN" ? "AI 预测尚未生成" : "AI prediction is not ready yet")}
             </span>
             <h3>{accessHeading}</h3>
             <p>{decisionGenerated
-              ? (locale === "zh-CN" ? "解锁后查看完整决策、置信度和分析理由。" : "Unlock to view the full decision, confidence, and reasoning.")
-              : (locale === "zh-CN" ? "决策生成后会显示在这里，解锁后可实时查看。" : "The decision will appear here once generated. Unlock to follow it in real time.")}</p>
+              ? (locale === "zh-CN" ? "解锁后查看完整预测、置信度和分析理由。" : "Unlock to view the full prediction, confidence, and reasoning.")
+              : (locale === "zh-CN" ? "预测生成后会显示在这里，解锁后可实时查看。" : "The prediction will appear here once generated. Unlock to follow it in real time.")}</p>
             {authEnabled && (!signedIn ? <button className="product-btn product-btn-primary" type="button" onClick={onLogin}>{locale === "zh-CN" ? "登录" : "Sign in"}<span>→</span></button> : <a className="product-btn product-btn-primary" href={billingHref}>{locale === "zh-CN" ? "查看赛事 Pass" : "View competition pass"}<span>→</span></a>)}
           </div>
         </div>
       )}
-      <p className="match-ai-disclaimer">{locale === "zh-CN" ? "AI 内容用于分析和 Shadow 验证，不代表真实下注执行或收益承诺。" : "AI content is for analysis and Shadow validation, not real betting execution or a promise of returns."}</p>
+      <p className="match-ai-disclaimer">{locale === "zh-CN" ? "AI 内容用于赛事分析与预测积分验证。积分不可充值、提现、转让或兑换，平台不执行真实资金投注。" : "AI content supports match analysis and prediction-points evaluation. Points cannot be purchased, withdrawn, transferred, or redeemed, and the service does not execute real-money wagers."}</p>
     </article>
   );
 };

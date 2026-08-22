@@ -100,3 +100,28 @@ test("uses provider-neutral user-facing copy", () => {
   const { container } = render(<MatchLivePulse match={liveMatch()} locale="zh-CN" />);
   expect(container.textContent?.toLowerCase()).not.toMatch(/dltv|raybet/);
 });
+
+test("distinguishes a delayed start from missing postmatch data", () => {
+  const match = liveMatch({
+    phase: "DELAYED_START",
+    live: null,
+    draft: {
+      complete: false,
+      blockers: ["DRAFT_PARTIAL"],
+      warnings: [],
+      observed_at: "2026-08-19T12:00:00Z",
+      statistics_cutoff: "2026-08-19T12:00:00Z",
+      features: null,
+      roster_ready_count: 10,
+      hero_ready_count: 9,
+      slots: [],
+    },
+  });
+
+  render(<MatchLivePulse match={match} locale="zh-CN" />);
+
+  expect(screen.getByText("等待实际开局")).toBeInTheDocument();
+  expect(screen.getByText("赛程延迟")).toBeInTheDocument();
+  expect(screen.getByText("10/10")).toBeInTheDocument();
+  expect(screen.getByText("9/10")).toBeInTheDocument();
+});

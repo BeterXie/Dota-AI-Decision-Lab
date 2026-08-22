@@ -32,13 +32,13 @@ export function DecisionReadinessPanel({
   }, [data?.series, selectedReason, selectedStage]);
 
   if (loading) {
-    return <ReadinessState text={locale === "zh-CN" ? "正在计算真实比赛决策漏斗…" : "Calculating real-match readiness…"} />;
+    return <ReadinessState text={locale === "zh-CN" ? "正在计算真实比赛预测漏斗…" : "Calculating real-match prediction readiness…"} />;
   }
   if (error) {
     return (
       <ReadinessState
         error
-        text={locale === "zh-CN" ? "决策就绪度加载失败。" : "Failed to load decision readiness."}
+        text={locale === "zh-CN" ? "预测就绪度加载失败。" : "Failed to load prediction readiness."}
         onRetry={onRetry}
       />
     );
@@ -59,11 +59,11 @@ export function DecisionReadinessPanel({
   const total = data.scope.series_count;
 
   return (
-    <section className="performance-readiness" aria-label={locale === "zh-CN" ? "决策就绪度" : "Decision readiness"}>
+    <section className="performance-readiness" aria-label={locale === "zh-CN" ? "预测就绪度" : "Prediction readiness"}>
       <div className="performance-section-heading readiness-heading">
         <div>
-          <span className="performance-kicker">PRODUCTION SHADOW VALIDATION</span>
-          <h3>{locale === "zh-CN" ? "真实比赛决策就绪度" : "Real-match decision readiness"}</h3>
+          <span className="performance-kicker">PRODUCTION PREDICTION VALIDATION</span>
+          <h3>{locale === "zh-CN" ? "真实比赛预测就绪度" : "Real-match prediction readiness"}</h3>
         </div>
         <span>
           {locale === "zh-CN"
@@ -87,7 +87,7 @@ export function DecisionReadinessPanel({
         </div>
       </div>
 
-      <div className="readiness-funnel" aria-label={locale === "zh-CN" ? "决策漏斗" : "Decision funnel"}>
+      <div className="readiness-funnel" aria-label={locale === "zh-CN" ? "预测漏斗" : "Prediction funnel"}>
         {data.stages.map((stage) => (
           <StageCard
             key={stage.key}
@@ -265,7 +265,7 @@ function stageLabel(key: string, locale: string): string {
     map_identity: "Map 身份",
     live_ready: "实时数据",
     snapshot_ready: "特征快照",
-    ai_decision: "AI 决策",
+    ai_decision: "AI 预测",
     result_ready: "赛果可用",
     evaluated: "完成评价"
   };
@@ -276,7 +276,7 @@ function stageLabel(key: string, locale: string): string {
     map_identity: "Map identity",
     live_ready: "Live data",
     snapshot_ready: "Feature snapshot",
-    ai_decision: "AI decision",
+    ai_decision: "AI prediction",
     result_ready: "Result ready",
     evaluated: "Evaluated"
   };
@@ -309,7 +309,7 @@ function reasonLabel(reason: string, locale: string): string {
     DRAFT_INCOMPLETE: "选人数据不完整",
     DRAFT_CURVE_MISSING: "选人强度曲线缺失",
     SNAPSHOT_GATE_BLOCKED: "特征快照 Gate 未通过",
-    AI_DECISION_MISSING: "AI 决策未产生",
+    AI_DECISION_MISSING: "AI 预测未产生",
     RESULT_MISSING: "赛果未解析",
     EVALUATION_MISSING: "AI 评价未完成"
   };
@@ -322,7 +322,7 @@ function reasonLabel(reason: string, locale: string): string {
     DRAFT_INCOMPLETE: "Draft incomplete",
     DRAFT_CURVE_MISSING: "Draft curve missing",
     SNAPSHOT_GATE_BLOCKED: "Snapshot gate blocked",
-    AI_DECISION_MISSING: "AI decision missing",
+    AI_DECISION_MISSING: "AI prediction missing",
     RESULT_MISSING: "Result missing",
     EVALUATION_MISSING: "Evaluation missing"
   };

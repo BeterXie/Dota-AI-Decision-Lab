@@ -41,3 +41,16 @@
 
 - Least-assumptive choice: tune shared tokens and proven components first; make page-specific changes only where browser evidence shows a hierarchy or interaction defect.
 - Unresolved risk: authenticated account/billing states may not be populated locally; verify their public/empty states and preserve existing contracts.
+
+## 2026-08-21 prediction-points and legal-surface revision
+
+- Controller / user instruction: replace customer-facing virtual-money, BUY, purchase-like prediction, stake, P&L, and bankroll language with prediction/support and points language; add Terms of Use and Privacy Policy pages and link them from the site footer.
+- Deliverable surfaces: existing match AI cards, review, AI performance, access/billing copy, shared product shell, `/terms`, and `/privacy` in the editable React application.
+- Reader action: understand an AI prediction, its committed points and settled points change; inspect a points leaderboard; read the service and privacy rules before using an account or paid access.
+- Content truth: prediction points cannot be purchased, recharged, withdrawn, transferred, or redeemed; they are separate from paid Competition Pass access. Market observations remain an analytical input. The service does not place or execute wagers.
+- Copy refusal: do not disguise a real Pass payment as support or prediction. Paid access uses accurate `unlock`, `paid access`, price, tax, and checkout language.
+- Image role: `C:\Users\59908\Downloads\IMG_0504.PNG` is a positive product reference and is not placed. It demonstrates that a closed-points prediction flow can clearly connect outcome selection, committed points, expected points, settlement, and ranking. DotaScope keeps that functional relationship while using its own product language and visual system.
+- Visual direction: preserve `existing-product-refinement`; legal pages use the existing broadcast-field type, spacing, navigation, focus, and responsive system.
+- Surface/state map: shared footer default/mobile; Terms default/anchor navigation; Privacy default/anchor navigation; existing AI prediction and performance populated/empty states.
+- No new visual asset, font, color system, generation, or Figma translation is required.
+- Deployment prerequisite: confirm that `privacy@dotascope.com` is a monitored mailbox and obtain jurisdiction-specific legal review before public commercial launch.

@@ -7,6 +7,7 @@ import { AdminRuntimePage } from "./components/AdminRuntimePage";
 import { EventsPage } from "./components/EventsPage";
 import { HomePage } from "./components/HomePage";
 import { LoginDialog } from "./components/LoginDialog";
+import { LegalPage, type LegalPageKind } from "./components/LegalPage";
 import { MatchPage } from "./components/MatchPage";
 import { PremiumSurface, type PremiumSurfaceKey } from "./components/PremiumSurface";
 import { ProductShell, type ProductNavKey } from "./components/ProductShell";
@@ -28,6 +29,7 @@ function ProductExperience({ pathname }: { pathname: string }) {
   const premiumSurface = premiumSurfaceForPath(pathname);
   const adminRoute = pathname === "/admin/runtime" || pathname.startsWith("/admin/runtime/");
   const accountRoute = pathname === "/account" || pathname.startsWith("/account/");
+  const legalPage = legalPageForPath(pathname);
   const eventsRoute = pathname === "/events" || pathname.startsWith("/events/");
   const isHome = pathname === "/";
   const matchRouteId = matchIdFromPath(pathname);
@@ -99,6 +101,8 @@ function ProductExperience({ pathname }: { pathname: string }) {
         onLogout={handleLogout}
       />
     );
+  } else if (legalPage) {
+    page = <LegalPage kind={legalPage} />;
   } else if (premiumSurface) {
     page = (
       <PremiumSurface
@@ -166,6 +170,12 @@ function ProductExperience({ pathname }: { pathname: string }) {
       )}
     </ProductShell>
   );
+}
+
+function legalPageForPath(pathname: string): LegalPageKind | null {
+  if (pathname === "/terms" || pathname.startsWith("/terms/")) return "terms";
+  if (pathname === "/privacy" || pathname.startsWith("/privacy/")) return "privacy";
+  return null;
 }
 
 function premiumSurfaceForPath(pathname: string): PremiumSurfaceKey | null {

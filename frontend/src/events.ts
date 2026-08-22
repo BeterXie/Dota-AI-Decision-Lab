@@ -1,4 +1,5 @@
 import type { MapSummary } from "./api";
+import { isLivePhase, isUpcomingPhase } from "./matchPhase";
 import { getOfficialEventDisplayName } from "./utils/officialVisuals";
 
 export type EventStatus = "LIVE" | "UPCOMING" | "SETTLING" | "COMPLETED";
@@ -44,7 +45,7 @@ export function isSeriesOngoing(
   match: Pick<MapSummary, "best_of" | "series_score" | "phase">
 ): boolean {
   if (isSeriesComplete(match)) return false;
-  if (match.phase === "LIVE") return true;
+  if (isLivePhase(match.phase)) return true;
   if (match.best_of == null) return false;
   return (match.series_score?.team_a ?? 0) + (match.series_score?.team_b ?? 0) > 0;
 }
@@ -125,7 +126,7 @@ function buildEventSummary(name: string, matches: MapSummary[]): EventSummary {
   }
 
   const upcoming = matches
-    .filter((match) => match.phase === "PREMATCH" || match.phase === "UNKNOWN")
+    .filter((match) => isUpcomingPhase(match.phase))
     .sort((left, right) => compareDates(left.scheduled_at, right.scheduled_at));
   const latest = [...matches].sort((left, right) => compareDates(right.scheduled_at, left.scheduled_at))[0] ?? null;
   const dates = matches
@@ -180,8 +181,8 @@ function eventStatus(matches: MapSummary[]): EventStatus {
     bySeries.set(key, [...(bySeries.get(key) ?? []), match]);
   }
   const phases = [...bySeries.values()].map(seriesPhase);
-  if (phases.some((phase) => phase === "LIVE")) return "LIVE";
-  const hasUpcoming = phases.some((phase) => phase === "PREMATCH" || phase === "UNKNOWN");
+  if (phases.some(isLivePhase)) return "LIVE";
+  const hasUpcoming = phases.some(isUpcomingPhase);
   const hasStarted = phases.some((phase) => phase === "POSTMATCH" || phase === "AWAITING_RESULT");
   if (hasUpcoming && hasStarted) return "LIVE";
   if (hasUpcoming) return "UPCOMING";
@@ -200,9 +201,15 @@ function seriesPhase(matches: MapSummary[]): MapSummary["phase"] {
     : null;
   if (aggregate && isSeriesComplete(aggregate)) return "POSTMATCH";
   if (matches.some((match) => match.phase === "LIVE")) return "LIVE";
+  if (matches.some((match) => match.phase === "LIVE_DATA_DELAYED")) {
+    return "LIVE_DATA_DELAYED";
+  }
   if (matches.some((match) => match.phase === "AWAITING_RESULT")) return "AWAITING_RESULT";
   if (aggregate && isSeriesOngoing(aggregate)) return "LIVE";
-  if (matches.some((match) => match.phase === "PREMATCH" || match.phase === "UNKNOWN")) return "PREMATCH";
+  if (matches.some((match) => match.phase === "DELAYED_START")) return "DELAYED_START";
+  if (matches.some((match) => match.phase === "PREMATCH" || match.phase === "UNKNOWN")) {
+    return "PREMATCH";
+  }
   return "POSTMATCH";
 }
 
@@ -243,8 +250,8 @@ function eventStatusRank(status: EventStatus): number {
 }
 
 function seriesPhaseRank(phase: MapSummary["phase"]): number {
-  if (phase === "LIVE") return 0;
-  if (phase === "PREMATCH" || phase === "UNKNOWN") return 1;
+  if (isLivePhase(phase)) return 0;
+  if (isUpcomingPhase(phase)) return 1;
   if (phase === "AWAITING_RESULT") return 2;
   return 3;
 }

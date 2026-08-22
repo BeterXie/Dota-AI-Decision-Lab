@@ -9,5 +9,6 @@
 | Earlier match-detail screenshots supplied in the task | reference | Not placed | Owner-provided project evidence | Preserve the useful score/result and data-density relationships without restoring the whole page. |
 | `https://www.dota2.com/esports/ti15/schedule` | reference | Not placed | Official public product reference | Learn type scale, spatial confidence, imagery integration, and event atmosphere; do not copy its proprietary type or signature layout. |
 | Official Dota CDN team/hero images used by the app | identity/content evidence | Team, event, and match slots | Remote official identity assets | Keep replaceable, use real canonical IDs, and retain honest missing-image states. |
+| `C:\Users\59908\Downloads\IMG_0504.PNG` | reference | Not placed | User-supplied MAX+ product screenshot | Positive benchmark for a closed-points prediction flow: outcome selection, committed points, expected points, settlement, and ranking. Preserve the functional clarity; do not copy its layout, marks, teams, or visual treatment. |
 
 No new generated asset is required for this pass. Icons remain functional UI symbols and must come from the project's existing icon library.

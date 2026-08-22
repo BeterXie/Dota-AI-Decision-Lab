@@ -97,10 +97,10 @@ test("keeps ordinary match data public while premium AI remains locked", async (
   await expect(page.getByText("Team Spirit", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("Tundra", { exact: true }).first()).toBeVisible();
   await expect(page.getByRole("heading", { name: "How AI sees this match" })).toBeVisible();
-  await expect(page.getByText("AI decision is ready", { exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Sign in to view the full AI decision" })).toBeVisible();
+  await expect(page.getByText("AI prediction is ready", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Sign in to view the full AI prediction" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Sign in →", exact: true })).toBeVisible();
-  await expect(page.getByText("BUY A", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("PREDICT A", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: "R.O.S.H. Draft Advantage" })).toBeVisible();
   await expect(page.getByText("Collapse", { exact: true })).toBeVisible();
 });
@@ -114,7 +114,7 @@ test("renders the current premium AI decision workspace for entitled users", asy
   await expect(page.getByRole("heading", { name: "How AI sees this match" })).toBeVisible();
   await expect(page.getByText("Global access", { exact: true })).toBeVisible();
   await expect(page.getByText("GPT", { exact: true })).toBeVisible();
-  await expect(page.getByText("BUY A", { exact: true }).last()).toBeVisible();
+  await expect(page.getByText("PREDICT A", { exact: true }).last()).toBeVisible();
   await expect(page.getByRole("heading", { name: "R.O.S.H. Draft Advantage" })).toBeVisible();
   await expect(page.getByText("Team Spirit · Radiant advantage", { exact: true })).toBeVisible();
   await expect(page.getByText("Team Spirit · Radiant +3.2pp", { exact: true })).toBeVisible();

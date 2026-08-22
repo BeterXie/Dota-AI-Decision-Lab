@@ -4520,6 +4520,26 @@ BUY A / 67%
 
 必须把 Data Quality 放在最终判断旁边。
 
+## 24.1 公开比赛阶段
+
+Dashboard 与公开 API 使用同一组由可观察事实推导的比赛阶段：
+
+```text
+PREMATCH           计划开赛时间尚未到，且没有有效比赛时钟
+DELAYED_START      计划开赛时间已过，但仍没有有效比赛时钟
+LIVE               已观察到非负比赛时钟，且消息与有效状态均在 freshness 窗口内
+LIVE_DATA_DELAYED  已确认实际开局，但消息或有效状态已超出 freshness 窗口
+AWAITING_RESULT    已有赛果记录但尚未确认，或开局后的过期状态同时已有待确认赛果
+POSTMATCH          赛果已确认且无 Provider 冲突
+UNKNOWN            缺少计划时间、有效比赛时钟和赛果事实
+```
+
+计划时间只用于区分 `PREMATCH` 与 `DELAYED_START`，不得单独证明比赛已经开始。
+DLTV 的空 Bootstrap、负数占位时钟及归一化后的未知时钟不得进入 `LIVE`。
+`LIVE_DATA_DELAYED` 仍按 Live 频率轮询，并在界面明确显示数据延迟；不得退回赛前状态或伪装为等待赛果。
+
+阵容与 R.O.S.H. 也必须分别暴露真实进度：原始 Draft 可用于显示“已观察到的选手 / 英雄数量”，但只有验证后的 slot 才能绑定选手、英雄与位置。完整且可验证的十人阵容出现后，R.O.S.H. 曲线尚未持久化时显示 `CALCULATING`；只有曲线非空且阵营映射已验证时才显示 `READY`。计算失败或外部数据服务恢复中的状态不得展示虚构阵容分，恢复任务成功后页面自动刷新真实结果。
+
 ---
 
 # 25. Full Implementation 验收链

@@ -98,7 +98,7 @@ describe("DecisionReadinessPanel", () => {
       />
     );
 
-    expect(screen.getByText("真实比赛决策就绪度")).toBeTruthy();
+    expect(screen.getByText("真实比赛预测就绪度")).toBeTruthy();
     expect(screen.getAllByText("33%").length).toBeGreaterThan(0);
     expect(screen.getByText(hasTeamPair("Aurora", "Xtreme Gaming"))).toBeTruthy();
     expect(screen.getByText(hasTeamPair("Team Falcons", "Tundra Esports"))).toBeTruthy();

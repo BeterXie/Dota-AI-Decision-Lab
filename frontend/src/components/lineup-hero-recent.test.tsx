@@ -121,6 +121,28 @@ test("lineup cards show the actual recent sample, win rate, and record", async (
   );
 });
 
+test("reports partial draft progress without inventing lineup slots", () => {
+  render(
+    <I18nProvider>
+      <LineupCard
+        match={{
+          ...match,
+          draft: {
+            ...match.draft!,
+            complete: false,
+            roster_ready_count: 10,
+            hero_ready_count: 9,
+            slots: [],
+          },
+        }}
+      />
+    </I18nProvider>,
+  );
+
+  expect(screen.getByText(/已识别 10\/10 名选手、9\/10 个英雄/)).toBeInTheDocument();
+  expect(screen.queryByRole("button", { name: /P1/ })).not.toBeInTheDocument();
+});
+
 function recentResponse(recent: unknown) {
   return {
     ok: true,
