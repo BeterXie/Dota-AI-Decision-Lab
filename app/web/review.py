@@ -44,7 +44,7 @@ def create_review_router(
     async def review_matches(
         limit: int = Query(default=100, ge=1, le=200),
         offset: int = Query(default=0, ge=0, le=100_000),
-        event: UUID | None = Query(default=None),
+        event: UUID | None = None,
     ) -> dict[str, Any]:
         cache_key = (limit, offset, event)
         now = monotonic()
@@ -103,16 +103,14 @@ async def build_review_payload(
     )
     if canonical_event_id is not None:
         result_query = (
-            result_query
-            .join(CanonicalMap, CanonicalMap.id == MapResultRecord.canonical_map_id)
+            result_query.join(CanonicalMap, CanonicalMap.id == MapResultRecord.canonical_map_id)
             .join(CanonicalSeries, CanonicalSeries.id == CanonicalMap.series_id)
             .where(CanonicalSeries.event_id == canonical_event_id)
         )
     result_page = list(
         (
             await session.scalars(
-                result_query
-                .order_by(MapResultRecord.settled_at.desc(), MapResultRecord.id.desc())
+                result_query.order_by(MapResultRecord.settled_at.desc(), MapResultRecord.id.desc())
                 .offset(offset)
                 .limit(limit + 1)
             )

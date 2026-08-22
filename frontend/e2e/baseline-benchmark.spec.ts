@@ -28,7 +28,7 @@ test("keeps the performance route focused on the current leaderboard without dup
   await page.goto("/performance");
 
   await expect(page.getByRole("heading", { name: "AI 表现榜" })).toBeVisible();
-  await expect(page.getByText("没有匹配的 AI experiment。", { exact: true })).toBeVisible();
+  await expect(page.getByText("还没有可比较的 AI 配置。", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "AI 基线 Benchmark" })).toHaveCount(0);
   expect(benchmarkRequests).toBe(0);
 });

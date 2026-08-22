@@ -42,6 +42,6 @@ test("keeps the cross-event AI performance dashboard free for series-pass and fr
   await page.goto("/performance");
 
   await expect(page.getByRole("heading", { name: "AI 表现榜" })).toBeVisible();
-  await expect(page.getByText("没有匹配的 AI experiment。", { exact: true })).toBeVisible();
+  await expect(page.getByText("还没有可比较的 AI 配置。", { exact: true })).toBeVisible();
   expect(leaderboardRequests).toBeGreaterThan(0);
 });

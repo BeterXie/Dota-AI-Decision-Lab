@@ -213,9 +213,7 @@ async def test_review_api_uses_frozen_rosh_canonical_ai_rounds_and_closing_odds(
     app = create_app(factory, HealthRegistry())
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get("/api/review/matches")
-        scoped_response = await client.get(
-            "/api/review/matches", params={"event": str(event.id)}
-        )
+        scoped_response = await client.get("/api/review/matches", params={"event": str(event.id)})
         other_event_response = await client.get(
             "/api/review/matches", params={"event": str(uuid4())}
         )
