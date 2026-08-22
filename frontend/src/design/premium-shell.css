@@ -147,6 +147,17 @@
   color: var(--product-text-2);
 }
 
+.product-premium-loading.is-compact {
+  width: min(1420px, calc(100% - 48px));
+  min-height: 320px;
+  margin-inline: auto;
+  border: 1px solid var(--product-border);
+  border-radius: 14px;
+  background: linear-gradient(100deg, rgba(18, 30, 43, .46), rgba(28, 43, 57, .72), rgba(18, 30, 43, .46));
+  background-size: 220% 100%;
+  animation: premiumSkeleton 1.4s linear infinite;
+}
+
 .product-premium-loading > span {
   width: 32px;
   height: 32px;
@@ -163,6 +174,10 @@
 
 @keyframes premiumSpin {
   to { transform: rotate(360deg); }
+}
+
+@keyframes premiumSkeleton {
+  to { background-position-x: -220%; }
 }
 
 .product-access-gate {
@@ -302,6 +317,7 @@
 }
 
 @media (max-width: 760px) {
+  .product-premium-loading.is-compact { width: calc(100% - 24px); min-height: 260px; }
   .premium-product-intro {
     padding-top: 28px;
     padding-bottom: 12px;

@@ -21,10 +21,14 @@
 }
 
 * { box-sizing: border-box; }
-html { background: var(--product-bg); }
-body { margin: 0; }
+html { max-width: 100%; background: var(--product-bg); }
+body,
+#root { min-width: 0; max-width: 100%; }
+body { margin: 0; overflow-x: clip; }
 
 .product-root {
+  width: 100%;
+  min-width: 0;
   min-height: 100vh;
   display: flex;
   flex-direction: column;
@@ -35,6 +39,7 @@ body { margin: 0; }
     linear-gradient(180deg, #0A1117 0%, #080D12 58%, #0B131A 100%);
   font-family: var(--font-ui);
   letter-spacing: normal;
+  overflow-x: clip;
 }
 
 .product-topbar {
@@ -44,6 +49,7 @@ body { margin: 0; }
   height: 64px;
   display: grid;
   grid-template-columns: minmax(240px, 1fr) auto minmax(240px, 1fr);
+  grid-template-areas: "brand nav account";
   align-items: center;
   gap: 24px;
   padding: 0 34px;
@@ -53,6 +59,7 @@ body { margin: 0; }
 }
 
 .product-brand {
+  grid-area: brand;
   display: inline-flex;
   align-items: center;
   justify-self: start;
@@ -96,6 +103,7 @@ body { margin: 0; }
 }
 
 .product-main-nav {
+  grid-area: nav;
   height: 64px;
   display: flex;
   align-items: stretch;
@@ -124,6 +132,7 @@ body { margin: 0; }
 }
 
 .product-nav-toggle {
+  grid-area: toggle;
   display: none;
   width: 36px;
   height: 36px;
@@ -140,7 +149,7 @@ body { margin: 0; }
 .product-nav-toggle:hover,
 .product-nav-toggle.is-open { border-color: rgba(77, 217, 223, 0.48); color: var(--product-teal); }
 
-.product-account { position: relative; justify-self: end; }
+.product-account { position: relative; grid-area: account; justify-self: end; }
 .product-avatar-button {
   width: 38px;
   height: 38px;
@@ -268,6 +277,8 @@ body { margin: 0; }
 .home-hero-art { position: relative; z-index: 2; height: 290px; }
 
 .tournament-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
+.tournament-grid.is-single { grid-template-columns: 1fr; }
+.tournament-grid.is-single .tournament-card { grid-template-columns: 74px minmax(260px, .7fr) minmax(320px, 1fr) auto; }
 .tournament-card { position: relative; min-height: 122px; display: grid; grid-template-columns: 74px 1fr auto; align-items: center; gap: 15px; padding: 16px; border: 1px solid var(--product-border); border-radius: var(--product-radius); background: linear-gradient(145deg, rgba(20, 34, 48, 0.91), rgba(12, 22, 33, 0.92)); overflow: hidden; }
 .tournament-card::after { display: none; }
 .tournament-card.event-tone-0::after { background: radial-gradient(circle, #8a7043, transparent 67%); }
@@ -287,12 +298,22 @@ body { margin: 0; }
 .status-completed { background: rgba(133, 153, 171, 0.1); color: #8798a8; }
 .event-card-action { position: relative; z-index: 1; min-height: 34px; display: inline-flex; align-items: center; gap: 6px; padding: 0 10px; border: 1px solid var(--product-border); border-radius: 8px; background: rgba(255, 255, 255, 0.03); color: #c3cfda; text-decoration: none; font-size: 10px; white-space: nowrap; }
 .event-card-action:hover { border-color: rgba(77,217,223,0.34); color: #e8fbfb; }
+.event-card-focus { display: none; min-width: 0; padding-left: 22px; border-left: 1px solid rgba(151, 177, 202, 0.12); }
+.tournament-grid.is-single .event-card-focus { display: grid; gap: 8px; }
+.event-card-focus > small { color: #7890a4; font-size: 11px; font-weight: 700; }
+.event-card-focus > div { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) 48px minmax(0, 1fr); align-items: center; gap: 10px; }
+.event-card-focus > div > span { min-width: 0; display: flex; align-items: center; gap: 8px; overflow: hidden; color: #d9e5ec; font-size: 13px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.event-card-focus > div > span:last-child { justify-content: flex-end; }
+.event-card-focus b { color: #879aab; text-align: center; font-size: 12px; }
 
 .home-match-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
 .home-list-card { min-width: 0; padding: 14px 15px 8px; border: 1px solid var(--product-border); border-radius: var(--product-radius); background: rgba(14, 25, 37, 0.82); }
 .home-match-list { border-top: 1px solid rgba(151, 177, 202, 0.11); }
 .home-match-row { min-height: 48px; display: grid; grid-template-columns: 86px minmax(0, 1fr) 50px 68px; align-items: center; gap: 10px; border-bottom: 1px solid rgba(151, 177, 202, 0.09); color: #b8c5d0; font-size: 10px; }
-.home-match-row time { color: #8fa0b0; }
+.home-match-row time { display: grid; gap: 2px; color: #8fa0b0; }
+.home-match-row time > span { display: inline-flex; align-items: center; gap: 4px; }
+.home-match-row time em { color: #72869a; font-size: 10px; font-style: normal; }
+.home-match-row.is-delayed time > span { color: #e5b766; font-weight: 700; }
 .match-teams { min-width: 0; display: grid; grid-template-columns: minmax(0, 1fr) 42px minmax(0, 1fr); align-items: center; gap: 6px; }
 .match-teams > span { min-width: 0; display: flex; align-items: center; gap: 7px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: #d8e1e8; }
 .match-teams > span:last-child { justify-content: flex-start; }
@@ -302,6 +323,13 @@ body { margin: 0; }
 .home-match-row > a { justify-self: end; color: #5ed2da; text-decoration: none; font-size: 9px; }
 .home-match-row > a:hover { color: #9ef5f3; }
 .home-list-empty { min-height: 100px; display: grid; place-items: center; color: #607388; font-size: 11px; }
+.home-list-skeleton { min-height: 116px; display: grid; gap: 8px; padding-block: 9px; }
+.home-list-skeleton span { min-height: 27px; border-radius: 7px; background: linear-gradient(100deg, rgba(22, 36, 49, .72), rgba(37, 53, 68, .9), rgba(22, 36, 49, .72)); background-size: 220% 100%; animation: productSkeleton 1.4s linear infinite; }
+.home-load-error { min-height: 132px; display: flex; align-items: center; justify-content: space-between; gap: 18px; padding: 22px; border: 1px dashed rgba(255, 101, 114, .25); border-radius: var(--product-radius); background: rgba(255, 101, 114, .035); }
+.home-load-error strong { color: #f0d7da; font-size: 15px; }
+.home-load-error p { margin: 6px 0 0; color: #8f9eab; font-size: 12px; }
+.home-list-error { min-height: 100px; display: flex; align-items: center; justify-content: center; gap: 10px; color: #c99198; font-size: 12px; }
+.home-list-error button { min-height: 34px; padding: 0 10px; border: 1px solid rgba(255, 101, 114, .22); border-radius: 7px; background: rgba(255, 101, 114, .05); color: #e7a1a8; font: inherit; cursor: pointer; }
 .home-empty-state { min-height: 150px; display: flex; align-items: center; justify-content: center; gap: 12px; border: 1px dashed var(--product-border); border-radius: var(--product-radius); color: #778a9d; }
 .home-empty-state span { color: #476b7a; font-size: 24px; }
 .home-empty-state p { margin: 0; font-size: 12px; }
@@ -377,7 +405,7 @@ body { margin: 0; }
 }
 
 @media (max-width: 760px) {
-  .product-topbar { height: 58px; grid-template-columns: auto 1fr auto; gap: 12px; padding-inline: 14px; }
+  .product-topbar { height: 58px; grid-template-columns: auto minmax(0, 1fr) auto auto; grid-template-areas: "brand . toggle account"; gap: 10px; padding-inline: 14px; }
   .product-nav-toggle { display: grid; justify-self: end; }
   .product-main-nav { position: absolute; top: 66px; left: 14px; right: 14px; height: auto; display: none; gap: 3px; padding: 7px; overflow: visible; border: 1px solid var(--product-border); border-radius: 10px; background: rgba(10, 22, 34, .98); box-shadow: 0 22px 50px rgba(0,0,0,.42); }
   .product-main-nav.is-open { display: grid; }
@@ -394,6 +422,8 @@ body { margin: 0; }
   .home-hero p { font-size: 13px; }
   .home-hero-art { position: absolute; right: -90px; top: 10px; width: 330px; opacity: 0.25; pointer-events: none; }
   .tournament-card { grid-template-columns: 58px 1fr; padding: 13px; }
+  .tournament-grid.is-single .tournament-card { grid-template-columns: 58px minmax(0, 1fr); }
+  .tournament-grid.is-single .event-card-focus { grid-column: 1 / -1; padding: 12px 0 0; border-top: 1px solid rgba(151, 177, 202, 0.12); border-left: 0; }
   .event-emblem { width: 50px; height: 50px; }
   .event-card-action { grid-column: 2; justify-self: start; margin-top: -2px; }
   .home-capabilities { grid-template-columns: 1fr; }
@@ -403,6 +433,7 @@ body { margin: 0; }
   .match-teams i { display: none; }
   .home-access-banner { grid-template-columns: 52px 1fr; }
   .home-access-banner .product-btn { grid-column: 1 / -1; width: 100%; }
+  .home-load-error { align-items: flex-start; flex-direction: column; }
   .product-account-menu { position: fixed; top: 66px; right: 10px; width: min(292px, calc(100vw - 20px)); }
   .product-footer { margin-top: 42px; }
   .product-footer-grid { min-height: 0; grid-template-columns: 1fr; gap: 18px; padding-block: 28px; }

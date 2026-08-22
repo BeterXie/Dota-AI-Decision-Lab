@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import async_sessionmaker, create_async_engine
 from app.db import Base
 from app.models import (
     AiDecisionRecord,
+    CanonicalEvent,
     CanonicalMap,
     CanonicalSeries,
     CanonicalTeam,
@@ -32,11 +33,13 @@ async def test_review_api_uses_frozen_rosh_canonical_ai_rounds_and_closing_odds(
     now = datetime(2026, 8, 15, 12, 0, tzinfo=UTC)
 
     async with factory.begin() as session:
+        event = CanonicalEvent(name="The International 2026")
         team_a = CanonicalTeam(name="Team A")
         team_b = CanonicalTeam(name="Team B")
-        session.add_all((team_a, team_b))
+        session.add_all((event, team_a, team_b))
         await session.flush()
         series = CanonicalSeries(
+            event_id=event.id,
             team_a_id=team_a.id,
             team_b_id=team_b.id,
             scheduled_at=now - timedelta(hours=2),
@@ -210,8 +213,17 @@ async def test_review_api_uses_frozen_rosh_canonical_ai_rounds_and_closing_odds(
     app = create_app(factory, HealthRegistry())
     async with AsyncClient(transport=ASGITransport(app=app), base_url="http://test") as client:
         response = await client.get("/api/review/matches")
+        scoped_response = await client.get("/api/review/matches", params={"event": str(event.id)})
+        other_event_response = await client.get(
+            "/api/review/matches", params={"event": str(uuid4())}
+        )
 
     assert response.status_code == 200
+    assert scoped_response.status_code == 200
+    assert scoped_response.json()["summary"]["settled_maps"] == 1
+    assert scoped_response.json()["matches"][0]["tournament_name"] == event.name
+    assert other_event_response.status_code == 200
+    assert other_event_response.json()["summary"]["settled_maps"] == 0
     payload = response.json()
     assert payload["summary"]["settled_maps"] == 1
     assert payload["pagination"] == {

@@ -2,10 +2,12 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, expect, test, vi } from "vitest";
 import { I18nProvider } from "../i18n";
+import { fetchReviewMatches } from "../reviewApi";
 import { ReviewPage } from "./ReviewPage";
 
 beforeEach(() => {
   window.localStorage.setItem("dota-ai-decision-lab-locale", "zh-CN");
+  window.history.replaceState({}, "", "/review");
 });
 
 afterEach(() => {
@@ -164,4 +166,15 @@ test("filters the ledger to R.O.S.H. misses", async () => {
   const search = screen.getByPlaceholderText("搜索队伍 / 赛事");
   fireEvent.change(search, { target: { value: "不存在" } });
   expect(screen.getByText("当前筛选条件没有比赛")).toBeInTheDocument();
+});
+
+test("requests event-scoped review data when an event id is provided", async () => {
+  const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
+    expect(String(input)).toBe("/api/review/matches?limit=50&event=event-ti");
+    return response(fixture);
+  });
+  vi.stubGlobal("fetch", fetchMock);
+
+  await fetchReviewMatches(50, "event-ti");
+  expect(fetchMock).toHaveBeenCalledOnce();
 });

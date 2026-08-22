@@ -15,11 +15,12 @@ type ReviewFilter = "ALL" | "ROSH_WRONG" | "AI_PREDICTION" | "CLOSING";
 
 export function ReviewPage() {
   const { locale, setLocale, t } = useI18n();
-  const [search, setSearch] = useState("");
+  const [eventContext] = useState(readReviewEventContext);
+  const [search, setSearch] = useState(eventContext?.eventId ? "" : eventContext?.eventName ?? "");
   const [filter, setFilter] = useState<ReviewFilter>("ALL");
   const review = useQuery({
-    queryKey: ["review-matches"],
-    queryFn: () => fetchReviewMatches(100),
+    queryKey: ["review-matches", eventContext?.eventId ?? null],
+    queryFn: () => fetchReviewMatches(100, eventContext?.eventId),
     staleTime: 30_000,
     refetchInterval: 60_000
   });
@@ -59,6 +60,13 @@ export function ReviewPage() {
             <span className="review-kicker">POST-MATCH ANALYTICS</span>
             <h2>{t("reviewHeadline")}</h2>
             <p>{t("reviewDescription")}</p>
+            {eventContext?.eventName && (
+              <div className="review-event-context">
+                <span>{locale === "zh-CN" ? "赛事范围" : "Event scope"}</span>
+                <strong>{getOfficialEventDisplayName(eventContext.eventName)}</strong>
+                <a href="/review">{locale === "zh-CN" ? "查看全部复盘" : "View all reviews"}</a>
+              </div>
+            )}
           </div>
           <div className="review-method-pill">{t("reviewNoLeakage")}</div>
         </section>
@@ -126,6 +134,14 @@ export function ReviewPage() {
       </div>
     </div>
   );
+}
+
+function readReviewEventContext(): { eventId: string | null; eventName: string | null } | null {
+  if (typeof window === "undefined") return null;
+  const params = new URLSearchParams(window.location.search);
+  const eventId = params.get("event")?.trim() || null;
+  const eventName = params.get("event_name")?.trim() || null;
+  return eventId || eventName ? { eventId, eventName } : null;
 }
 
 function Kpi({ label, value, sub }: { label: string; value: string; sub?: string }) {

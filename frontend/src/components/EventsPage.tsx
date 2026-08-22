@@ -18,6 +18,7 @@ import { EventMark, TeamCrest, UiIcon } from "./VisualIdentity";
 
 type EventFilter = "ALL" | "LIVE" | "UPCOMING" | "COMPLETED";
 type EventDetailTab = "OVERVIEW" | "SCHEDULE" | "UPCOMING" | "LIVE" | "COMPLETED";
+const EVENT_DETAIL_TABS: EventDetailTab[] = ["OVERVIEW", "SCHEDULE", "UPCOMING", "LIVE", "COMPLETED"];
 
 interface EventsPageProps {
   matches: MapSummary[];
@@ -138,16 +139,28 @@ const EventDetail: React.FC<{
   onRetry: () => void;
   locale: string;
 }> = ({ event, loading, error, onRetry, locale }) => {
-  const [activeTab, setActiveTab] = React.useState<EventDetailTab>("OVERVIEW");
+  const [activeTab, setActiveTab] = React.useState<EventDetailTab>(readEventDetailTab);
   const [followed, setFollowed] = React.useState(false);
+  const [visibleLimit, setVisibleLimit] = React.useState(12);
 
   React.useEffect(() => {
     if (!event || typeof window === "undefined") return;
     setFollowed(window.localStorage.getItem(`followed-event:${eventSlug(event.name)}`) === "1");
   }, [event]);
 
+  React.useEffect(() => {
+    setVisibleLimit(12);
+  }, [activeTab, event?.name]);
+
+  React.useEffect(() => {
+    if (typeof window === "undefined") return;
+    const syncTabFromHistory = () => setActiveTab(readEventDetailTab());
+    window.addEventListener("popstate", syncTabFromHistory);
+    return () => window.removeEventListener("popstate", syncTabFromHistory);
+  }, []);
+
   if (loading) {
-    return <div className="product-container event-detail-loading"><div className="event-detail-hero is-skeleton" /></div>;
+    return <EventDetailLoading locale={locale} />;
   }
   if (error) {
     return <EventLoadError locale={locale} onRetry={onRetry} />;
@@ -164,14 +177,29 @@ const EventDetail: React.FC<{
   }
 
   const series = buildSeriesSummaries(event);
-  const visibleSeries = filterEventSeries(series, activeTab);
   const featured = event.matches.find((match) => match.phase === "LIVE")
     ?? event.matches.find((match) => match.phase === "LIVE_DATA_DELAYED")
     ?? event.nextMatch;
-  const stages = groupSeriesByStage(visibleSeries, locale);
+  const filteredSeries = filterEventSeries(series, activeTab);
+  const visibleSeries = activeTab === "OVERVIEW"
+    ? buildOverviewSeries(series, featured?.series_id ?? null)
+    : filteredSeries;
+  const renderedSeries = visibleSeries.slice(0, visibleLimit);
+  const stages = groupSeriesForDisplay(renderedSeries, activeTab, locale);
   const teams = eventTeams(event);
   const completedSeries = series.filter((item) => item.phase === "POSTMATCH").length;
+  const completedOrSettlingSeries = series.filter((item) => item.phase === "POSTMATCH" || item.phase === "AWAITING_RESULT").length;
+  const overviewCompletedShown = visibleSeries.filter((item) => item.phase === "POSTMATCH" || item.phase === "AWAITING_RESULT").length;
   const isTi15 = event.name === "The International 2026";
+  const featuredContext = featured ? featuredStatusContext(featured, series, locale) : null;
+  const featuredRound = featured ? displayRoundLabel(featured.round, featured.best_of, locale) : null;
+  const reviewHref = eventReviewHref(event);
+  const selectTab = (tab: EventDetailTab) => {
+    if (tab !== activeTab) {
+      setActiveTab(tab);
+      writeEventDetailTab(tab);
+    }
+  };
   const toggleFollow = () => {
     const next = !followed;
     setFollowed(next);
@@ -209,24 +237,32 @@ const EventDetail: React.FC<{
         <div className="event-detail-stats">
           <EventHeroStat value={event.seriesCount} label={locale === "zh-CN" ? "系列赛" : "Series"} />
           <EventHeroStat value={event.teamCount} label={locale === "zh-CN" ? "参赛队伍" : "Teams"} />
-          <EventHeroStat value={event.stages.length || 1} label={locale === "zh-CN" ? "赛段" : "Stages"} />
+          <EventHeroStat value={`${completedSeries} / ${series.length}`} label={locale === "zh-CN" ? "已完成" : "Completed"} />
         </div>
       </section>
 
-      <nav className="product-container event-detail-tabs" aria-label={locale === "zh-CN" ? "赛事详情" : "Event detail"}>
-        {(["OVERVIEW", "SCHEDULE", "UPCOMING", "LIVE", "COMPLETED"] as EventDetailTab[]).map((tab) => (
-          <button
-            key={tab}
-            type="button"
-            className={activeTab === tab ? "is-active" : undefined}
-            aria-pressed={activeTab === tab}
-            onClick={() => setActiveTab(tab)}
-          >
-            {eventTabLabel(tab, locale)}
-          </button>
-        ))}
-        <a href="/review">{locale === "zh-CN" ? "AI 复盘" : "AI review"}</a>
-      </nav>
+      <div className="product-container event-detail-tabbar">
+        <nav className="event-detail-tabs" aria-label={locale === "zh-CN" ? "赛事详情" : "Event detail"}>
+          <div className="event-detail-tab-scroll">
+            {EVENT_DETAIL_TABS.map((tab) => (
+              <button
+                key={tab}
+                type="button"
+                className={activeTab === tab ? "is-active" : undefined}
+                aria-pressed={activeTab === tab}
+                onClick={(clickEvent) => {
+                  selectTab(tab);
+                  clickEvent.currentTarget.scrollIntoView({ block: "nearest", inline: "center" });
+                }}
+              >
+                {eventTabLabel(tab, locale)}
+              </button>
+            ))}
+          </div>
+        </nav>
+        <a className="event-detail-review-link event-detail-review-desktop" href={reviewHref}><UiIcon name="spark" size={14} />{locale === "zh-CN" ? "本赛事 AI 复盘" : "Event AI review"}</a>
+      </div>
+      <a className="product-container event-detail-review-link event-detail-review-mobile" href={reviewHref}><UiIcon name="spark" size={14} />{locale === "zh-CN" ? "查看本赛事 AI 复盘" : "Open event AI review"}</a>
 
       {featured && activeTab === "OVERVIEW" && (
         <section className="product-container event-featured-match product-section">
@@ -244,13 +280,20 @@ const EventDetail: React.FC<{
             <time><UiIcon name="clock" size={12} />{featured.scheduled_at ? formatDateTime(featured.scheduled_at, locale) : "—"}</time>
             <TeamPair match={featured} locale={locale} />
             <div className="event-featured-meta">
-              <span><UiIcon name="layers" size={11} />{featured.round || (locale === "zh-CN" ? "赛程" : "Schedule")}</span>
+              {featuredRound ? <span><UiIcon name="layers" size={11} />{featuredRound}</span> : null}
               {featured.best_of ? <span><UiIcon name="trophy" size={11} />BO{featured.best_of}</span> : null}
             </div>
             <a className="product-btn product-btn-secondary" href={matchHref(featured)}>
               {locale === "zh-CN" ? "查看比赛" : "View match"}<span>→</span>
             </a>
           </div>
+          {featuredContext && (
+            <div className={`event-featured-timing is-${featuredContext.kind}`} role="status">
+              {featuredContext.items.map((item) => (
+                <span key={item.label}><strong>{item.label}</strong>{item.value}</span>
+              ))}
+            </div>
+          )}
         </section>
       )}
 
@@ -258,7 +301,7 @@ const EventDetail: React.FC<{
         <section className="event-schedule-panel">
           <div className="event-panel-title">
             <div><span className="home-eyebrow">MATCHES</span><h2>{eventScheduleTitle(activeTab, locale)}</h2></div>
-            <span>{locale === "zh-CN" ? `${visibleSeries.length} 个系列赛` : `${visibleSeries.length} series`}</span>
+            <span>{eventScheduleCountLabel(activeTab, visibleSeries.length, series.length, Boolean(featured), locale)}</span>
           </div>
           {Array.from(stages.entries()).map(([stage, stageSeries]) => (
             <div className="event-stage" key={stage}>
@@ -268,21 +311,39 @@ const EventDetail: React.FC<{
               </div>
             </div>
           ))}
-          {visibleSeries.length === 0 && <div className="events-empty is-compact"><p>{locale === "zh-CN" ? "这个分类暂时没有确认的对阵。" : "No confirmed matchups in this category yet."}</p></div>}
+          {visibleSeries.length === 0 && (
+            <div className="events-empty is-compact"><p>{activeTab === "OVERVIEW" && featured
+              ? (locale === "zh-CN" ? "当前焦点比赛已在上方展示。" : "The current featured match is shown above.")
+              : (locale === "zh-CN" ? "这个分类暂时没有确认的对阵。" : "No confirmed matchups in this category yet.")}</p></div>
+          )}
+          {activeTab === "OVERVIEW" && completedOrSettlingSeries > overviewCompletedShown && (
+            <button className="event-series-all-completed" type="button" onClick={() => selectTab("COMPLETED")}>
+              {locale === "zh-CN" ? `查看全部 ${completedOrSettlingSeries} 场已结束比赛` : `View all ${completedOrSettlingSeries} completed matches`}
+            </button>
+          )}
+          {visibleSeries.length > 12 && (
+            <button className="event-series-more" type="button" aria-expanded={visibleLimit >= visibleSeries.length} onClick={() => setVisibleLimit((current) => current >= visibleSeries.length ? 12 : Math.min(current + 12, visibleSeries.length))}>
+              {visibleLimit >= visibleSeries.length
+                ? (locale === "zh-CN" ? "收起比赛" : "Show fewer")
+                : (locale === "zh-CN" ? `再显示 ${Math.min(12, visibleSeries.length - visibleLimit)} 场` : `Show ${Math.min(12, visibleSeries.length - visibleLimit)} more`)}
+            </button>
+          )}
         </section>
 
         <aside className="event-detail-aside">
-          <article className="event-overview-card">
-            <div className="event-aside-title"><span aria-hidden="true">▣</span><h2>{locale === "zh-CN" ? "赛事概览" : "Event overview"}</h2></div>
-            <div className="event-overview-grid">
-              <EventOverviewMetric label={locale === "zh-CN" ? "比赛阶段" : "Status"} value={statusLabel(event.status, locale)} />
-              <EventOverviewMetric label={locale === "zh-CN" ? "已完成" : "Completed"} value={`${completedSeries} / ${series.length}`} />
-              <EventOverviewMetric label={locale === "zh-CN" ? "参赛队伍" : "Teams"} value={`${event.teamCount}`} />
-              <EventOverviewMetric label={locale === "zh-CN" ? "赛段" : "Stages"} value={`${event.stages.length || 1}`} />
-              <EventOverviewMetric label={locale === "zh-CN" ? "主要赛制" : "Formats"} value={seriesFormats(series)} />
-              <EventOverviewMetric label={locale === "zh-CN" ? "比赛记录" : "Map records"} value={`${event.matches.length}`} />
-            </div>
-          </article>
+          <div className="event-detail-sticky-summary">
+            <article className="event-overview-card">
+              <div className="event-aside-title"><span aria-hidden="true">▣</span><h2>{locale === "zh-CN" ? "赛事概览" : "Event overview"}</h2></div>
+              <div className="event-overview-grid">
+                <EventOverviewMetric label={locale === "zh-CN" ? "比赛阶段" : "Status"} value={statusLabel(event.status, locale)} />
+                <EventOverviewMetric label={locale === "zh-CN" ? "已完成" : "Completed"} value={`${completedSeries} / ${series.length}`} />
+                <EventOverviewMetric label={locale === "zh-CN" ? "参赛队伍" : "Teams"} value={`${event.teamCount}`} />
+                <EventOverviewMetric label={locale === "zh-CN" ? "赛事阶段" : "Event stage"} value={event.stages.slice(0, 2).join(" / ") || "—"} />
+                <EventOverviewMetric label={locale === "zh-CN" ? "主要赛制" : "Formats"} value={seriesFormats(series)} />
+                <EventOverviewMetric label={locale === "zh-CN" ? "比赛记录" : "Map records"} value={`${event.matches.length}`} />
+              </div>
+            </article>
+          </div>
           <article className="event-team-card">
             <div className="event-aside-title"><span aria-hidden="true">♙</span><div><h2>{locale === "zh-CN" ? "参赛队伍" : "Participating teams"}</h2><small>{locale === "zh-CN" ? `${teams.length} 支队伍` : `${teams.length} teams`}</small></div></div>
             <div className="event-team-rail">
@@ -349,6 +410,7 @@ const EventDirectoryCard: React.FC<{ event: EventSummary; index: number; locale:
 const SeriesRow: React.FC<{ series: EventSeriesSummary; locale: string }> = ({ series, locale }) => {
   const score = series.score;
   const showScore = Boolean(score && (isLivePhase(series.phase) || series.phase === "POSTMATCH" || series.phase === "AWAITING_RESULT"));
+  const showMapCount = series.mapCount > 0 && (isLivePhase(series.phase) || series.phase === "POSTMATCH" || series.phase === "AWAITING_RESULT");
   return (
     <article className="event-series-row">
       <div className="event-series-time"><time><UiIcon name="clock" size={10} />{series.scheduledAt ? formatDateTime(series.scheduledAt, locale) : "—"}</time><PhasePill phase={series.phase} locale={locale} /></div>
@@ -357,26 +419,29 @@ const SeriesRow: React.FC<{ series: EventSeriesSummary; locale: string }> = ({ s
         <strong className={showScore ? "is-score" : undefined}>{showScore ? `${score?.team_a ?? 0} : ${score?.team_b ?? 0}` : "VS"}</strong>
         <TeamName team={series.teamB} locale={locale} />
       </div>
-      <div className="event-series-meta"><span>{series.bestOf ? `BO${series.bestOf}` : "—"}</span><span>{locale === "zh-CN" ? `${series.mapCount} 局记录` : `${series.mapCount} map records`}</span></div>
+      <div className="event-series-meta"><span>{series.bestOf ? `BO${series.bestOf}` : "—"}</span>{showMapCount && <span>{locale === "zh-CN" ? `${series.mapCount} 局记录` : `${series.mapCount} map records`}</span>}</div>
       <a href={matchHref(series.representative)}>{locale === "zh-CN" ? "查看比赛" : "View match"}<span>›</span></a>
     </article>
   );
 };
 
-const TeamPair: React.FC<{ match: MapSummary; locale: string }> = ({ match, locale }) => (
-  <div className="event-featured-teams">
-    <TeamName team={match.team_a} locale={locale} large />
-    <strong>{match.series_score ? `${match.series_score.team_a} : ${match.series_score.team_b}` : "VS"}</strong>
-    <TeamName team={match.team_b} locale={locale} large />
-  </div>
-);
+const TeamPair: React.FC<{ match: MapSummary; locale: string }> = ({ match, locale }) => {
+  const showScore = Boolean(match.series_score && (isLivePhase(match.phase) || match.phase === "POSTMATCH" || match.phase === "AWAITING_RESULT"));
+  return (
+    <div className="event-featured-teams">
+      <TeamName team={match.team_a} locale={locale} large />
+      <strong>{showScore ? `${match.series_score?.team_a ?? 0} : ${match.series_score?.team_b ?? 0}` : "VS"}</strong>
+      <TeamName team={match.team_b} locale={locale} large />
+    </div>
+  );
+};
 
 const TeamName: React.FC<{ team: MapSummary["team_a"]; locale: string; large?: boolean }> = ({ team, locale, large }) => {
   const name = team?.name || (locale === "zh-CN" ? "待定" : "TBD");
   return <span className={`event-team-name ${large ? "is-large" : ""}`}><TeamCrest team={team} fallbackName={name} size={large ? "md" : "sm"} /><b>{name}</b></span>;
 };
 
-const EventHeroStat: React.FC<{ value: number; label: string; accent?: boolean }> = ({ value, label, accent }) => (
+const EventHeroStat: React.FC<{ value: React.ReactNode; label: string; accent?: boolean }> = ({ value, label, accent }) => (
   <div className={accent ? "is-accent" : undefined}><strong>{value}</strong><span>{label}</span></div>
 );
 
@@ -390,6 +455,18 @@ const EventLoadError: React.FC<{ locale: string; onRetry: () => void }> = ({ loc
     <p>{locale === "zh-CN" ? "当前无法读取赛事，请重试。" : "Event data is unavailable right now. Try again."}</p>
     <button className="product-btn product-btn-secondary" type="button" onClick={onRetry}>{locale === "zh-CN" ? "重试" : "Retry"}</button>
   </section>
+);
+
+const EventDetailLoading: React.FC<{ locale: string }> = ({ locale }) => (
+  <div className="event-detail-v2 event-detail-loading" aria-live="polite" aria-busy="true">
+    <div className="product-container event-detail-loading-label">{locale === "zh-CN" ? "正在同步赛事详情…" : "Syncing event details…"}</div>
+    <div className="product-container event-detail-hero is-skeleton" />
+    <div className="product-container event-detail-tabs is-skeleton" />
+    <div className="product-container event-detail-loading-layout">
+      <div className="event-detail-loading-schedule is-skeleton" />
+      <div className="event-detail-loading-aside is-skeleton" />
+    </div>
+  </div>
 );
 
 const StatusPill: React.FC<{ status: EventStatus; locale: string }> = ({ status, locale }) => (
@@ -407,15 +484,25 @@ function filterLabel(filter: EventFilter, locale: string): string {
 }
 
 function eventTabLabel(tab: EventDetailTab, locale: string): string {
-  if (locale !== "zh-CN") return tab === "OVERVIEW" ? "Overview" : tab === "SCHEDULE" ? "Schedule" : tab === "UPCOMING" ? "Upcoming" : tab === "LIVE" ? "Live" : "Completed";
-  return tab === "OVERVIEW" ? "总览" : tab === "SCHEDULE" ? "赛程" : tab === "UPCOMING" ? "即将开始" : tab === "LIVE" ? "进行中" : "已结束";
+  if (locale !== "zh-CN") return tab === "OVERVIEW" ? "Overview" : tab === "SCHEDULE" ? "Full schedule" : tab === "UPCOMING" ? "Upcoming" : tab === "LIVE" ? "Live" : "Completed";
+  return tab === "OVERVIEW" ? "总览" : tab === "SCHEDULE" ? "全部赛程" : tab === "UPCOMING" ? "即将开始" : tab === "LIVE" ? "进行中" : "已结束";
 }
 
 function eventScheduleTitle(tab: EventDetailTab, locale: string): string {
+  if (tab === "OVERVIEW") return locale === "zh-CN" ? "当前与近期比赛" : "Current & recent matches";
+  if (tab === "SCHEDULE") return locale === "zh-CN" ? "全部赛程与赛果" : "Full schedule & results";
   if (tab === "UPCOMING") return locale === "zh-CN" ? "即将开始的比赛" : "Upcoming matches";
   if (tab === "LIVE") return locale === "zh-CN" ? "进行中的比赛" : "Live matches";
   if (tab === "COMPLETED") return locale === "zh-CN" ? "已结束的比赛" : "Completed matches";
   return locale === "zh-CN" ? "对阵与赛果" : "Matches & results";
+}
+
+function eventScheduleCountLabel(tab: EventDetailTab, visible: number, total: number, hasFeatured: boolean, locale: string): string {
+  if (tab === "OVERVIEW") {
+    if (hasFeatured) return locale === "zh-CN" ? `焦点 1 · 列表 ${visible} / 共 ${total} 场` : `1 featured · ${visible} listed of ${total}`;
+    return locale === "zh-CN" ? `精选 ${visible} / 共 ${total} 场` : `${visible} selected of ${total}`;
+  }
+  return locale === "zh-CN" ? `${visible} 个系列赛` : `${visible} series`;
 }
 
 function filterEventSeries(series: EventSeriesSummary[], tab: EventDetailTab): EventSeriesSummary[] {
@@ -423,6 +510,17 @@ function filterEventSeries(series: EventSeriesSummary[], tab: EventDetailTab): E
   if (tab === "LIVE") return series.filter((item) => isLivePhase(item.phase));
   if (tab === "COMPLETED") return series.filter((item) => item.phase === "POSTMATCH" || item.phase === "AWAITING_RESULT");
   return series;
+}
+
+function buildOverviewSeries(series: EventSeriesSummary[], featuredSeriesId: string | null): EventSeriesSummary[] {
+  const candidates = featuredSeriesId ? series.filter((item) => item.seriesId !== featuredSeriesId) : series;
+  const selected = [
+    ...candidates.filter((item) => isLivePhase(item.phase)),
+    ...candidates.filter((item) => item.phase === "AWAITING_RESULT"),
+    ...candidates.filter((item) => isUpcomingPhase(item.phase)).slice(0, 4),
+    ...candidates.filter((item) => item.phase === "POSTMATCH").slice(0, 3)
+  ];
+  return Array.from(new Map(selected.map((item) => [item.seriesId, item])).values());
 }
 
 function eventTeams(event: EventSummary): NonNullable<MapSummary["team_a"]>[] {
@@ -445,13 +543,144 @@ function statusLabel(status: EventStatus, locale: string): string {
   return status === "LIVE" ? "进行中" : status === "UPCOMING" ? "即将开始" : status === "SETTLING" ? "赛果确认中" : "已结束";
 }
 
-function groupSeriesByStage(series: EventSeriesSummary[], locale: string): Map<string, EventSeriesSummary[]> {
+function groupSeriesForDisplay(series: EventSeriesSummary[], tab: EventDetailTab, locale: string): Map<string, EventSeriesSummary[]> {
   const grouped = new Map<string, EventSeriesSummary[]>();
   for (const item of series) {
-    const stage = item.round?.trim() || (locale === "zh-CN" ? "赛程" : "Schedule");
-    grouped.set(stage, [...(grouped.get(stage) ?? []), item]);
+    const group = tab === "OVERVIEW"
+      ? phaseGroupLabel(item.phase, locale)
+      : item.scheduledAt
+        ? formatSeriesGroupDate(item.scheduledAt, locale)
+        : (locale === "zh-CN" ? "时间待确认" : "Date pending");
+    grouped.set(group, [...(grouped.get(group) ?? []), item]);
   }
   return grouped;
+}
+
+function phaseGroupLabel(phase: MapSummary["phase"], locale: string): string {
+  if (locale !== "zh-CN") {
+    if (isLivePhase(phase)) return "Live now";
+    if (phase === "DELAYED_START") return "Delayed starts";
+    if (isUpcomingPhase(phase)) return "Coming up";
+    if (phase === "AWAITING_RESULT") return "Confirming results";
+    return "Recently completed";
+  }
+  if (isLivePhase(phase)) return "正在进行";
+  if (phase === "DELAYED_START") return "顺延中的比赛";
+  if (isUpcomingPhase(phase)) return "即将开始";
+  if (phase === "AWAITING_RESULT") return "赛果确认中";
+  return "最近结束";
+}
+
+function formatSeriesGroupDate(value: string, locale: string): string {
+  return new Intl.DateTimeFormat(locale === "zh-CN" ? "zh-CN" : "en-US", { month: "long", day: "numeric", weekday: "short" }).format(new Date(value));
+}
+
+function displayRoundLabel(round: string | null, bestOf: number | null | undefined, locale: string): string | null {
+  const value = round?.trim();
+  if (!value) return null;
+  if (/^bo\s*\d+$/i.test(value) || (bestOf && value.toLowerCase() === `bo${bestOf}`)) return null;
+  if (value.toLowerCase() === "schedule") return locale === "zh-CN" ? "赛程" : "Schedule";
+  return value;
+}
+
+interface FeaturedStatusContext {
+  kind: "live-delay" | "schedule-delay";
+  items: Array<{ label: string; value: string }>;
+}
+
+function featuredStatusContext(
+  featured: MapSummary,
+  series: EventSeriesSummary[],
+  locale: string
+): FeaturedStatusContext | null {
+  if (featured.phase === "LIVE_DATA_DELAYED") {
+    const lastMessageAt = featured.live?.last_message_received_at ?? null;
+    const stateAgeSeconds = featured.live?.effective_state_age_seconds ?? featured.live?.message_age_seconds ?? null;
+    const matchStatus = featured.map_number != null
+      ? (locale === "zh-CN" ? `第 ${featured.map_number} 局仍在进行` : `Map ${featured.map_number} is still in progress`)
+      : (locale === "zh-CN" ? "比赛仍在进行" : "Match still in progress");
+    const delayReason = stateAgeSeconds != null
+      ? (locale === "zh-CN"
+          ? `${formatElapsed(stateAgeSeconds, locale)}未收到新的有效比赛状态，页面保留最后有效数据。`
+          : `No new valid match state for ${formatElapsed(stateAgeSeconds, locale)}; the last valid state remains visible.`)
+      : (locale === "zh-CN"
+          ? "实时数据暂时中断，页面保留最后有效状态。"
+          : "The live feed is temporarily interrupted; the last valid state remains visible.");
+    return {
+      kind: "live-delay",
+      items: [
+        { label: locale === "zh-CN" ? "比赛状态" : "Match status", value: matchStatus },
+        { label: locale === "zh-CN" ? "最后有效比赛时间" : "Last valid game clock", value: formatGameClock(featured.live?.game_time_seconds) },
+        { label: locale === "zh-CN" ? "数据说明" : "Data context", value: delayReason },
+        { label: locale === "zh-CN" ? "最后消息" : "Last message", value: lastMessageAt ? formatDateTime(lastMessageAt, locale) : "—" }
+      ]
+    };
+  }
+
+  const scheduledAt = featured.scheduled_at ? Date.parse(featured.scheduled_at) : Number.NaN;
+  const priorLive = series.find((item) =>
+    item.seriesId !== featured.series_id &&
+    isLivePhase(item.phase) &&
+    (!Number.isFinite(scheduledAt) || !item.scheduledAt || Date.parse(item.scheduledAt) <= scheduledAt)
+  );
+  const delayed = featured.phase === "DELAYED_START" || (
+    isUpcomingPhase(featured.phase) &&
+    Number.isFinite(scheduledAt) &&
+    scheduledAt < Date.now() &&
+    Boolean(priorLive)
+  );
+  if (!delayed) return null;
+  return {
+    kind: "schedule-delay",
+    items: [
+      { label: locale === "zh-CN" ? "计划时间" : "Scheduled", value: featured.scheduled_at ? formatDateTime(featured.scheduled_at, locale) : "—" },
+      { label: locale === "zh-CN" ? "当前预计" : "Current estimate", value: locale === "zh-CN" ? "等待赛事方确认" : "Awaiting organizer confirmation" },
+      {
+        label: locale === "zh-CN" ? "顺延说明" : "Delay context",
+        value: priorLive
+          ? (locale === "zh-CN" ? "前序系列赛仍在进行，本场将顺延。" : "The preceding series is still in progress, so this match will start later.")
+          : (locale === "zh-CN" ? "计划时间已过，新的开赛时间尚未确认。" : "The scheduled time has passed and a new start time is not confirmed.")
+      },
+      { label: locale === "zh-CN" ? "最后同步" : "Last synced", value: featured.provider_observed_at ? formatDateTime(featured.provider_observed_at, locale) : "—" }
+    ]
+  };
+}
+
+function readEventDetailTab(): EventDetailTab {
+  if (typeof window === "undefined") return "OVERVIEW";
+  const value = new URLSearchParams(window.location.search).get("tab")?.toUpperCase();
+  return EVENT_DETAIL_TABS.includes(value as EventDetailTab) ? value as EventDetailTab : "OVERVIEW";
+}
+
+function writeEventDetailTab(tab: EventDetailTab): void {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  if (tab === "OVERVIEW") url.searchParams.delete("tab");
+  else url.searchParams.set("tab", tab.toLowerCase());
+  window.history.pushState({}, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
+function eventReviewHref(event: EventSummary): string {
+  const params = new URLSearchParams({ event_name: event.name });
+  if (event.canonicalEventId) params.set("event", event.canonicalEventId);
+  return `/review?${params.toString()}`;
+}
+
+function formatGameClock(value: number | null | undefined): string {
+  if (value == null || !Number.isFinite(value)) return "—";
+  const absolute = Math.abs(Math.trunc(value));
+  const minutes = Math.floor(absolute / 60);
+  const seconds = absolute % 60;
+  return `${value < 0 ? "−" : ""}${minutes}:${seconds.toString().padStart(2, "0")}`;
+}
+
+function formatElapsed(value: number, locale: string): string {
+  const seconds = Math.max(0, Math.round(value));
+  if (seconds < 60) return locale === "zh-CN" ? `${seconds} 秒` : `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  const remainder = seconds % 60;
+  if (locale === "zh-CN") return remainder > 0 ? `${minutes} 分 ${remainder} 秒` : `${minutes} 分钟`;
+  return remainder > 0 ? `${minutes}m ${remainder}s` : `${minutes}m`;
 }
 
 function eventDateRange(event: EventSummary, locale: string): string {

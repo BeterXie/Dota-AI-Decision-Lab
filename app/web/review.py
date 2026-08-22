@@ -37,15 +37,16 @@ def create_review_router(
     cache_ttl_seconds: float = REVIEW_CACHE_TTL_SECONDS,
 ) -> APIRouter:
     router = APIRouter()
-    cache: dict[tuple[int, int], tuple[float, dict[str, Any]]] = {}
+    cache: dict[tuple[int, int, UUID | None], tuple[float, dict[str, Any]]] = {}
     cache_lock = asyncio.Lock()
 
     @router.get("/api/review/matches")
     async def review_matches(
         limit: int = Query(default=100, ge=1, le=200),
         offset: int = Query(default=0, ge=0, le=100_000),
+        event: UUID | None = None,
     ) -> dict[str, Any]:
-        cache_key = (limit, offset)
+        cache_key = (limit, offset, event)
         now = monotonic()
         cached = cache.get(cache_key)
         if cached is not None and now - cached[0] < cache_ttl_seconds:
@@ -60,6 +61,7 @@ def create_review_router(
                     session,
                     limit=limit,
                     offset=offset,
+                    canonical_event_id=event,
                     ai_min_game_time_seconds=ai_min_game_time_seconds,
                 )
             cache[cache_key] = (monotonic(), payload)
@@ -73,6 +75,7 @@ async def build_review_payload(
     *,
     limit: int = 100,
     offset: int = 0,
+    canonical_event_id: UUID | None = None,
     ai_min_game_time_seconds: int = 600,
 ) -> dict[str, Any]:
     """Build a post-match review projection from immutable/audited records.
@@ -84,22 +87,30 @@ async def build_review_payload(
     snapshot/provider/model before accuracy is aggregated.
     """
 
+    result_query = (
+        select(MapResultRecord)
+        .options(
+            load_only(
+                MapResultRecord.canonical_map_id,
+                MapResultRecord.winner_team_id,
+                MapResultRecord.settled_at,
+            )
+        )
+        .where(
+            MapResultRecord.winner_team_id.is_not(None),
+            MapResultRecord.provider_conflict.is_(False),
+        )
+    )
+    if canonical_event_id is not None:
+        result_query = (
+            result_query.join(CanonicalMap, CanonicalMap.id == MapResultRecord.canonical_map_id)
+            .join(CanonicalSeries, CanonicalSeries.id == CanonicalMap.series_id)
+            .where(CanonicalSeries.event_id == canonical_event_id)
+        )
     result_page = list(
         (
             await session.scalars(
-                select(MapResultRecord)
-                .options(
-                    load_only(
-                        MapResultRecord.canonical_map_id,
-                        MapResultRecord.winner_team_id,
-                        MapResultRecord.settled_at,
-                    )
-                )
-                .where(
-                    MapResultRecord.winner_team_id.is_not(None),
-                    MapResultRecord.provider_conflict.is_(False),
-                )
-                .order_by(MapResultRecord.settled_at.desc(), MapResultRecord.id.desc())
+                result_query.order_by(MapResultRecord.settled_at.desc(), MapResultRecord.id.desc())
                 .offset(offset)
                 .limit(limit + 1)
             )

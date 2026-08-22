@@ -331,6 +331,9 @@
 
 @media (max-width: 760px) {
   .product-topbar {
+    grid-template-columns: auto minmax(0, 1fr) auto auto;
+    grid-template-areas: "brand . toggle account";
+    gap: 10px;
     padding-inline: 16px;
   }
 

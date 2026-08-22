@@ -54,6 +54,18 @@ export function PremiumSurface({
     );
   }
 
+  // Performance is a public surface. It must not wait behind an unrelated
+  // account-session request before showing its own page structure.
+  if (surface === "performance") {
+    return (
+      <PremiumShellFrame surface={surface}>
+        <Suspense fallback={<PremiumLoading compact label={locale === "zh-CN" ? "正在加载 AI 表现…" : "Loading AI performance…"} />}>
+          <AiPerformanceExperience />
+        </Suspense>
+      </PremiumShellFrame>
+    );
+  }
+
   if (authLoading) {
     return <PremiumLoading label={locale === "zh-CN" ? "正在确认账号权限…" : "Checking account access…"} />;
   }
@@ -74,16 +86,6 @@ export function PremiumSurface({
         <PremiumProductIntro surface={surface} />
         <Suspense fallback={<PremiumLoading label={locale === "zh-CN" ? "正在加载通知设置…" : "Loading notifications…"} />}>
           <NotificationCenterPage userEmail={session.user.email} />
-        </Suspense>
-      </PremiumShellFrame>
-    );
-  }
-
-  if (surface === "performance") {
-    return (
-      <PremiumShellFrame surface={surface}>
-        <Suspense fallback={<PremiumLoading label={locale === "zh-CN" ? "正在加载 AI 表现…" : "Loading AI performance…"} />}>
-          <AiPerformanceExperience />
         </Suspense>
       </PremiumShellFrame>
     );
@@ -162,9 +164,9 @@ function premiumIntroCopy(surface: PremiumSurfaceKey, zh: boolean) {
   };
 }
 
-function PremiumLoading({ label }: { label: string }) {
+function PremiumLoading({ label, compact = false }: { label: string; compact?: boolean }) {
   return (
-    <div className="product-premium-loading" aria-live="polite">
+    <div className={`product-premium-loading ${compact ? "is-compact" : ""}`} aria-live="polite">
       <span aria-hidden="true" />
       <strong>{label}</strong>
     </div>

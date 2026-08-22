@@ -32,7 +32,11 @@ test("keeps account, language, membership and notifications reachable at 390px",
   });
 
   await page.goto("/");
-  await page.getByRole("button", { name: "打开个人菜单" }).click();
+  const accountButton = page.getByRole("button", { name: "打开个人菜单" });
+  const accountButtonBox = await accountButton.boundingBox();
+  expect(accountButtonBox).not.toBeNull();
+  expect((accountButtonBox?.x ?? 0) + (accountButtonBox?.width ?? 0)).toBeLessThanOrEqual(390);
+  await accountButton.click();
 
   const menu = page.getByRole("menu");
   await expect(menu).toBeVisible();
@@ -46,6 +50,10 @@ test("keeps account, language, membership and notifications reachable at 390px",
   const menuBox = await menu.boundingBox();
   expect(menuBox).not.toBeNull();
   expect((menuBox?.y ?? 0) + (menuBox?.height ?? 0)).toBeLessThanOrEqual(844);
+
+  await page.keyboard.press("Escape");
+  await expect(menu).toBeHidden();
+  await expect(page.getByRole("button", { name: "打开个人菜单" })).toHaveAttribute("aria-expanded", "false");
 
   const noOverflow = await page.evaluate(
     () => document.documentElement.scrollWidth === document.documentElement.clientWidth

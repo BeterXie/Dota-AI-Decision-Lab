@@ -327,22 +327,25 @@ test("compares AI portfolios and drills into an auditable event position", async
   await expect(page.getByText("SAME STARTING BANKROLL · SHADOW SETTLEMENT", { exact: true })).toHaveCount(0);
   await expect(page.getByText("REAL SETTLEMENT", { exact: true })).toHaveCount(0);
 
-  const gptRow = page.getByRole("button", { name: /#1 GPT gpt-5\.6/ });
-  const deepseekRow = page.getByRole("button", { name: /#2 DeepSeek deepseek-reasoner/ });
+  const gptRow = page.getByRole("button", { name: /#1 GPT · R2 gpt-5\.6/ });
+  const deepseekRow = page.getByRole("button", { name: /#2 DeepSeek · R2 deepseek-reasoner/ });
   await expect(gptRow).toContainText("13%");
   await expect(gptRow).toContainText("+2,600");
   await expect(deepseekRow).toContainText("-4%");
   await expect(deepseekRow).toContainText("−400");
   await expect(page.getByText("The International", { exact: true }).first()).toBeVisible();
-  await expect(page.getByText("PASS", { exact: true })).toBeVisible();
-  await expect(page.getByText("22/20", { exact: true })).toBeVisible();
+  const compactDetail = (page.viewportSize()?.width ?? 1440) <= 520;
+  if (compactDetail) await page.getByRole("button", { name: "质量", exact: true }).click();
+  await expect(page.getByText("质量达标", { exact: true })).toBeVisible();
+  await expect(page.getByText("门槛 20", { exact: true }).first()).toBeVisible();
   await expect(page.getByText("T+30s", { exact: true })).toBeVisible();
   await expect(page.getByText(/纸面 Edge 保留率/).first()).toBeVisible();
   await expect(page.getByText("Brier 改善 vs 市场", { exact: true })).toBeVisible();
   await expect(page.getByText("+0.025", { exact: true })).toBeVisible();
 
+  if (compactDetail) await page.getByRole("button", { name: "逐轮记录", exact: true }).click();
   const positionButton = page.getByRole("button", { name: /MAP 2.*Team Spirit/ });
-  await expect(positionButton).toContainText("WON");
+  await expect(positionButton).toContainText("命中");
   await expect(positionButton).toContainText("详情");
   await positionButton.click();
   await expect(positionButton).toContainText("收起");
@@ -352,8 +355,9 @@ test("compares AI portfolios and drills into an auditable event position", async
   await page.getByRole("textbox", { name: "搜索 AI" }).fill("DeepSeek");
   await expect(page.locator(".performance-selected-summary")).toContainText("DeepSeek");
   await expect(page.locator(".performance-selected-summary")).not.toContainText("GPT");
-  await expect(page.getByRole("button", { name: /#1 GPT gpt-5\.6/ })).toHaveCount(0);
-  await expect(page.getByText("FAIL", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: /#1 GPT · R2 gpt-5\.6/ })).toHaveCount(0);
+  if (compactDetail) await page.getByRole("button", { name: "质量", exact: true }).click();
+  await expect(page.getByText("质量未达标", { exact: true })).toBeVisible();
   await expect(page.getByText("积分变化率未达标", { exact: true })).toBeVisible();
 
   const noOverflow = await page.evaluate(
@@ -367,13 +371,13 @@ test("keeps ranking semantics and position audit discoverable at tablet width", 
   await mockPerformanceApi(page);
   await page.goto("/performance");
 
-  const gptRow = page.getByRole("button", { name: /#1 GPT gpt-5\.6/ });
+  const gptRow = page.getByRole("button", { name: /#1 GPT · R2 gpt-5\.6/ });
   await expect(gptRow).toContainText("13%");
   await expect(page.locator(".performance-col-events", { hasText: "赛事" })).toBeVisible();
-  await expect(page.getByText("PASS", { exact: true })).toBeVisible();
+  await expect(page.getByText("质量达标", { exact: true })).toBeVisible();
 
   const positionButton = page.getByRole("button", { name: /MAP 2.*Team Spirit/ });
-  await expect(positionButton).toContainText("WON");
+  await expect(positionButton).toContainText("命中");
   await expect(positionButton).toContainText("详情");
   await positionButton.click();
   await expect(page.getByText("预测前可用积分", { exact: true })).toBeVisible();
@@ -382,4 +386,33 @@ test("keeps ranking semantics and position audit discoverable at tablet width", 
     () => document.documentElement.scrollWidth === document.documentElement.clientWidth
   );
   expect(noOverflow).toBe(true);
+});
+
+test("recomposes event evidence into overview, quality and audit views on mobile", async ({ page }) => {
+  const zeroSizeChartWarnings: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "warning" && message.text().includes("Can't get DOM width or height")) {
+      zeroSizeChartWarnings.push(message.text());
+    }
+  });
+  await page.setViewportSize({ width: 390, height: 844 });
+  await mockPerformanceApi(page);
+  await page.goto("/performance");
+
+  await expect(page.getByRole("button", { name: "概览", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("heading", { name: "赛事预测积分曲线" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "为什么是这个结论" })).toBeHidden();
+
+  await page.getByRole("button", { name: "质量", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "为什么是这个结论" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "赛事预测积分曲线" })).toBeHidden();
+
+  await page.getByRole("button", { name: "逐轮记录", exact: true }).click();
+  await expect(page.getByRole("button", { name: /MAP 2.*Team Spirit/ })).toBeVisible();
+
+  const noOverflow = await page.evaluate(
+    () => document.documentElement.scrollWidth === document.documentElement.clientWidth
+  );
+  expect(noOverflow).toBe(true);
+  expect(zeroSizeChartWarnings).toEqual([]);
 });

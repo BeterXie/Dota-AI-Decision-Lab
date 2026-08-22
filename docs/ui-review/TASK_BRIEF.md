@@ -54,3 +54,15 @@
 - Surface/state map: shared footer default/mobile; Terms default/anchor navigation; Privacy default/anchor navigation; existing AI prediction and performance populated/empty states.
 - No new visual asset, font, color system, generation, or Figma translation is required.
 - Deployment prerequisite: confirm that `privacy@dotascope.com` is a monitored mailbox and obtain jurisdiction-specific legal review before public commercial launch.
+
+## 2026-08-22 prototype-guided product refinement
+
+- Controller / user instruction: compare the implemented product with `image-gen-1.png` through `image-gen-3.png`, identify layout and interaction defects, then optimize each finding directly.
+- Deliverable surfaces: shared responsive shell, home, The International event detail, and AI performance. The editable React/CSS application remains the delivery.
+- Reference role: all three image-gen files are owner-provided product benchmarks and remain outside the product surface. They establish the expected hierarchy, functional density, competition atmosphere, KPI rhythm, and account-menu care.
+- Reader action: enter the correct route quickly, distinguish live/upcoming/completed competition state, reveal more schedule only when needed, compare model configurations, and inspect quality or round-level points evidence without traversing one continuous mobile report.
+- Required states: loading, empty, error/retry, delayed start, overview, progressively expanded schedule, account menu open/closed, performance overview/quality/audit, and collapsed/expanded round history.
+- Revision contract: preserve `existing-product-refinement`, real event/model evidence, and semantic colors; remove false empty states, hidden mobile controls, redundant grouping, excessive initial rows, and zero-size chart initialization; strengthen responsive recomposition, readable configuration identity, state copy, keyboard recovery, and local loading feedback.
+- Capacity checks: desktop around 1440 CSS px, effective Edge mobile width 345 CSS px under a requested 390 px override, long Chinese labels, nine model configurations, 55 series, and 19 round records.
+- Acceptance evidence: no horizontal page overflow; all mobile Header actions remain in bounds; event overview stays curated; full schedule starts at 12 rows and expands by 12; mobile tabs expose every state; hidden ECharts instances unmount; points-ledger labels describe available, used, returned, and changed points accurately.
+- Asset decision: existing hero and identity assets are sufficient. No new generated image, font, icon set, or Figma translation is required.

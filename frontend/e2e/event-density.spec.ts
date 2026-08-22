@@ -64,7 +64,7 @@ test("keeps matches dominant and access guidance secondary on event detail", asy
   const aside = page.locator(".event-detail-aside");
   await expect(schedule).toBeVisible();
   await expect(aside).toBeVisible();
-  await expect(page.getByText("对阵与赛果", { exact: true })).toBeVisible();
+  await expect(page.getByText("当前与近期比赛", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "比赛公开，AI 按权限解锁" })).toBeVisible();
 
   const viewport = page.viewportSize();

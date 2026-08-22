@@ -84,3 +84,29 @@ Design schema: v3.1
 - Dense and quiet zones: prediction cards concentrate state and metrics; modal rounds carry dense evidence; legal hero and section gaps provide quiet orientation; the footer closes the route without competing with primary content.
 - Concrete acts: action-label mapping, points-ledger relabeling, generated-reason normalization, policy/mode presentation aliases, plain-language legal summaries, sticky/stacked policy navigation, explicit contact recovery, and responsive footer recomposition.
 - Signature refusal: the implementation does not copy MAX+ branding, teams, split-color match header, modal layout, icons, or H-coin treatment.
+
+## 2026-08-22 revision control — prototype-guided product refinement
+
+- Gate 1 status: released under the owner-approved `existing-product-refinement` direction.
+- Direction approval evidence: the owner named `image-gen-1.png` through `image-gen-3.png` as the prototypes, asked for an optimization review, and then instructed “一一优化发现的这些问题”.
+- Image role: reference; placement: not placed. Rights/status are recorded in `docs/ui-review/ASSET_LEDGER.md`.
+- Surface/state map: shared Header default/menu-open; home loading/populated/empty/error; event overview/all/upcoming/live/completed and progressive schedule expansion; performance loading/populated/error plus mobile overview/quality/audit.
+- Revision contract: preserve the product field, route structure, and real evidence; remove false empty feedback, redundant `bo3` grouping, unbounded initial lists, inaccessible mobile account placement, and hidden chart initialization; strengthen event focus, model identity, points semantics, keyboard recovery, and responsive information density.
+- Concrete design acts: mobile Header grid repair; account ARIA/Escape behavior; honest home skeleton/error states; focused active-event card; delayed-start provenance; curated and date-grouped event schedule; sticky event aside; scroll-revealed event tabs; locally loading public performance; selected-model KPI context; readable execution configuration; localized gate/status copy; progressive round history; mobile performance segmentation; 2 × 2 mobile KPI and metric grids; chart lifecycle tied to the visible mobile state.
+- Gate 2 master: the production build served by the supported local runtime at `http://127.0.0.1:8000/`.
+- Browser review: Edge extension with requested 1586 × 992 and 390 × 844 overrides. Browser zoom produced effective CSS viewports of 1433 × 902 and 345 × 767; both were measured rather than inferred.
+- Desktop evidence: home scroll height 1,488 px with zero horizontal overflow; event overview 1,845 px; all-schedule view exposed 12 unique match links initially and 24 after one “再显示 12 场” action; performance displayed nine distinct model configurations, five initial audit rows, one chart canvas, and zero horizontal overflow.
+- Mobile evidence: Header children ended at x=329 inside a 345 px viewport; account menu occupied x=43 through x=335 and closed with Escape; event-tab scroller measured 321 px client width / 480 px scroll width and moved to scrollLeft 159 with “已结束” fully visible; no route produced horizontal page overflow.
+- Performance evidence: mobile overview height fell from 4,183 px to 3,545 px after translating the prototype KPI band into a 2 × 2 composition; every KPI card measured 156 × 96 px with no clipped label/value. Switching from overview to quality reduced mounted chart canvases from one to zero, and Edge reported no ECharts zero-size warning. Audit showed five rows plus “查看全部 19 条”.
+- Review result: no P0/P1 finding remains in the reviewed routes. The build passes; the local Node 20.16.0 runtime remains below the repository's declared Node 22.12 minimum and Vite's recommended runtime.
+- Gate 3 delivery: editable React/CSS application source. Separate Figma delivery remains outside the requested scope.
+
+## Benchmark comparison — prototype-guided product refinement
+
+- Reference family: owner-provided esports event and data-product prototypes (`image-gen-1` through `image-gen-3`) beside the running product at equal functional scale.
+- Type levels: the prototypes use route title, section title, card title/value, explanatory body, and metadata/action levels. The implementation retains those five roles and raises previously sub-floor KPI/configuration labels to 12 px.
+- Reading loop: home moves from product proposition to live/upcoming focus, recent results, capability, and access; event detail moves from identity to state filter, focused match, curated schedule, and context aside; performance moves from selected configuration to comparison, event, quality, and round evidence.
+- Image operations: existing Aegis/event/performance images keep the prototype's image-to-field contact through deliberate crop, dark veil, and protected reading zones. Reference images remain unplaced.
+- Craft family: competition broadcast field plus evidence board. Cyan carries navigation/action, green and red carry true state or points change, amber carries delay/quality caution, and violet identifies AI/access evidence.
+- Dense and quiet zones: decisive hero and KPI bands occupy the entry; schedule, ranking, and audit concentrate evidence; progressive disclosure and mobile state segmentation create recovery space. The mobile 2 × 2 KPI band preserves the prototype's horizontal comparison logic without miniature desktop scaling.
+- Signature refusal: no prototype logo, exact card grid, account styling, fake tournament data, or Shadow-money wording is copied.

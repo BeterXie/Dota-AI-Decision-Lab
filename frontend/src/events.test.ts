@@ -88,6 +88,16 @@ describe("event aggregation", () => {
     expect(event.nextMatch?.id).toBe("next");
   });
 
+  it("keeps only confirmed competition stages and never treats BO labels as stages", () => {
+    const [event] = buildEventSummaries([
+      match({ id: "map-1", series_id: "series-a", round: "BO3" }),
+      match({ id: "map-2", series_id: "series-b", round: "schedule" }),
+      match({ id: "map-3", series_id: "series-c", round: "小组赛" })
+    ]);
+
+    expect(event.stages).toEqual(["小组赛"]);
+  });
+
   it("collapses multiple maps into one series row and keeps the latest score", () => {
     const [event] = buildEventSummaries([
       match({ id: "map-1", series_id: "series-a", phase: "POSTMATCH", series_score: { team_a: 1, team_b: 0 } }),

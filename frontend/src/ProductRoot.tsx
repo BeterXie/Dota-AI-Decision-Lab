@@ -117,6 +117,8 @@ function ProductExperience({ pathname }: { pathname: string }) {
       <HomePage
         matches={matches.data ?? []}
         loading={matches.isLoading}
+        error={Boolean(matches.error)}
+        onRetry={() => void matches.refetch()}
         signedIn={signedIn}
         onLogin={() => setLoginOpen(true)}
       />

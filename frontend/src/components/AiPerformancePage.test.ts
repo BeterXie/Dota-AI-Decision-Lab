@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import type { AiExperimentIdentity } from "../performanceApi";
-import { identityKey } from "./AiPerformancePage";
+import { formatPerformanceRate, identityKey } from "./AiPerformancePage";
 
 const identity: AiExperimentIdentity = {
   provider: "openai",
@@ -20,5 +20,11 @@ describe("AI performance experiment identity", () => {
     };
 
     expect(identityKey(identity)).not.toBe(identityKey(changed));
+  });
+
+  it("normalizes negative zero in percentage presentation", () => {
+    expect(formatPerformanceRate(-0, "zh-CN")).toBe("0%");
+    expect(formatPerformanceRate(-0.0001, "zh-CN")).toBe("0%");
+    expect(formatPerformanceRate(-0.02, "zh-CN")).toBe("-2%");
   });
 });
