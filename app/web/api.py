@@ -1411,11 +1411,7 @@ def _has_started_live_state(live: DltvLiveObservationRecord | None) -> bool:
 def _not_started_phase(*, scheduled_at: datetime | None, observed_at: datetime) -> str:
     if scheduled_at is None:
         return "UNKNOWN"
-    return (
-        "PREMATCH"
-        if ensure_utc(scheduled_at) >= ensure_utc(observed_at)
-        else "DELAYED_START"
-    )
+    return "PREMATCH" if ensure_utc(scheduled_at) >= ensure_utc(observed_at) else "DELAYED_START"
 
 
 def _confirmed_result(result: MapResultRecord | None) -> bool:
