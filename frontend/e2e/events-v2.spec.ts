@@ -16,15 +16,22 @@ const matches = [
     canonical_map_id: "ti-live-map-1",
     entity_type: "MAP",
     identity_status: "RESOLVED",
-    phase: "LIVE",
+    phase: "LIVE_DATA_DELAYED",
     map_number: 1,
+    canonical_event_id: "event-ti",
     scheduled_at: "2026-08-18T09:00:00Z",
     tournament_name: "TI15 国际邀请赛",
     round: "小组赛",
     team_a: { id: "liquid", name: "Team Liquid" },
     team_b: { id: "yandex", name: "Team Yandex" },
     best_of: 3,
-    series_score: { team_a: 1, team_b: 1 }
+    series_score: { team_a: 1, team_b: 1 },
+    provider_observed_at: "2026-08-18T09:19:00Z",
+    live: {
+      game_time_seconds: 1112,
+      last_message_received_at: "2026-08-18T09:18:32Z",
+      effective_state_age_seconds: 88
+    }
   },
   {
     id: "ti-live-map-2",
@@ -125,13 +132,25 @@ test("event detail deduplicates series, shows team crests and keeps free versus 
   await page.goto("/events/the-international-2026");
 
   await expect(page.getByRole("heading", { name: "The International 2026" })).toBeVisible();
-  await expect(page.getByText("对阵与赛果", { exact: true })).toBeVisible();
-  await expect(page.locator(".event-series-row")).toHaveCount(2);
+  await expect(page.getByText("当前与近期比赛", { exact: true })).toBeVisible();
+  await expect(page.locator(".event-series-row")).toHaveCount(1);
   await expect(page.getByText("Team Spirit").first()).toBeVisible();
+  await expect(page.locator(".event-featured-timing > span").nth(0)).toContainText("第 1 局仍在进行");
+  await expect(page.locator(".event-featured-timing > span").nth(1)).toContainText("18:32");
+  await expect(page.locator(".event-series-row")).not.toContainText("局记录");
   await expect(page.locator(".team-crest").first()).toBeAttached();
   await expect(page.getByRole("heading", { name: "比赛公开，AI 按权限解锁" })).toBeVisible();
-  await expect(page.getByText("赛程、对阵、比分、赛果与基础比赛情报无需登录。", { exact: true })).toBeVisible();
-  await expect(page.getByRole("link", { name: /查看赛事 Pass/ })).toHaveAttribute("href", "/billing");
+  const publicAccessDetail = page.getByText("赛程、对阵、比分、赛果与基础比赛情报无需登录。", { exact: true });
+  if ((page.viewportSize()?.width ?? 1440) <= 760) await expect(publicAccessDetail).toBeHidden();
+  else await expect(publicAccessDetail).toBeVisible();
+  await expect(page.getByRole("link", { name: /查看赛事 Pass/ })).toHaveAttribute("href", "/billing?event=event-ti");
+  await expect(page.getByRole("link", { name: /本赛事 AI 复盘/ })).toHaveAttribute("href", /event=event-ti/);
+
+  await page.getByRole("button", { name: "已结束" }).click();
+  await expect(page).toHaveURL(/\?tab=completed$/);
+  await page.goBack();
+  await expect(page).toHaveURL(/\/events\/the-international-2026$/);
+  await expect(page.getByRole("button", { name: "总览" })).toHaveAttribute("aria-pressed", "true");
 
   const noOverflow = await page.evaluate(
     () => document.documentElement.scrollWidth === document.documentElement.clientWidth

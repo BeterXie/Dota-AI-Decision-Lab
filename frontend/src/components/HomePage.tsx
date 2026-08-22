@@ -2,7 +2,7 @@ import React from "react";
 import type { MapSummary } from "../api";
 import { buildEventSummaries, buildSeriesSummaries, eventHref, type EventStatus, type EventSummary } from "../events";
 import { useI18n } from "../i18n";
-import { isUpcomingPhase } from "../matchPhase";
+import { isLivePhase, isUpcomingPhase } from "../matchPhase";
 import { matchHref } from "../matches";
 import { EventMark, TeamCrest, UiIcon } from "./VisualIdentity";
 
@@ -11,6 +11,8 @@ const HOME_HERO_IMAGE = "/assets/heroes/home-hero-aegis.webp";
 interface HomePageProps {
   matches: MapSummary[];
   loading: boolean;
+  error: boolean;
+  onRetry: () => void;
   signedIn: boolean;
   onLogin: () => void;
 }
@@ -18,6 +20,8 @@ interface HomePageProps {
 export const HomePage: React.FC<HomePageProps> = ({
   matches,
   loading,
+  error,
+  onRetry,
   signedIn,
   onLogin
 }) => {
@@ -63,12 +67,14 @@ export const HomePage: React.FC<HomePageProps> = ({
         <div className="home-hero-art" aria-hidden="true" />
       </section>
 
-      <section className="product-container product-section" id="current-events">
+      <section className="product-container product-section" id="current-events" aria-busy={loading}>
         <SectionTitle title={locale === "zh-CN" ? "正在进行与即将开始" : "Live & upcoming events"} action={locale === "zh-CN" ? "全部赛事" : "All events"} href="/events" />
         {loading ? (
           <div className="tournament-grid">{[0, 1, 2].map((item) => <div key={item} className="tournament-card is-skeleton" />)}</div>
+        ) : error ? (
+          <HomeLoadError locale={locale} onRetry={onRetry} />
         ) : featuredGroups.length > 0 ? (
-          <div className="tournament-grid">
+          <div className={`tournament-grid ${featuredGroups.length === 1 ? "is-single" : ""}`}>
             {featuredGroups.map((group, index) => <TournamentCard key={group.name} group={group} index={index} locale={locale} />)}
           </div>
         ) : (
@@ -76,17 +82,29 @@ export const HomePage: React.FC<HomePageProps> = ({
         )}
       </section>
 
-      <section className="product-container home-match-grid product-section">
+      <section className="product-container home-match-grid product-section" aria-busy={loading}>
         <div className="home-list-card">
           <SectionTitle title={locale === "zh-CN" ? "即将开始的比赛" : "Upcoming matches"} action={locale === "zh-CN" ? "查看赛事" : "View events"} href="/events" compact />
           <div className="home-match-list">
-            {upcoming.length > 0 ? upcoming.map((match) => <MatchRow key={match.id} match={match} mode="upcoming" locale={locale} />) : <ListEmpty text={locale === "zh-CN" ? "目前没有即将开始的比赛" : "No upcoming matches right now"} />}
+            {loading
+              ? <HomeListSkeleton />
+              : error
+                ? <ListLoadError locale={locale} onRetry={onRetry} />
+                : upcoming.length > 0
+                  ? upcoming.map((match) => <MatchRow key={match.id} match={match} mode="upcoming" locale={locale} />)
+                  : <ListEmpty text={locale === "zh-CN" ? "目前没有即将开始的比赛" : "No upcoming matches right now"} />}
           </div>
         </div>
         <div className="home-list-card">
           <SectionTitle title={locale === "zh-CN" ? "最近结束的比赛" : "Recent results"} action={locale === "zh-CN" ? "查看赛事结果" : "View event results"} href="/events" compact />
           <div className="home-match-list">
-            {completed.length > 0 ? completed.map((match) => <MatchRow key={match.id} match={match} mode="completed" locale={locale} />) : <ListEmpty text={locale === "zh-CN" ? "还没有已完成的比赛" : "No completed matches yet"} />}
+            {loading
+              ? <HomeListSkeleton />
+              : error
+                ? <ListLoadError locale={locale} onRetry={onRetry} />
+                : completed.length > 0
+                  ? completed.map((match) => <MatchRow key={match.id} match={match} mode="completed" locale={locale} />)
+                  : <ListEmpty text={locale === "zh-CN" ? "还没有已完成的比赛" : "No completed matches yet"} />}
           </div>
         </div>
       </section>
@@ -111,19 +129,24 @@ const SectionTitle: React.FC<{ title: string; action: string; href: string; comp
 const TournamentCard: React.FC<{ group: EventSummary; index: number; locale: string }> = ({ group, index, locale }) => {
   const stage = group.stages[0] || (locale === "zh-CN" ? "赛事" : "Event");
   const nextAt = group.nextMatch?.scheduled_at ? formatTime(group.nextMatch.scheduled_at, locale) : null;
-  return <article className={`tournament-card event-tone-${index % 3}`}><div className="event-emblem event-emblem-rich"><EventMark eventName={group.name} size="md" /></div><div className="event-card-body"><div className="event-card-title"><h3>{group.name}</h3><StatusPill status={group.status} locale={locale} /></div><p>{stage}</p><div className="event-card-meta"><span><UiIcon name="trophy" size={11} />{group.seriesCount} {locale === "zh-CN" ? "个系列赛" : "series"}</span>{nextAt && <span><UiIcon name="clock" size={11} />{locale === "zh-CN" ? "下一场" : "Next"} {nextAt}</span>}</div></div><a className="event-card-action" href={eventHref(group.name)}>{locale === "zh-CN" ? "查看赛事" : "View event"}<span>›</span></a></article>;
+  const focus = group.matches.find((match) => isLivePhase(match.phase)) ?? group.nextMatch;
+  return <article className={`tournament-card event-tone-${index % 3}`}><div className="event-emblem event-emblem-rich"><EventMark eventName={group.name} size="md" /></div><div className="event-card-body"><div className="event-card-title"><h3>{group.name}</h3><StatusPill status={group.status} locale={locale} /></div><p>{stage}</p><div className="event-card-meta"><span><UiIcon name="trophy" size={11} />{group.seriesCount} {locale === "zh-CN" ? "个系列赛" : "series"}</span>{nextAt && <span><UiIcon name="clock" size={11} />{locale === "zh-CN" ? "下一场" : "Next"} {nextAt}</span>}</div></div>{focus && <div className="event-card-focus"><small>{isLivePhase(focus.phase) ? (locale === "zh-CN" ? "正在进行" : "Live now") : (locale === "zh-CN" ? "下一场对阵" : "Next matchup")}</small><div><span><TeamCrest team={focus.team_a} fallbackName={focus.team_a?.name} size="sm" />{focus.team_a?.name || (locale === "zh-CN" ? "待定" : "TBD")}</span><b>{focus.series_score && isLivePhase(focus.phase) ? `${focus.series_score.team_a} : ${focus.series_score.team_b}` : "VS"}</b><span><TeamCrest team={focus.team_b} fallbackName={focus.team_b?.name} size="sm" />{focus.team_b?.name || (locale === "zh-CN" ? "待定" : "TBD")}</span></div></div>}<a className="event-card-action" href={eventHref(group.name)}>{locale === "zh-CN" ? "查看赛事" : "View event"}<span>›</span></a></article>;
 };
 
 const MatchRow: React.FC<{ match: MapSummary; mode: "upcoming" | "completed"; locale: string }> = ({ match, mode, locale }) => {
   const a = match.team_a?.name || (locale === "zh-CN" ? "待定" : "TBD");
   const b = match.team_b?.name || (locale === "zh-CN" ? "待定" : "TBD");
   const score = match.series_score ? `${match.series_score.team_a} - ${match.series_score.team_b}` : mode === "completed" ? (locale === "zh-CN" ? "已结束" : "Final") : "vs";
-  return <div className="home-match-row"><time><UiIcon name="clock" size={11} />{match.scheduled_at ? formatTime(match.scheduled_at, locale) : "—"}</time><div className="match-teams"><span><TeamCrest team={match.team_a} fallbackName={a} size="sm" />{a}</span><b>{score}</b><span><TeamCrest team={match.team_b} fallbackName={b} size="sm" />{b}</span></div><small>{match.best_of ? `BO${match.best_of}` : match.round || "—"}</small><a href={matchHref(match)}>{locale === "zh-CN" ? "查看比赛" : "View match"}</a></div>;
+  const delayed = match.phase === "DELAYED_START";
+  return <div className={`home-match-row ${delayed ? "is-delayed" : ""}`}><time><span><UiIcon name="clock" size={11} />{delayed ? (locale === "zh-CN" ? "顺延中" : "Delayed") : match.scheduled_at ? formatTime(match.scheduled_at, locale) : "—"}</span>{delayed && <em>{locale === "zh-CN" ? "原定" : "Scheduled"} {match.scheduled_at ? formatTime(match.scheduled_at, locale) : "—"}</em>}</time><div className="match-teams"><span><TeamCrest team={match.team_a} fallbackName={a} size="sm" />{a}</span><b>{score}</b><span><TeamCrest team={match.team_b} fallbackName={b} size="sm" />{b}</span></div><small>{match.best_of ? `BO${match.best_of}` : match.round || "—"}</small><a href={matchHref(match)}>{locale === "zh-CN" ? "查看比赛" : "View match"}</a></div>;
 };
 
 const StatusPill: React.FC<{ status: EventStatus; locale: string }> = ({ status, locale }) => <span className={`event-status status-${status.toLowerCase()}`}>{status === "LIVE" ? (locale === "zh-CN" ? "进行中" : "Live") : status === "UPCOMING" ? (locale === "zh-CN" ? "即将开始" : "Upcoming") : status === "SETTLING" ? (locale === "zh-CN" ? "赛果确认中" : "Confirming") : (locale === "zh-CN" ? "已结束" : "Finished")}</span>;
 const ListEmpty: React.FC<{ text: string }> = ({ text }) => <div className="home-list-empty">{text}</div>;
 const EmptyHomeState: React.FC<{ text: string }> = ({ text }) => <div className="home-empty-state"><span aria-hidden="true">◇</span><p>{text}</p></div>;
+const HomeListSkeleton = () => <div className="home-list-skeleton" aria-label="loading"><span /><span /><span /></div>;
+const HomeLoadError: React.FC<{ locale: string; onRetry: () => void }> = ({ locale, onRetry }) => <div className="home-load-error" role="alert"><div><strong>{locale === "zh-CN" ? "赛事数据暂时不可用" : "Event data is temporarily unavailable"}</strong><p>{locale === "zh-CN" ? "保留当前页面，你可以立即重试。" : "Stay on this page and try again now."}</p></div><button className="product-btn product-btn-secondary" type="button" onClick={onRetry}>{locale === "zh-CN" ? "重试" : "Retry"}</button></div>;
+const ListLoadError: React.FC<{ locale: string; onRetry: () => void }> = ({ locale, onRetry }) => <div className="home-list-error" role="alert"><span>{locale === "zh-CN" ? "加载失败" : "Failed to load"}</span><button type="button" onClick={onRetry}>{locale === "zh-CN" ? "重试" : "Retry"}</button></div>;
 
 function byScheduledAscending(a: MapSummary, b: MapSummary): number { return byNullableDate(a.scheduled_at, b.scheduled_at); }
 function byScheduledDescending(a: MapSummary, b: MapSummary): number { return byNullableDate(b.scheduled_at, a.scheduled_at); }

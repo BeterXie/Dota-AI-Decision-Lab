@@ -17,6 +17,7 @@ import { UiIcon } from "./VisualIdentity";
 import "./ai-performance.css";
 
 const IntelligenceChart = lazy(() => import("../Chart"));
+type PerformanceDetailTab = "OVERVIEW" | "QUALITY" | "AUDIT";
 
 export function AiPerformancePage() {
   const { locale } = useI18n();
@@ -97,6 +98,9 @@ export function AiPerformancePage() {
   const selectedEvent = selectedExperiment?.events.find(
     (event) => event.canonical_event_id === selectedEventId
   );
+  const selectedExperimentIdentityKey = selectedExperiment
+    ? identityKey(selectedExperiment.experiment)
+    : null;
 
   const refresh = () => {
     void leaderboard.refetch();
@@ -122,7 +126,7 @@ export function AiPerformancePage() {
             </p>
           </div>
           <div className="performance-intro-actions">
-            <span className="performance-shadow-badge">POINTS ONLY</span>
+            <span className="performance-shadow-badge">{locale === "zh-CN" ? "仅限预测积分" : "POINTS ONLY"}</span>
             <a href="/review">{locale === "zh-CN" ? "查看复盘" : "Open review"}</a>
             <button type="button" onClick={refresh}>{locale === "zh-CN" ? "刷新" : "Refresh"}</button>
           </div>
@@ -131,17 +135,23 @@ export function AiPerformancePage() {
         {leaderboard.isLoading ? (
           <StateBlock text={locale === "zh-CN" ? "正在计算 AI 排行榜…" : "Loading AI leaderboard…"} />
         ) : leaderboard.error ? (
-          <StateBlock error text={locale === "zh-CN" ? "AI 排行榜加载失败。" : "Failed to load AI leaderboard."} onRetry={() => void leaderboard.refetch()} />
+          <StateBlock error text={locale === "zh-CN" ? "AI 排行榜加载失败。" : "Failed to load AI leaderboard."} retryLabel={locale === "zh-CN" ? "重试" : "Retry"} onRetry={() => void leaderboard.refetch()} />
         ) : (leaderboard.data?.experiments.length ?? 0) === 0 ? (
-          <StateBlock text={locale === "zh-CN" ? "没有匹配的 AI experiment。" : "No matching AI experiments."} />
+          <StateBlock text={locale === "zh-CN" ? "还没有可比较的 AI 配置。" : "No comparable AI configurations yet."} />
         ) : (
           <>
             {selectedExperiment && (
-              <section className="performance-kpi-strip" aria-label={locale === "zh-CN" ? "AI 表现概览" : "AI performance overview"}>
-                <PerformanceKpi icon="spark" label={locale === "zh-CN" ? "累计积分变化" : "Total points change"} value={signedMoney(selectedExperiment.realized_pnl, locale)} tone={tone(selectedExperiment.realized_pnl)} />
-                <PerformanceKpi icon="trophy" label={locale === "zh-CN" ? "命中率" : "Hit rate"} value={rate(selectedExperiment.hit_rate, locale)} />
-                <PerformanceKpi icon="layers" label={locale === "zh-CN" ? "最大积分回落" : "Max points decline"} value={rate(-selectedExperiment.worst_event_drawdown_pct, locale)} tone="negative" />
-                <PerformanceKpi icon="clock" label={locale === "zh-CN" ? "已结算预测" : "Settled predictions"} value={`${selectedExperiment.bet_count}`} />
+              <section className="performance-kpi-overview" aria-label={locale === "zh-CN" ? "当前选中 AI 表现概览" : "Selected AI performance overview"}>
+                <div className="performance-kpi-context">
+                  <div><span>{locale === "zh-CN" ? "当前查看" : "Viewing"}</span><strong>{experimentDisplayName(selectedExperiment.experiment)}</strong></div>
+                  <small>#{selectedExperiment.rank} · {selectedExperiment.experiment.model} · {executionConfigSummary(selectedExperiment.experiment.execution_config_version, locale)}</small>
+                </div>
+                <div className="performance-kpi-strip">
+                  <PerformanceKpi icon="spark" label={locale === "zh-CN" ? "累计积分变化" : "Total points change"} value={signedMoney(selectedExperiment.realized_pnl, locale)} tone={tone(selectedExperiment.realized_pnl)} />
+                  <PerformanceKpi icon="trophy" label={locale === "zh-CN" ? "命中率" : "Hit rate"} value={rate(selectedExperiment.hit_rate, locale)} />
+                  <PerformanceKpi icon="layers" label={locale === "zh-CN" ? "最大积分回落" : "Max points decline"} value={rate(-selectedExperiment.worst_event_drawdown_pct, locale)} tone={tone(-selectedExperiment.worst_event_drawdown_pct)} />
+                  <PerformanceKpi icon="clock" label={locale === "zh-CN" ? "已结算预测" : "Settled predictions"} value={`${selectedExperiment.bet_count}`} />
+                </div>
               </section>
             )}
             <section className="performance-overview-grid">
@@ -174,7 +184,7 @@ export function AiPerformancePage() {
                     <LeaderboardRow
                       key={identityKey(row.experiment)}
                       row={row}
-                      active={identityKey(row.experiment) === selectedExperimentKey}
+                      active={identityKey(row.experiment) === selectedExperimentIdentityKey}
                       locale={locale}
                       onSelect={() => {
                         setSelectedExperimentKey(identityKey(row.experiment));
@@ -198,7 +208,7 @@ export function AiPerformancePage() {
                   <div className="performance-selected-title">
                     <div>
                       <span className="performance-rank">#{selectedExperiment.rank}</span>
-                      <h3>{providerLabel(selectedExperiment.experiment.provider)}</h3>
+                      <h3>{experimentDisplayName(selectedExperiment.experiment)}</h3>
                       <small>{selectedExperiment.experiment.model}</small>
                     </div>
                     <PnlBadge value={selectedExperiment.realized_pnl} locale={locale} />
@@ -207,7 +217,7 @@ export function AiPerformancePage() {
                     <Metric label={locale === "zh-CN" ? "累计初始积分" : "Total initial points"} value={money(selectedExperiment.total_initial_bankroll, locale)} />
                     <Metric label={locale === "zh-CN" ? "当前积分" : "Current points"} value={money(selectedExperiment.equity, locale)} />
                     <Metric label={locale === "zh-CN" ? "积分变化率" : "Points change rate"} value={rate(selectedExperiment.realized_roi, locale)} tone={tone(selectedExperiment.realized_roi)} />
-                    <Metric label={locale === "zh-CN" ? "最差赛事积分回落" : "Worst event points decline"} value={rate(-selectedExperiment.worst_event_drawdown_pct, locale)} tone="negative" />
+                    <Metric label={locale === "zh-CN" ? "最差赛事积分回落" : "Worst event points decline"} value={rate(-selectedExperiment.worst_event_drawdown_pct, locale)} tone={tone(-selectedExperiment.worst_event_drawdown_pct)} />
                     <Metric label={locale === "zh-CN" ? "积分增加赛事" : "Points-positive events"} value={`${selectedExperiment.profitable_events}/${selectedExperiment.event_count}`} sub={rate(selectedExperiment.profitable_event_rate, locale)} />
                     <Metric label={locale === "zh-CN" ? "已结算预测 / 命中率" : "Settled predictions / hit rate"} value={`${selectedExperiment.bet_count}`} sub={rate(selectedExperiment.hit_rate, locale)} />
                   </div>
@@ -216,7 +226,7 @@ export function AiPerformancePage() {
                     <span title={selectedExperiment.experiment.decision_policy_version}>{predictionPolicyLabel(selectedExperiment.experiment.decision_policy_version)}</span>
                     <span>{selectedExperiment.experiment.ai_view_version}</span>
                     <span title={selectedExperiment.experiment.execution_config_version}>
-                      {executionConfigLabel(selectedExperiment.experiment.execution_config_version)}
+                      {executionConfigSummary(selectedExperiment.experiment.execution_config_version, locale)}
                     </span>
                   </div>
                   <div className="performance-summary-guide">
@@ -310,11 +320,11 @@ function LeaderboardRow({
   onSelect: () => void;
 }) {
   return (
-    <button className={`performance-leader-row ${active ? "active" : ""}`} type="button" onClick={onSelect}>
+    <button className={`performance-leader-row ${active ? "active" : ""}`} type="button" aria-pressed={active} onClick={onSelect}>
       <span className="performance-place">#{row.rank}</span>
       <span className="performance-model-name">
-        <strong>{providerLabel(row.experiment.provider)}</strong>
-        <small>{row.experiment.model} · {executionConfigLabel(row.experiment.execution_config_version)}</small>
+        <strong>{experimentDisplayName(row.experiment)}</strong>
+        <small>{row.experiment.model} · {executionConfigSummary(row.experiment.execution_config_version, locale)}</small>
       </span>
       <span className={`performance-table-number performance-col-roi ${tone(row.realized_roi)}`}>{rate(row.realized_roi, locale)}</span>
       <span className={`performance-table-number performance-col-pnl ${tone(row.realized_pnl)}`}>{signedMoney(row.realized_pnl, locale)}</span>
@@ -336,7 +346,7 @@ function EventButton({
   onSelect: () => void;
 }) {
   return (
-    <button className={`performance-event-btn ${active ? "active" : ""}`} type="button" onClick={onSelect}>
+    <button className={`performance-event-btn ${active ? "active" : ""}`} type="button" aria-pressed={active} onClick={onSelect}>
       <span className="performance-event-name">{event.event_name || shortId(event.canonical_event_id)}</span>
       <span>{formatDateRange(event.started_at, event.ended_at, locale)}</span>
       <strong className={tone(event.realized_pnl)}>{locale === "zh-CN" ? "积分变化" : "Points change"} {signedMoney(event.realized_pnl, locale)}</strong>
@@ -375,14 +385,34 @@ function EventDetail({
   expandedPositionId: string | null;
   onTogglePosition: (id: string) => void;
 }) {
+  const [mobileTab, setMobileTab] = useState<PerformanceDetailTab>("OVERVIEW");
+  const [showAllPositions, setShowAllPositions] = useState(false);
+  const [isCompactLayout, setIsCompactLayout] = useState(() =>
+    typeof window !== "undefined" && window.matchMedia("(max-width: 720px)").matches
+  );
+
+  useEffect(() => {
+    setMobileTab("OVERVIEW");
+    setShowAllPositions(false);
+  }, [event.canonical_event_id, experiment?.portfolio.account_id]);
+
+  useEffect(() => {
+    const query = window.matchMedia("(max-width: 720px)");
+    const updateLayout = (event: MediaQueryListEvent) => setIsCompactLayout(event.matches);
+    setIsCompactLayout(query.matches);
+    query.addEventListener("change", updateLayout);
+    return () => query.removeEventListener("change", updateLayout);
+  }, []);
+
   if (loading) return <StateBlock text={locale === "zh-CN" ? "正在读取赛事质量报告…" : "Loading event quality report…"} />;
-  if (error) return <StateBlock error text={locale === "zh-CN" ? "赛事质量报告加载失败。" : "Failed to load event quality report."} onRetry={onRetry} />;
+  if (error) return <StateBlock error text={locale === "zh-CN" ? "赛事质量报告加载失败。" : "Failed to load event quality report."} retryLabel={locale === "zh-CN" ? "重试" : "Retry"} onRetry={onRetry} />;
   if (!experiment || !policy) return <StateBlock text={locale === "zh-CN" ? "这个 AI 在该赛事还没有可评估的积分记录。" : "No evaluable points record for this AI in the event."} />;
 
   const portfolio = experiment.portfolio;
   const quality = experiment.quality;
+  const visiblePositions = showAllPositions ? positions : positions.slice(0, 5);
   return (
-    <section className="performance-detail">
+    <section className="performance-detail" data-mobile-tab={mobileTab.toLowerCase()}>
       <div className="performance-detail-heading">
         <div>
           <span className="performance-kicker">EVENT DETAIL</span>
@@ -392,17 +422,25 @@ function EventDetail({
         <GateBadge status={experiment.gate.status} mode={experiment.gate.mode} locale={locale} />
       </div>
 
-      <div className="performance-detail-metrics">
+      <div className="performance-detail-tabs" role="group" aria-label={locale === "zh-CN" ? "赛事表现详情" : "Event performance detail"}>
+        {(["OVERVIEW", "QUALITY", "AUDIT"] as PerformanceDetailTab[]).map((tab) => (
+          <button key={tab} type="button" className={mobileTab === tab ? "is-active" : ""} aria-pressed={mobileTab === tab} onClick={() => setMobileTab(tab)}>
+            {performanceDetailTabLabel(tab, locale)}
+          </button>
+        ))}
+      </div>
+
+      <div className="performance-detail-metrics performance-mobile-overview">
         <Metric label={locale === "zh-CN" ? "初始预测积分" : "Initial prediction points"} value={money(portfolio.initial_bankroll, locale)} />
         <Metric label={locale === "zh-CN" ? "当前积分" : "Current points"} value={money(portfolio.equity, locale)} />
         <Metric label={locale === "zh-CN" ? "已结算积分变化" : "Settled points change"} value={signedMoney(portfolio.realized_pnl, locale)} tone={tone(portfolio.realized_pnl)} />
         <Metric label={locale === "zh-CN" ? "积分变化率" : "Points change rate"} value={rate(portfolio.roi, locale)} tone={tone(portfolio.roi)} />
-        <Metric label={locale === "zh-CN" ? "最大积分回落" : "Max points decline"} value={rate(-portfolio.max_drawdown_pct, locale)} tone="negative" />
+        <Metric label={locale === "zh-CN" ? "最大积分回落" : "Max points decline"} value={rate(-portfolio.max_drawdown_pct, locale)} tone={tone(-portfolio.max_drawdown_pct)} />
         <Metric label={locale === "zh-CN" ? "正负积分比" : "Positive/negative points ratio"} value={decimal(portfolio.profit_factor, 2)} />
       </div>
 
       <div className="performance-two-column">
-        <section className="performance-panel">
+        <section className="performance-panel performance-mobile-overview">
           <div className="performance-panel-heading">
             <div>
               <span className="performance-kicker">POINTS CURVE</span>
@@ -411,7 +449,7 @@ function EventDetail({
             <span>{portfolio.wins}W · {portfolio.losses}L · {portfolio.rejected_bet_count} {locale === "zh-CN" ? "次未计分" : "not scored"}</span>
           </div>
           <div className="performance-chart-wrap">
-            {experiment.equity_curve.length > 1 ? (
+            {isCompactLayout && mobileTab !== "OVERVIEW" ? null : experiment.equity_curve.length > 1 ? (
               <Suspense fallback={<div className="performance-chart-loading">Chart…</div>}>
                 <IntelligenceChart option={equityChartOption(experiment, locale)} />
               </Suspense>
@@ -421,20 +459,20 @@ function EventDetail({
           </div>
         </section>
 
-        <section className="performance-panel">
+        <section className="performance-panel performance-mobile-quality">
           <div className="performance-panel-heading">
             <div>
               <span className="performance-kicker">QUALITY GATE</span>
               <h4>{locale === "zh-CN" ? "为什么是这个结论" : "Why this gate status"}</h4>
             </div>
-            <span>POINTS ONLY</span>
+            <span>{locale === "zh-CN" ? "仅限预测积分" : "POINTS ONLY"}</span>
           </div>
           <div className="performance-gate-progress">
-            <SampleProgress label={locale === "zh-CN" ? "已结算 Maps" : "Settled maps"} current={quality.settled_maps} target={policy.min_settled_maps} />
-            <SampleProgress label={locale === "zh-CN" ? "已结算预测" : "Settled predictions"} current={portfolio.bet_count} target={policy.min_settled_bets} />
-            <SampleProgress label={locale === "zh-CN" ? "独立预测样本" : "Prediction samples"} current={quality.prediction_sample_count} target={policy.min_prediction_samples} />
-            <SampleProgress label="CLV" current={quality.clv_sample_count} target={policy.min_clv_samples} />
-            <SampleProgress label={locale === "zh-CN" ? "市场对照" : "Market comparison"} current={quality.market_comparison.sample_count} target={policy.min_market_comparison_samples} />
+            <SampleProgress label={locale === "zh-CN" ? "已结算地图" : "Settled maps"} current={quality.settled_maps} target={policy.min_settled_maps} locale={locale} />
+            <SampleProgress label={locale === "zh-CN" ? "已结算预测" : "Settled predictions"} current={portfolio.bet_count} target={policy.min_settled_bets} locale={locale} />
+            <SampleProgress label={locale === "zh-CN" ? "独立预测样本" : "Prediction samples"} current={quality.prediction_sample_count} target={policy.min_prediction_samples} locale={locale} />
+            <SampleProgress label="CLV" current={quality.clv_sample_count} target={policy.min_clv_samples} locale={locale} />
+            <SampleProgress label={locale === "zh-CN" ? "市场对照" : "Market comparison"} current={quality.market_comparison.sample_count} target={policy.min_market_comparison_samples} locale={locale} />
           </div>
           {experiment.gate.failures.length > 0 && (
             <div className="performance-gate-reasons">
@@ -444,7 +482,7 @@ function EventDetail({
         </section>
       </div>
 
-      <div className="performance-three-column">
+      <div className="performance-three-column performance-mobile-quality">
         <section className="performance-panel compact">
           <span className="performance-kicker">PREDICTION QUALITY</span>
           <h4>{locale === "zh-CN" ? "预测质量" : "Prediction quality"}</h4>
@@ -493,11 +531,11 @@ function EventDetail({
           <MetricLine label={locale === "zh-CN" ? "累计预测积分" : "Total prediction points"} value={money(portfolio.turnover, locale)} />
           <MetricLine label={locale === "zh-CN" ? "最大单轮积分使用率" : "Largest round points usage"} value={rate(quality.largest_stake_pct_of_available_cash, locale)} />
           <MetricLine label={locale === "zh-CN" ? "待结算积分" : "Pending points"} value={money(portfolio.locked_balance, locale)} />
-          <MetricLine label={locale === "zh-CN" ? "积分状态" : "Points status"} value={portfolio.status} />
+          <MetricLine label={locale === "zh-CN" ? "积分状态" : "Points status"} value={pointsStatusLabel(portfolio.status, locale)} />
         </section>
       </div>
 
-      <section className="performance-panel performance-position-panel">
+      <section className="performance-panel performance-position-panel performance-mobile-audit">
         <div className="performance-panel-heading">
           <div>
             <span className="performance-kicker">PREDICTION AUDIT</span>
@@ -513,7 +551,7 @@ function EventDetail({
           <div className="performance-empty-inline">{locale === "zh-CN" ? "这个赛事还没有已计分预测。" : "No scored predictions in this event yet."}</div>
         ) : (
           <div className="performance-position-list">
-            {positions.map((position) => (
+            {visiblePositions.map((position) => (
               <PositionRow
                 key={position.id}
                 position={position}
@@ -522,6 +560,13 @@ function EventDetail({
                 onToggle={() => onTogglePosition(position.id)}
               />
             ))}
+            {positions.length > 5 && (
+              <button className="performance-position-more" type="button" aria-expanded={showAllPositions} onClick={() => setShowAllPositions((value) => !value)}>
+                {showAllPositions
+                  ? (locale === "zh-CN" ? "收起记录" : "Show fewer")
+                  : (locale === "zh-CN" ? `查看全部 ${positions.length} 条` : `View all ${positions.length}`)}
+              </button>
+            )}
           </div>
         )}
       </section>
@@ -546,15 +591,17 @@ function PositionRow({
         <span className="performance-position-map"><b>MAP {position.map_number ?? "?"}</b><small>{formatDateTime(position.opened_at, locale)}</small></span>
         <span className="performance-position-choice"><b>{position.selected_team?.name ?? predictionActionLabel(position.action, locale)}</b><small>{predictionActionLabel(position.action, locale)} · {locale === "zh-CN" ? "AI 预测" : "AI prediction"}</small></span>
         <span className="performance-position-stake"><b>{money(position.stake, locale)}</b><small>{locale === "zh-CN" ? "积分 · 倍率" : "points · multiplier"} {position.odds?.toFixed(3) ?? "—"}</small></span>
-        <span className={`position-status status-${position.status.toLowerCase()}`}>{position.status}</span>
+        <span className={`position-status status-${position.status.toLowerCase()}`}>{positionStatusLabel(position.status, locale)}</span>
         <span className={`performance-position-pnl ${tone(position.realized_pnl)}`}><b>{position.realized_pnl == null ? "—" : signedMoney(position.realized_pnl, locale)}</b><small>{locale === "zh-CN" ? "积分变化" : "Points change"}</small></span>
         <span className="performance-position-action">{locale === "zh-CN" ? (expanded ? "收起" : "详情") : (expanded ? "Less" : "Details")} <b>{expanded ? "−" : "›"}</b></span>
       </button>
       {expanded && (
         <div className="performance-position-detail">
           <DetailDatum label={locale === "zh-CN" ? "预测前可用积分" : "Available points before"} value={money(position.cash_before, locale)} />
-          <DetailDatum label={locale === "zh-CN" ? "结算后积分" : "Settled points"} value={position.payout == null ? "—" : money(position.payout, locale)} />
-          <DetailDatum label={locale === "zh-CN" ? "未计分原因" : "Not-scored reason"} value={position.rejection_reason ?? "—"} />
+          <DetailDatum label={locale === "zh-CN" ? "本轮使用积分" : "Points used"} value={money(position.stake, locale)} />
+          <DetailDatum label={locale === "zh-CN" ? "本轮返还积分" : "Points returned"} value={position.payout == null ? "—" : money(position.payout, locale)} />
+          <DetailDatum label={locale === "zh-CN" ? "本轮积分变化" : "Points change"} value={position.realized_pnl == null ? "—" : signedMoney(position.realized_pnl, locale)} />
+          <DetailDatum label={locale === "zh-CN" ? "未计分原因" : "Not-scored reason"} value={rejectionReasonLabel(position.rejection_reason, locale)} />
           <DetailDatum label={locale === "zh-CN" ? "结算时间" : "Settled"} value={position.settled_at ? formatDateTime(position.settled_at, locale) : "—"} />
           <DetailDatum label="Map ID" value={shortId(position.canonical_map_id)} title={position.canonical_map_id} />
           <DetailDatum label="Decision ID" value={shortId(position.ai_decision_id)} title={position.ai_decision_id} />
@@ -564,12 +611,12 @@ function PositionRow({
   );
 }
 
-function SampleProgress({ label, current, target }: { label: string; current: number; target: number }) {
+function SampleProgress({ label, current, target, locale }: { label: string; current: number; target: number; locale: string }) {
   const ratio = target > 0 ? Math.min(1, current / target) : 1;
   const complete = current >= target;
   return (
     <div className="performance-sample-progress">
-      <div><span>{label}</span><strong className={complete ? "positive" : ""}>{current}/{target}</strong></div>
+      <div><span>{label}</span><strong className={complete ? "positive" : ""}><b>{current}</b><small>{locale === "zh-CN" ? `门槛 ${target}` : `target ${target}`}</small></strong></div>
       <div className="performance-progress-track"><span style={{ width: `${ratio * 100}%` }} /></div>
     </div>
   );
@@ -579,7 +626,7 @@ function GateBadge({ status, mode, locale }: { status: string; mode: string; loc
   const modeLabel = mode === "SHADOW_ONLY"
     ? (locale === "zh-CN" ? "仅积分" : "POINTS ONLY")
     : mode.replaceAll("_", " ");
-  return <div className={`performance-gate-badge gate-${status.toLowerCase()}`}><strong>{status}</strong><span>{modeLabel}</span></div>;
+  return <div className={`performance-gate-badge gate-${status.toLowerCase()}`}><strong>{gateStatusLabel(status, locale)}</strong><span>{modeLabel}</span></div>;
 }
 
 function PnlBadge({ value, locale }: { value: number; locale: string }) {
@@ -598,8 +645,8 @@ function DetailDatum({ label, value, title }: { label: string; value: string; ti
   return <div><span>{label}</span><strong title={title}>{value}</strong></div>;
 }
 
-function StateBlock({ text, error, onRetry }: { text: string; error?: boolean; onRetry?: () => void }) {
-  return <section className={`performance-state ${error ? "error" : ""}`}><span>{text}</span>{onRetry && <button type="button" onClick={onRetry}>Retry</button>}</section>;
+function StateBlock({ text, error, onRetry, retryLabel = "Retry" }: { text: string; error?: boolean; onRetry?: () => void; retryLabel?: string }) {
+  return <section className={`performance-state ${error ? "error" : ""}`}><span>{text}</span>{onRetry && <button type="button" onClick={onRetry}>{retryLabel}</button>}</section>;
 }
 
 export function identityKey(identity: AiExperimentIdentity): string {
@@ -610,8 +657,68 @@ function sameIdentity(left: AiExperimentIdentity, right: AiExperimentIdentity): 
   return identityKey(left) === identityKey(right);
 }
 
-function executionConfigLabel(value: string): string {
-  return `cfg ${value.length > 24 ? `${value.slice(0, 22)}…` : value}`;
+function experimentDisplayName(identity: AiExperimentIdentity): string {
+  const provider = providerLabel(identity.provider);
+  const revision = identity.execution_config_version.match(/(?:^|:)r(\d+)(?::|$)/i)?.[1];
+  if (revision) return `${provider} · R${revision}`;
+  if (/^[a-f\d]{8,}$/i.test(identity.execution_config_version)) {
+    return `${provider} · ${identity.execution_config_version.slice(0, 4).toUpperCase()}`;
+  }
+  return provider;
+}
+
+function executionConfigSummary(value: string, locale: string): string {
+  const parts = value.split(":");
+  const revision = parts.find((part) => /^r\d+$/i.test(part));
+  if (revision) {
+    const profile = parts[1] === "default"
+      ? (locale === "zh-CN" ? "默认配置" : "Default")
+      : parts[1]
+        ? parts[1].replaceAll("_", " ")
+        : (locale === "zh-CN" ? "运行配置" : "Runtime config");
+    const lag = parts.find((part) => /^lag\d+$/i.test(part));
+    return [profile, revision.toUpperCase(), lag ? (locale === "zh-CN" ? `延迟 ${lag.slice(3)} 秒` : `lag ${lag.slice(3)}s`) : null]
+      .filter(Boolean)
+      .join(" · ");
+  }
+  const short = value.length > 12 ? `${value.slice(0, 8)}…` : value;
+  return locale === "zh-CN" ? `配置 ${short}` : `Config ${short}`;
+}
+
+function performanceDetailTabLabel(tab: PerformanceDetailTab, locale: string): string {
+  if (locale !== "zh-CN") return tab === "OVERVIEW" ? "Overview" : tab === "QUALITY" ? "Quality" : "Prediction audit";
+  return tab === "OVERVIEW" ? "概览" : tab === "QUALITY" ? "质量" : "逐轮记录";
+}
+
+function gateStatusLabel(status: string, locale: string): string {
+  if (locale !== "zh-CN") return status.replaceAll("_", " ");
+  const labels: Record<string, string> = { PASS: "质量达标", FAIL: "质量未达标", INSUFFICIENT_SAMPLE: "样本不足" };
+  return labels[status.toUpperCase()] ?? status.replaceAll("_", " ");
+}
+
+function pointsStatusLabel(status: string, locale: string): string {
+  if (locale !== "zh-CN") return status.replaceAll("_", " ");
+  const labels: Record<string, string> = { ACTIVE: "正常", BANKRUPT: "积分已耗尽", CLOSED: "已结束" };
+  return labels[status.toUpperCase()] ?? status.replaceAll("_", " ");
+}
+
+function positionStatusLabel(status: string, locale: string): string {
+  if (locale !== "zh-CN") return status.replaceAll("_", " ");
+  const labels: Record<string, string> = { WON: "命中", LOST: "未命中", REJECTED: "未计分", VOID: "作废", OPEN: "待结算" };
+  return labels[status.toUpperCase()] ?? status.replaceAll("_", " ");
+}
+
+function rejectionReasonLabel(reason: string | null, locale: string): string {
+  if (!reason) return "—";
+  if (locale !== "zh-CN") return reason.replaceAll("_", " ");
+  const labels: Record<string, string> = {
+    MAP_ALREADY_SETTLED: "比赛已结算",
+    MISSING_DECISION_ODDS: "缺少决策时市场数据",
+    INSUFFICIENT_CASH: "可用积分不足",
+    MARKET_QUALITY_INELIGIBLE: "市场质量未通过",
+    STALE_MARKET: "市场数据过期"
+  };
+  return labels[reason.toUpperCase()] ?? reason.replaceAll("_", " ");
 }
 
 function rankingLabel(ranking: string | undefined, locale: string): string {
@@ -708,8 +815,14 @@ function signedMoney(value: number, locale: string): string {
   return `${value > 0 ? "+" : value < 0 ? "−" : ""}${money(Math.abs(value), locale)}`;
 }
 
+export function formatPerformanceRate(value: number | null, locale: string): string {
+  if (value == null) return "—";
+  const normalized = Math.abs(value) < 0.0005 ? 0 : value;
+  return new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 1 }).format(normalized);
+}
+
 function rate(value: number | null, locale: string): string {
-  return value == null ? "—" : new Intl.NumberFormat(locale, { style: "percent", maximumFractionDigits: 1 }).format(value);
+  return formatPerformanceRate(value, locale);
 }
 
 function decimal(value: number | null, digits: number): string {

@@ -115,8 +115,10 @@ export interface ReviewPayload {
   };
 }
 
-export async function fetchReviewMatches(limit = 100): Promise<ReviewPayload> {
-  const response = await fetch(`/api/review/matches?limit=${limit}`, {
+export async function fetchReviewMatches(limit = 100, eventId?: string | null): Promise<ReviewPayload> {
+  const query = new URLSearchParams({ limit: String(limit) });
+  if (eventId) query.set("event", eventId);
+  const response = await fetch(`/api/review/matches?${query.toString()}`, {
     cache: "no-store",
     headers: { Accept: "application/json" }
   });

@@ -48,6 +48,17 @@ export const ProductShell: React.FC<ProductShellProps> = ({
     return () => document.removeEventListener("mousedown", close);
   }, [menuOpen]);
 
+  React.useEffect(() => {
+    if (!menuOpen && !navOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape") return;
+      setMenuOpen(false);
+      setNavOpen(false);
+    };
+    document.addEventListener("keydown", closeOnEscape);
+    return () => document.removeEventListener("keydown", closeOnEscape);
+  }, [menuOpen, navOpen]);
+
   const handleLogout = async () => {
     if (logoutBusy) return;
     setLogoutBusy(true);
@@ -73,6 +84,7 @@ export const ProductShell: React.FC<ProductShellProps> = ({
           className={`product-nav-toggle ${navOpen ? "is-open" : ""}`}
           aria-label={navOpen ? (locale === "zh-CN" ? "关闭主导航" : "Close main navigation") : (locale === "zh-CN" ? "打开主导航" : "Open main navigation")}
           aria-expanded={navOpen}
+          aria-controls="product-main-navigation"
           onClick={() => {
             setMenuOpen(false);
             setNavOpen((value) => !value);
@@ -80,7 +92,7 @@ export const ProductShell: React.FC<ProductShellProps> = ({
         >
           <UiIcon name="menu" size={18} />
         </button>
-        <nav className={`product-main-nav ${navOpen ? "is-open" : ""}`} aria-label={locale === "zh-CN" ? "主导航" : "Main navigation"}>
+        <nav id="product-main-navigation" className={`product-main-nav ${navOpen ? "is-open" : ""}`} aria-label={locale === "zh-CN" ? "主导航" : "Main navigation"}>
           {navItems.map((item) => (
             <a
               key={item.key}
@@ -102,8 +114,13 @@ export const ProductShell: React.FC<ProductShellProps> = ({
               if (signedIn) setMenuOpen((value) => !value);
               else onLogin();
             }}
-            aria-label={signedIn ? (locale === "zh-CN" ? "打开个人菜单" : "Open account menu") : (locale === "zh-CN" ? "登录" : "Sign in")}
+            aria-label={signedIn
+              ? menuOpen
+                ? (locale === "zh-CN" ? "关闭个人菜单" : "Close account menu")
+                : (locale === "zh-CN" ? "打开个人菜单" : "Open account menu")
+              : (locale === "zh-CN" ? "登录" : "Sign in")}
             aria-expanded={signedIn ? menuOpen : undefined}
+            aria-controls={signedIn ? "product-account-menu" : undefined}
           >
             {signedIn && user?.avatar_url ? (
               <img src={user.avatar_url} alt="" referrerPolicy="no-referrer" />
@@ -112,7 +129,7 @@ export const ProductShell: React.FC<ProductShellProps> = ({
             )}
           </button>
           {signedIn && menuOpen && (
-            <div className="product-account-menu" role="menu">
+            <div id="product-account-menu" className="product-account-menu" role="menu" aria-label={locale === "zh-CN" ? "个人菜单" : "Account menu"}>
               <div className="account-menu-head">
                 <div className="account-menu-avatar">
                   {user?.avatar_url ? <img src={user.avatar_url} alt="" referrerPolicy="no-referrer" /> : label.slice(0, 1).toUpperCase()}

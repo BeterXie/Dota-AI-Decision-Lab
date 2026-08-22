@@ -122,7 +122,8 @@ function buildEventSummary(name: string, matches: MapSummary[]): EventSummary {
   for (const match of matches) {
     if (match.team_a?.id || match.team_a?.name) teams.add(match.team_a?.id || match.team_a?.name || "");
     if (match.team_b?.id || match.team_b?.name) teams.add(match.team_b?.id || match.team_b?.name || "");
-    if (match.round?.trim()) stages.add(match.round.trim());
+    const stage = confirmedStageLabel(match.round);
+    if (stage) stages.add(stage);
   }
 
   const upcoming = matches
@@ -147,6 +148,14 @@ function buildEventSummary(name: string, matches: MapSummary[]): EventSummary {
     startsAt: dates[0] ?? null,
     endsAt: dates.at(-1) ?? null
   };
+}
+
+function confirmedStageLabel(value: string | null): string | null {
+  const normalized = value?.trim();
+  if (!normalized) return null;
+  if (/^bo\s*\d+$/i.test(normalized)) return null;
+  if (/^schedule$/i.test(normalized)) return null;
+  return normalized;
 }
 
 function buildSeriesSummary(seriesId: string, matches: MapSummary[]): EventSeriesSummary {
