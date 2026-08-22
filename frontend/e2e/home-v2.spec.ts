@@ -74,7 +74,7 @@ test("2.0 homepage explains the product and surfaces live, upcoming and complete
   await page.goto("/");
 
   await expect(page).toHaveTitle("DotaScope");
-  await expect(page.getByRole("link", { name: "DotaScope" })).toBeVisible();
+  await expect(page.getByRole("banner").getByRole("link", { name: "DotaScope" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "看懂比赛，验证 AI，追踪真实表现" })).toBeVisible();
   if ((page.viewportSize()?.width ?? 0) <= 760) {
     await page.getByRole("button", { name: "打开主导航" }).click();
@@ -86,7 +86,7 @@ test("2.0 homepage explains the product and surfaces live, upcoming and complete
   await expect(page.getByText("Tundra Esports")).toBeVisible();
   await expect(page.getByText("比赛追踪", { exact: true })).toBeVisible();
   await expect(page.getByText("AI 预测对比", { exact: true })).toBeVisible();
-  await expect(page.getByText("Shadow 表现复盘", { exact: true })).toBeVisible();
+  await expect(page.getByText("积分表现复盘", { exact: true })).toBeVisible();
 
   const noOverflow = await page.evaluate(
     () => document.documentElement.scrollWidth === document.documentElement.clientWidth
